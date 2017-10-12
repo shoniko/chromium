@@ -84,6 +84,14 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
     profile_path_ = profile_path;
   }
 
+  void set_enable_adblock(BooleanPrefMember* enable_adblock) {
+    enable_adblock_ = enable_adblock;
+  }
+
+  void set_adblock_whitelisted_domains(StringListPrefMember* adblock_whitelisted_domains) {
+    adblock_whitelisted_domains_ = adblock_whitelisted_domains;
+  }
+
   // If |cookie_settings| is nullptr or not set, all cookies are enabled,
   // otherwise the settings are enforced on all observed network requests.
   // Not inlined because we assign a scoped_refptr, which requires us to include
@@ -123,6 +131,8 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
   // This method should be called on the UI thread.
   static void InitializePrefsOnUIThread(
       BooleanPrefMember* enable_referrers,
+      BooleanPrefMember* enable_adblock,
+      StringListPrefMember* adblock_whitelisted_domains,
       BooleanPrefMember* enable_do_not_track,
       BooleanPrefMember* force_google_safe_search,
       IntegerPrefMember* force_youtube_restrict,
@@ -208,6 +218,8 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
 
   // Weak, owned by our owner.
   BooleanPrefMember* enable_referrers_;
+  BooleanPrefMember* enable_adblock_;
+  StringListPrefMember* adblock_whitelisted_domains_;
   BooleanPrefMember* enable_do_not_track_;
   BooleanPrefMember* force_google_safe_search_;
   IntegerPrefMember* force_youtube_restrict_;

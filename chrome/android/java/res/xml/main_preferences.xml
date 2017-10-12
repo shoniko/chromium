@@ -33,6 +33,10 @@
     <PreferenceCategory
         android:title="@string/prefs_section_advanced"/>
     <Preference
+        android:fragment="org.adblockplus.libadblockplus.android.settings.GeneralSettingsFragment"
+        android:key="adblock"
+        android:title="@string/ad_block_settings_title" />
+    <Preference
         android:fragment="org.chromium.chrome.browser.preferences.privacy.PrivacyPreferences"
         android:key="privacy"
         android:title="@string/prefs_privacy" />

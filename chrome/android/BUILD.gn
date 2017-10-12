@@ -103,6 +103,10 @@ android_resources("chrome_java_resources") {
     "//third_party/android_tools:android_support_design_java",
     "//third_party/android_tools:android_support_v7_appcompat_java",
     "//third_party/android_tools:android_support_v7_recyclerview_java",
+
+    # libadblockplus-android
+    "//third_party/libadblockplus_android:libadblockplus_android_aar_java",
+    "//third_party/libadblockplus_android:libadblockplus_android_settings_aar_java"
   ]
   custom_package = "org.chromium.chrome"
 }
@@ -257,6 +261,11 @@ android_library("chrome_java") {
     "//third_party/gif_player:gif_player_java",
     "//third_party/jsr-305:jsr_305_javalib",
     "//third_party/leakcanary:leakcanary_java",
+
+    # libadblockplus-android
+    "//third_party/libadblockplus_android:libadblockplus_android_aar_java",
+    "//third_party/libadblockplus_android:libadblockplus_android_settings_aar_java",
+
     "//ui/android:ui_java",
     "//ui/base/mojo:mojo_bindings_java",
     "//ui/gfx/geometry/mojo:mojo_java",
@@ -710,7 +719,12 @@ shared_library("chrome") {
     ":chrome_jni_registration($default_toolchain)",
     "//build/config:exe_and_shlib_deps",
     "//chrome:chrome_android_core",
+    "//third_party/libadblockplus_android:libadblockplus_android_aar_java_native"
   ]
+
+  _abs_gen_path = rebase_path(root_gen_dir, "")
+  _abs_lib_path = "$_abs_gen_path/third_party/libadblockplus_android/libadblockplus_android_aar_java/jni/armeabi-v7a/libadblockplus-jni.so"
+  ldflags = [ "-l$_abs_lib_path" ]
 
   if (enable_vr) {
     # Ensure libgvr static library appears before gcc library in linking order.
@@ -955,6 +969,7 @@ chrome_public_apk_tmpl_shared("chrome_public_apk") {
   android_manifest_dep = ":chrome_public_android_manifest"
   apk_name = "ChromePublic"
   shared_libraries = [ ":chrome" ]
+  shared_libraries += [ "//third_party/libadblockplus_android:libadblockplus_android_aar_java_native" ]
 }
 
 chrome_public_apk_tmpl_shared("chrome_modern_public_apk") {
@@ -962,6 +977,7 @@ chrome_public_apk_tmpl_shared("chrome_modern_public_apk") {
   android_manifest_dep = ":chrome_modern_public_android_manifest"
   apk_name = "ChromeModernPublic"
   shared_libraries = [ ":chrome" ]
+  shared_libraries += [ "//third_party/libadblockplus_android:libadblockplus_android_aar_java_native" ]
 
   if (!is_java_debug) {
     png_to_webp = true

@@ -1505,6 +1505,9 @@ split_static_library("browser") {
   configs += [
     "//build/config/compiler:wexit_time_destructors",
     "//build/config:precompiled_headers",
+
+    # libadblockplus-android contains precompiled shared library, including headers here
+    "//third_party/libadblockplus_android:libadblockplus_headers"
   ]
   defines = []
   libs = []
@@ -2672,6 +2675,8 @@ split_static_library("browser") {
       "after_startup_task_utils_android.cc",
       "android/accessibility/font_size_prefs_android.cc",
       "android/accessibility/font_size_prefs_android.h",
+      "android/adblock/adblock_bridge.cc",
+      "android/adblock/adblock_bridge.h",
       "android/android_theme_resources.h",
       "android/app_hooks.cc",
       "android/app_hooks.h",
@@ -4041,6 +4046,7 @@ if (is_android) {
       "../android/java/src/org/chromium/chrome/browser/WarmupManager.java",
       "../android/java/src/org/chromium/chrome/browser/WebContentsFactory.java",
       "../android/java/src/org/chromium/chrome/browser/accessibility/FontSizePrefs.java",
+      "../android/java/src/org/chromium/chrome/browser/adblock/AdblockBridge.java",
       "../android/java/src/org/chromium/chrome/browser/appmenu/AppMenuDragHelper.java",
       "../android/java/src/org/chromium/chrome/browser/autofill/AutofillKeyboardAccessoryBridge.java",
       "../android/java/src/org/chromium/chrome/browser/autofill/AutofillLogger.java",

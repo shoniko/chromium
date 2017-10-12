@@ -71,9 +71,9 @@ template("write_build_config") {
     if (sources != []) {
       set_sources_assignment_filter(_java_target_blacklist)
       sources = []
-      sources = [
-        _target_label,
-      ]
+      #sources = [
+      #  _target_label,
+      #]
       if (sources != []) {
         assert(false, "Invalid java target name: $_target_label")
       }
@@ -2811,6 +2811,10 @@ if (enable_java_templates) {
             rebase_path(invoker.alternative_android_sdk_jar)
       } else {
         _rebased_android_sdk_jar = rebased_android_sdk_jar
+      }
+
+      if (defined(invoker.native_libraries_dir)) {
+        _native_libraries_dir = invoker.native_libraries_dir
       }
 
       args = [

@@ -64,6 +64,11 @@
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/io_thread.h"
+#include "chrome/browser/android/adblock/adblock_bridge.h"
+
+// because of dependency "third_party/libadblockplus_android/include" is added into -I
+#include "AdblockPlus.h"
+
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -139,6 +144,8 @@ ChromeNetworkDelegate::ChromeNetworkDelegate(
     BooleanPrefMember* enable_referrers)
     : profile_(nullptr),
       enable_referrers_(enable_referrers),
+      enable_adblock_(nullptr),
+      adblock_whitelisted_domains_(nullptr),
       enable_do_not_track_(nullptr),
       force_google_safe_search_(nullptr),
       force_youtube_restrict_(nullptr),
@@ -181,6 +188,8 @@ void ChromeNetworkDelegate::set_data_use_aggregator(
 // static
 void ChromeNetworkDelegate::InitializePrefsOnUIThread(
     BooleanPrefMember* enable_referrers,
+    BooleanPrefMember* enable_adblock,
+    StringListPrefMember* adblock_whitelisted_domains,
     BooleanPrefMember* enable_do_not_track,
     BooleanPrefMember* force_google_safe_search,
     IntegerPrefMember* force_youtube_restrict,
@@ -195,6 +204,19 @@ void ChromeNetworkDelegate::InitializePrefsOnUIThread(
     enable_do_not_track->MoveToThread(
         BrowserThread::GetTaskRunnerForThread(BrowserThread::IO));
   }
+
+  if (enable_adblock) {
+    enable_adblock->Init(prefs::kEnableAdblock, pref_service);
+    enable_adblock->MoveToThread(
+        BrowserThread::GetTaskRunnerForThread(BrowserThread::IO));
+  }
+
+  if (adblock_whitelisted_domains) {
+    adblock_whitelisted_domains->Init(prefs::kAdblockWhitelistedDomains, pref_service);
+    adblock_whitelisted_domains->MoveToThread(
+        BrowserThread::GetTaskRunnerForThread(BrowserThread::IO));
+  }
+
   if (force_google_safe_search) {
     force_google_safe_search->Init(prefs::kForceGoogleSafeSearch, pref_service);
     force_google_safe_search->MoveToThread(
@@ -308,6 +330,162 @@ int ChromeNetworkDelegate::OnBeforeStartTransaction(
           static_cast<safe_search_util::YouTubeRestrictMode>(value));
     }
   }
+
+  // -----------------------------------------------------------------------
+
+  LOG(WARNING) << "Adblock: OnBeforeStartTransaction";
+
+  // check settings
+
+  bool is_adblock_enabled = true;
+  if (enable_adblock_) {
+    is_adblock_enabled = enable_adblock_->GetValue();
+  }
+
+  LOG(WARNING) << "Adblock: isAdBlockEnabled = "
+               << (is_adblock_enabled ? "true" : "false")
+               << ", FilterEngine ptr = " << AdblockBridge::filterEnginePtr;
+
+  const std::string filename = request->url().ExtractFileName();
+  const std::string url = request->url().spec();
+  LOG(WARNING) << "Adblock: loading url " << url;
+
+  if (is_adblock_enabled && AdblockBridge::filterEnginePtr) {
+    // retain local filter engine to prevent usage of released instance if it's released on android/java side
+    AdblockPlus::FilterEnginePtr* extFilterEngine =
+      reinterpret_cast<AdblockPlus::FilterEnginePtr*>(AdblockBridge::filterEnginePtr);
+    AdblockPlus::FilterEnginePtr filterEngine(*extFilterEngine);
+
+    const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
+
+    LOG(WARNING) << "Adblock: casted to AdblockPlus::FilterEnginePtr, "
+                 << "use_count = " << filterEngine.use_count();
+
+    content::ResourceType resource_type;
+    if (info) {
+      resource_type = info->GetResourceType();
+      bool isResourceTypeImage = (resource_type == content::RESOURCE_TYPE_IMAGE);
+      LOG(WARNING) << "Adblock: resource type of " << url << " is " << info->GetResourceType()
+                   << " (isImage = " << (isResourceTypeImage ? "true" : "false") << ")";
+    } else {
+      LOG(WARNING) << "Adblock: No resourceRequestInfo";
+
+    }
+
+    std::string host = filterEngine->GetHostFromURL(url);
+    LOG(WARNING) << "Adblock: extracted host \"" << host << "\" from url " << url;
+
+    // check referrer (required for proper ad blocking)
+    std::vector<std::string> documentUrls;
+    std::string referrer;
+    if (headers->GetHeader("Referer", &referrer)) {
+      LOG(WARNING) << "Adblock: Referrer = " << referrer;
+      documentUrls.push_back(referrer);
+    } else {
+      LOG(WARNING) << "Adblock: No referer";
+    }
+
+    // check for it or any referrer is whitelisted
+    bool is_url_whitelisted = false;
+    if (adblock_whitelisted_domains_) {
+      std::vector<std::string> whitelisted_domains = adblock_whitelisted_domains_->GetValue();
+      //if (whitelisted_domains) {
+      LOG(WARNING) << "Adblock: whitelisted domains: " << whitelisted_domains.size();
+
+      // check if current url's domain is whitelisted
+      is_url_whitelisted =
+        std::find(
+          whitelisted_domains.begin(),
+          whitelisted_domains.end(),
+          host)
+        != whitelisted_domains.end();
+
+      if (is_url_whitelisted) {
+        LOG(ERROR) << "Adblock: URL's domain whitelisted";
+      } else {
+        LOG(WARNING) << "Adblock: URL's domain NOT whitelisted";
+
+        // check if referrer's domain is whitelisted
+        if (!referrer.empty()) {
+          std::string referrer_host = filterEngine->GetHostFromURL(referrer);
+          LOG(WARNING) << "Adblock: extracted referrer host \"" << referrer_host << "\"";
+
+          is_url_whitelisted = 
+            std::find(
+              whitelisted_domains.begin(),
+              whitelisted_domains.end(),
+              referrer_host)
+              != whitelisted_domains.end();
+
+          if (is_url_whitelisted) {
+            LOG(ERROR) << "Adblock: referrer domain " << referrer_host << " whitelisted";
+          }  
+        }
+      }
+    } else {
+      LOG(WARNING) << "Adblock: no whitelisted domains pref";
+    }
+
+    if (!is_url_whitelisted) {
+      LOG(WARNING) << "Adblock: invoking IsDocumentWhitelisted(" << url << ")";  
+      if (filterEngine->IsDocumentWhitelisted(url, documentUrls)) {
+        LOG(ERROR) << "Adblock: document whitelisted";
+      } else {
+        AdblockPlus::FilterEngine::ContentType adblock_content_type;
+        
+        switch (resource_type) {
+          case content::RESOURCE_TYPE_XHR:
+            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_XMLHTTPREQUEST;
+            break;
+
+          case content::RESOURCE_TYPE_STYLESHEET:
+            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_STYLESHEET;
+            break;
+
+          case content::RESOURCE_TYPE_SCRIPT:
+            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_SCRIPT;
+            break;
+
+          case content::RESOURCE_TYPE_FONT_RESOURCE:
+            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_FONT;
+            break;
+
+          case content::RESOURCE_TYPE_OBJECT:
+            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_OBJECT;
+            break;
+
+          case content::RESOURCE_TYPE_SUB_FRAME:
+            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_SUBDOCUMENT;
+            break;
+
+          case content::RESOURCE_TYPE_MEDIA:
+            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_MEDIA;
+            break;
+
+          default:
+            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_OTHER;
+
+        }
+        LOG(WARNING) << "Adblock: mapped to adblock content type " << adblock_content_type;
+
+        AdblockPlus::FilterPtr filterPtr = filterEngine->Matches(url, adblock_content_type, documentUrls);
+        if (filterPtr && filterPtr->GetType() != AdblockPlus::Filter::TYPE_EXCEPTION) {
+          LOG(ERROR) << "Adblock: !!! Prevented loading " << url;
+
+          // URL access blocked by Adblock Plus.
+          request->net_log().AddEvent(
+            net::NetLogEventType::CHROME_POLICY_ABORTED_REQUEST,
+            net::NetLog::StringCallback("url", &request->url().possibly_invalid_spec()));
+
+          return net::ERR_BLOCKED_BY_ADMINISTRATOR;
+        }
+      }
+    }
+  }
+
+  LOG(WARNING) << "Adblock: exiting OnBeforeStartTransaction()";
+
+  // -----------------------------------------------------------------------
 
   return extensions_delegate_->OnBeforeStartTransaction(request, callback,
                                                         headers);

@@ -144,6 +144,10 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import org.adblockplus.libadblockplus.android.AdblockEngine;
+import org.adblockplus.libadblockplus.android.settings.AdblockHelper;
+import org.chromium.chrome.browser.adblock.AdblockBridge;
+
 /**
  * This is the main activity for ChromeMobile when not running in document mode.  All the tabs
  * are accessible via a chrome specific tab switching UI.
@@ -260,6 +264,9 @@ public class ChromeTabbedActivity
     // Time at which an intent was received and handled.
     private long mIntentHandlingTimeMs;
 
+    // Whether or not AdBlock is initialized
+    private boolean isAdblockInitialized;
+
     private class TabbedAssistStatusHandler extends AssistStatusHandler {
         public TabbedAssistStatusHandler(Activity activity) {
             super(activity);
@@ -372,6 +379,43 @@ public class ChromeTabbedActivity
         mActivityStopMetrics = new ActivityStopMetrics();
         mMainIntentMetrics = new MainIntentBehaviorMetrics(this);
         mAppIndexingUtil = new AppIndexingUtil();
+    }
+
+    private void sendFilterEnginePointer(long ptr) {
+        AdblockBridge.getInstance().setFilterEnginePointer(ptr);
+    }
+
+    private void initAdblock() {
+        Log.w(TAG, "Adblock ChromeTabbedActivity.java: initAdblock()");
+
+        String basePath = getDir(
+            AdblockEngine.BASE_PATH_DIRECTORY,
+            Context.MODE_PRIVATE)
+                .getAbsolutePath();
+
+        AdblockHelper
+            .get()
+            .init(this, basePath, true, AdblockHelper.PREFERENCE_NAME);
+
+        Log.w(TAG, "Adblock: getting isolate pointer async in Thread " + java.lang.Thread.currentThread());
+        long isolatePtr = AdblockBridge.getInstance().getIsolatePointer();
+
+        Log.w(TAG, "Adblock: got isolate pointer = " + isolatePtr
+                 + " in thread " + Thread.currentThread());
+
+        AdblockHelper
+            .get()
+            .useV8Isolate(isolatePtr);
+
+        // synchronously (blocks the UI but allows to get pointer here)
+        // TODO: (improvement) do it async and wait for engine to be created
+        // and passed when URL is about to load
+        if (AdblockHelper.get().retain(false)) {
+            // pass FilterEngine instance pointer to C++ side
+            long ptr = AdblockHelper.get().getEngine().getFilterEngine().getNativePtr();
+            android.util.Log.w(TAG, "Adblock: Notify C++ FilterEngine is created (passing pointer) " + ptr + " in thread " + Thread.currentThread());
+            sendFilterEnginePointer(ptr);
+        }
     }
 
     @Override
@@ -631,12 +675,19 @@ public class ChromeTabbedActivity
 
     @Override
     public void onStartWithNative() {
+        Log.w(TAG, "onStartWithNative");
         super.onStartWithNative();
 
         setInitialOverviewState();
         BrowserActionsContextMenuItemDelegate.cancelBrowserActionsNotification();
 
         resetSavedInstanceState();
+
+        // for some reason onStartWithNative can be invoked multiple times
+        if (!isAdblockInitialized) {
+            initAdblock();
+            isAdblockInitialized = true;
+        }
     }
 
     @Override
@@ -1911,6 +1962,7 @@ public class ChromeTabbedActivity
 
     @Override
     public void onDestroyInternal() {
+        Log.w(TAG, "onDestroyInternal()");
         if (mLayoutManager != null) mLayoutManager.removeOverviewModeObserver(this);
 
         if (mTabModelSelectorTabObserver != null) {
@@ -1925,7 +1977,20 @@ public class ChromeTabbedActivity
             mUndoBarPopupController = null;
         }
 
+        deinitAdblock();
+
         super.onDestroyInternal();
+    }
+
+    private void deinitAdblock() {
+        Log.w(TAG, "Adblock: deinitAdblock()");
+
+        // if it's the last instance then we need to notify C++ side (stop using it)
+        if (AdblockHelper.get().release()) {
+            Log.w(TAG, "Adblock: Notify C++ side filterEngine can't be used anymore in thread "
+             + Thread.currentThread());
+            sendFilterEnginePointer(0L);
+        }
     }
 
     @Override

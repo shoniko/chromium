@@ -147,7 +147,7 @@ class ChromeNetworkDelegateTest : public testing::Test {
 
   void SetUp() override {
     ChromeNetworkDelegate::InitializePrefsOnUIThread(
-        &enable_referrers_, nullptr, nullptr, nullptr, nullptr,
+        &enable_referrers_, nullptr, nullptr, nullptr, nullptr, nullptr,
         profile_.GetTestingPrefService());
     profile_manager_.reset(
         new TestingProfileManager(TestingBrowserProcess::GetGlobal()));
@@ -326,6 +326,7 @@ class ChromeNetworkDelegateSafeSearchTest :
   void SetUp() override {
     ChromeNetworkDelegate::InitializePrefsOnUIThread(
         &enable_referrers_,
+        nullptr,
         nullptr,
         &force_google_safe_search_,
         &force_youtube_restrict_,

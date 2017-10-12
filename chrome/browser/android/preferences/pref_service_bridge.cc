@@ -705,6 +705,25 @@ static void SetDoNotTrackEnabled(JNIEnv* env,
   GetPrefService()->SetBoolean(prefs::kEnableDoNotTrack, allow);
 }
 
+static void SetAdblockEnabled(JNIEnv* env,
+                              const JavaParamRef<jobject>& obj,
+                              jboolean allow) {
+  GetPrefService()->SetBoolean(prefs::kEnableAdblock, allow);
+}
+
+static void SetAdblockWhitelistedDomains(JNIEnv* env, const
+    base::android::JavaParamRef<jobject>& jcaller,
+    const base::android::JavaParamRef<jobjectArray>& jdomains) {
+  std::vector<std::string> domains;
+  base::android::AppendJavaStringArrayToStringVector(env, jdomains.obj(), &domains);
+
+  ListPrefUpdate update(GetPrefService(), prefs::kAdblockWhitelistedDomains);
+  update->Clear();
+  for (const std::string& domain : domains) {
+    update->AppendString(domain);
+  }
+}
+
 static ScopedJavaLocalRef<jstring> GetSyncLastAccountId(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {

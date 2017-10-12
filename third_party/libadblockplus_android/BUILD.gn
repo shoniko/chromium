@@ -1,0 +1,22 @@
+# Copyright 2017 eyeo GmbH. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/android/rules.gni")
+
+config("libadblockplus_headers") {
+  include_dirs = [ "include" ]
+}
+
+android_aar_prebuilt("libadblockplus_android_aar_java") {
+  aar_path = "libadblockplus-android-debug.aar"
+  proguard_configs = [ "proguard-adblock.txt" ]
+  ignore_native_libraries = false # We need .so from the aar
+  # assets are ignored (we don't need them if not using AdblockWebView)
+}
+
+android_aar_prebuilt("libadblockplus_android_settings_aar_java") {
+  aar_path = "libadblockplus-android-settings-debug.aar"
+  proguard_configs = [ "proguard-adblock.txt" ]
+  ignore_native_libraries = false
+}

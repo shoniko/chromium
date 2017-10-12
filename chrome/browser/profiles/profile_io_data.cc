@@ -477,6 +477,8 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
 
   ChromeNetworkDelegate::InitializePrefsOnUIThread(
       &enable_referrers_,
+      &enable_adblock_,
+      &adblock_whitelisted_domains_,
       &enable_do_not_track_,
       &force_google_safesearch_,
       &force_youtube_restrict_,
@@ -1051,6 +1053,8 @@ void ProfileIOData::Init(
   chrome_network_delegate->set_cookie_settings(
       profile_params_->cookie_settings.get());
   chrome_network_delegate->set_enable_do_not_track(&enable_do_not_track_);
+  chrome_network_delegate->set_enable_adblock(&enable_adblock_);
+  chrome_network_delegate->set_adblock_whitelisted_domains(&adblock_whitelisted_domains_);
   chrome_network_delegate->set_force_google_safe_search(
       &force_google_safesearch_);
   chrome_network_delegate->set_force_youtube_restrict(&force_youtube_restrict_);
@@ -1360,6 +1364,8 @@ void ProfileIOData::ShutdownOnUIThread(
   sync_has_auth_error_.Destroy();
   enable_referrers_.Destroy();
   enable_do_not_track_.Destroy();
+  enable_adblock_.Destroy();
+  adblock_whitelisted_domains_.Destroy();
   force_google_safesearch_.Destroy();
   force_youtube_restrict_.Destroy();
   allowed_domains_for_apps_.Destroy();

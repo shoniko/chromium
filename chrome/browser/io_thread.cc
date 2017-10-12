@@ -350,6 +350,8 @@ IOThread::IOThread(
       nullptr,
       nullptr,
       nullptr,
+      nullptr,
+      nullptr,
       local_state);
   ssl_config_service_manager_.reset(
       ssl_config::SSLConfigServiceManager::CreateDefaultManager(
@@ -622,6 +624,7 @@ void IOThread::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterStringPref(prefs::kAuthAndroidNegotiateAccountType,
                                std::string());
   registry->RegisterBooleanPref(prefs::kEnableReferrers, true);
+  registry->RegisterBooleanPref(prefs::kEnableAdblock, true);
   data_reduction_proxy::RegisterPrefs(registry);
   registry->RegisterBooleanPref(prefs::kBuiltInDnsClientEnabled, true);
   registry->RegisterBooleanPref(prefs::kQuickCheckEnabled, true);

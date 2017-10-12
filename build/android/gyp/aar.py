@@ -47,6 +47,9 @@ def _CreateInfo(aar_file):
   data['subjar_tuples'] = []
   data['has_classes_jar'] = False
   data['has_proguard_flags'] = False
+  data['native_libraries'] = []
+  data['native_libraries_armeabi_v7a'] = []
+  data['native_libraries_x86'] = []
   data['has_native_libraries'] = False
   data['has_r_text_file'] = False
   with zipfile.ZipFile(aar_file) as z:
@@ -65,6 +68,22 @@ def _CreateInfo(aar_file):
         label = re.sub(r'[^a-zA-Z0-9._]', '_', label)
         data['subjars'].append(name)
         data['subjar_tuples'].append([label, name])
+      elif name.endswith('.so'):
+        basename = posixpath.basename(name)
+        label = basename[:-3]
+        label = re.sub(r'[^a-zA-Z0-9._]', '_', label)
+        data['has_native_libraries'] = True
+        data['native_libraries'] += [ name ]
+
+        # armeabi-v7a
+        if name.startswith('jni/armeabi-v7a/'):
+          data['native_libraries_armeabi_v7a'].append([label, name, basename])
+
+        # x86
+        if name.startswith('jni/x86/'):
+          data['native_libraries_x86'].append([label, name, basename])
+
+        # TODO: support another ARCHs
       elif name.startswith('assets/'):
         data['assets'].append(name)
       elif name.startswith('jni/'):

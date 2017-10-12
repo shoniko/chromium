@@ -1129,6 +1129,12 @@ const char kEnableReferrers[] = "enable_referrers";
 // Whether to send the DNT header.
 const char kEnableDoNotTrack[] = "enable_do_not_track";
 
+// Whether to block ads
+const char kEnableAdblock[] = "adblock.enable";
+
+// Adblock whitelisted domains
+const char kAdblockWhitelistedDomains[] = "adblock.whitelisted_domains";
+
 // GL_VENDOR string.
 const char kGLVendorString[] = "gl_vendor_string";
 
