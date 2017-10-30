@@ -3754,6 +3754,11 @@ void WebContentsImpl::DidFinishNavigation(NavigationHandle* navigation_handle) {
   for (auto& observer : observers_)
     observer.DidFinishNavigation(navigation_handle);
 
+  LOG(WARNING) << "Adblock WebContentsImpl::DidFinishNavigation, URL=" <<  navigation_handle->GetURL().spec()
+               << ", has_commited=" << navigation_handle->HasCommitted()
+               << ", is_error=" << navigation_handle->IsErrorPage()
+               << ", isInMainFrame=" << navigation_handle->IsInMainFrame();
+
   if (navigation_handle->HasCommitted()) {
     BrowserAccessibilityManager* manager =
         static_cast<RenderFrameHostImpl*>(
@@ -3766,6 +3771,20 @@ void WebContentsImpl::DidFinishNavigation(NavigationHandle* navigation_handle) {
         manager->NavigationSucceeded();
       }
     }
+
+    // Adblock
+    if (!navigation_handle->IsErrorPage() &&
+        !navigation_handle->GetURL().IsAboutBlank() &&
+        navigation_handle->GetURL().SchemeIsHTTPOrHTTPS()) {
+        LOG(WARNING) << "Adblock ready to inject JS to " << navigation_handle->GetURL().spec();
+        
+        NotificationService::current()->Notify(
+          NOTIFICATION_DID_FINISH_NAVIGATION,
+          Source<WebContents>(this),
+          NotificationService::NoDetails());
+      } else {
+        LOG(WARNING) << "Adblock not suitable URL " << navigation_handle->GetURL().spec();
+      }
   }
 }
 

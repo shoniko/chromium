@@ -167,6 +167,8 @@
 #include "net/ssl/client_cert_store_mac.h"
 #endif
 
+#include "chrome/browser/android/adblock/adblock_bridge.h"
+
 using content::BrowserContext;
 using content::BrowserThread;
 using content::ResourceContext;
@@ -484,6 +486,9 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
       &force_youtube_restrict_,
       &allowed_domains_for_apps_,
       pref_service);
+
+  // it will be initialized in observer while notification received
+  AdblockBridge::InitializePrefsOnUIThread(pref_service);
 
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner =
       BrowserThread::GetTaskRunnerForThread(BrowserThread::IO);
