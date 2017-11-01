@@ -47,9 +47,6 @@ def _CreateInfo(aar_file):
   data['subjar_tuples'] = []
   data['has_classes_jar'] = False
   data['has_proguard_flags'] = False
-  data['native_libraries'] = []
-  data['native_libraries_armeabi_v7a'] = []
-  data['native_libraries_x86'] = []
   data['has_native_libraries'] = False
   data['has_r_text_file'] = False
   with zipfile.ZipFile(aar_file) as z:
@@ -73,17 +70,21 @@ def _CreateInfo(aar_file):
         label = basename[:-3]
         label = re.sub(r'[^a-zA-Z0-9._]', '_', label)
         data['has_native_libraries'] = True
+        if not 'native_libraries' in data:
+          data['native_libraries'] = []
+
         data['native_libraries'] += [ name ]
 
-        # armeabi-v7a
-        if name.startswith('jni/armeabi-v7a/'):
-          data['native_libraries_armeabi_v7a'].append([label, name, basename])
+        # arch
+        if name.startswith('jni'):
+          # dictionaries are not supported by GN in '.info' files so using key with arch at the end
+          # example: 'native_libraries_armeabi_v7a'
+          arch = name[4:name.find('/', 4)].replace('-', '_')
+          native_libraries_key = 'native_libraries_' + arch
+          if not native_libraries_key in data:
+            data[native_libraries_key] = []
+          data[native_libraries_key].append([label, name, basename])
 
-        # x86
-        if name.startswith('jni/x86/'):
-          data['native_libraries_x86'].append([label, name, basename])
-
-        # TODO: support another ARCHs
       elif name.startswith('assets/'):
         data['assets'].append(name)
       elif name.startswith('jni/'):
