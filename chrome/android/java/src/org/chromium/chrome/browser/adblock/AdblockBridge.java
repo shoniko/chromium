@@ -48,14 +48,14 @@ public final class AdblockBridge {
         return sInstance != null;
     }
 
-    public void setFilterEnginePointer(long ptr) {
-        nativeSetFilterEnginePointer(ptr);
+    public void setFilterEngineNativePtr(long ptr) {
+        nativeSetFilterEngineNativePtr(ptr);
     }
 
-    public long getIsolatePointer() {
-        return nativeGetIsolatePointer();
+    public long getIsolateProviderNativePtr() {
+        return nativeGetIsolateProviderNativePtr();
     }
 
-    private native void nativeSetFilterEnginePointer(long ptr);
-    private native long nativeGetIsolatePointer();
+    private native void nativeSetFilterEngineNativePtr(long ptr);
+    private native long nativeGetIsolateProviderNativePtr();
 }

@@ -185,6 +185,32 @@ void handleOnLoad(content::WebContents* webContents) {
   }
 }
 
+class IsolateHolderV8Provider : public AdblockPlus::IV8IsolateProvider  
+{  
+  public:  
+    IsolateHolderV8Provider(gin::IsolateHolder* isolateHolder_)
+      : isolateHolder(isolateHolder_)
+    {  
+    }  
+  
+    v8::Isolate* Get() override
+    {  
+      return isolateHolder->isolate();  
+    }
+
+    ~IsolateHolderV8Provider() override
+    {
+      LOG(WARNING) << "Deleted IsolateHolderV8Provider (and IsolateHolder)";
+      delete isolateHolder;
+    }
+  
+  private:
+    IsolateHolderV8Provider(const IsolateHolderV8Provider&);  
+    IsolateHolderV8Provider& operator=(const IsolateHolderV8Provider&);
+
+    gin::IsolateHolder* isolateHolder;  
+};
+
 class AdblockLoadCompleteListener : public content::NotificationObserver {
   public:
     explicit AdblockLoadCompleteListener(
@@ -268,7 +294,6 @@ StringListPrefMember* AdblockBridge::adblock_whitelisted_domains = nullptr;
 
 base::Thread* thread = nullptr;
 AdblockLoadCompleteListener* completeListener = nullptr;
-gin::IsolateHolder* isolate_holder = nullptr;
 
 void AdblockBridge::InitializePrefsOnUIThread(PrefService* pref_service) {
   LOG(WARNING) << "Adblock: init prefs for element hiding";
@@ -302,15 +327,6 @@ static void UnsubscribeOnLoadListener() {
   completeListener = nullptr;
 }
 
-void ReleaseV8Isolate() {
-  LOG(WARNING) << "Adblock: releasing isolate holder ...";
-
-  delete isolate_holder;
-  isolate_holder = nullptr;
-
-  LOG(WARNING) << "Adblock: released everything";
-}
-
 void ReleaseThread() {
   LOG(WARNING) << "Adblock: releasing thread";
 
@@ -325,15 +341,9 @@ void ReleaseAdblock() {
 
   // thread
   ReleaseThread();
-
-  // release V8 isolate on UI thread
-  // otherwise we will get `[FATAL:memory_dump_manager.cc(461)] Check failed:` crash
-  scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner =
-    content::BrowserThread::GetTaskRunnerForThread(content::BrowserThread::UI);
-  ui_task_runner->PostTask(FROM_HERE, base::BindOnce(&ReleaseV8Isolate));
 }
 
-static void SetFilterEnginePointer(
+static void SetFilterEngineNativePtr(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& jcaller,
     jlong ptr)
@@ -361,51 +371,48 @@ static void SetFilterEnginePointer(
   }
 }
 
-static jlong GetIsolatePointer(
+static jlong GetIsolateProviderNativePtr(
 	JNIEnv* env,
 	const base::android::JavaParamRef<jobject>& jcaller)
 {
-  if (!isolate_holder)
-  {
-    // thread for V8 tasks
-    thread = new base::Thread("AdblockThread");
-    thread->Start();
+  // thread for V8 tasks
+  thread = new base::Thread("AdblockThread");
+  thread->Start();
 
-    // v8 init
-    LOG(WARNING) << "Adblock: creating isolate holder ...";
-    
-    #ifdef V8_USE_EXTERNAL_STARTUP_DATA
-    LOG(WARNING) << "Adblock: loading v8 snapshot & natives ...";
-    gin::V8Initializer::LoadV8Snapshot();
-    gin::V8Initializer::LoadV8Natives();
-    LOG(WARNING) << "Adblock: loaded v8 snapshot & natives";
-    #endif
+  // v8 init
+  LOG(WARNING) << "Adblock: creating isolate holder ...";
+  
+  #ifdef V8_USE_EXTERNAL_STARTUP_DATA
+  LOG(WARNING) << "Adblock: loading v8 snapshot & natives ...";
+  gin::V8Initializer::LoadV8Snapshot();
+  gin::V8Initializer::LoadV8Natives();
+  LOG(WARNING) << "Adblock: loaded v8 snapshot & natives";
+  #endif
 
-    LOG(WARNING) << "Adblock: initialize isolate holder";
-    gin::IsolateHolder::Initialize(gin::IsolateHolder::kStrictMode,
-                                   gin::IsolateHolder::kStableV8Extras,
-                                   gin::ArrayBufferAllocator::SharedInstance());
+  LOG(WARNING) << "Adblock: initialize isolate holder";
+  gin::IsolateHolder::Initialize(gin::IsolateHolder::kStrictMode,
+                                 gin::IsolateHolder::kStableV8Extras,
+                                 gin::ArrayBufferAllocator::SharedInstance());
 
-    // create isolate using isolate holder (using kUseLocker!)
-    thread->WaitUntilThreadStarted();
-    scoped_refptr<base::SingleThreadTaskRunner> thread_task_runner = thread->task_runner();
-    task_runner = thread_task_runner.get();
-      //content::BrowserThread::GetTaskRunnerForThread(content::BrowserThread::UI);
-    /*
-      base::CreateSingleThreadTaskRunnerWithTraits(
-        {base::MayBlock(), base::TaskPriority::BACKGROUND},
-        base::SingleThreadTaskRunnerThreadMode::DEDICATED);
-        */
+  // create isolate using isolate holder (using kUseLocker!)
+  thread->WaitUntilThreadStarted();
+  scoped_refptr<base::SingleThreadTaskRunner> thread_task_runner = thread->task_runner();
+  task_runner = thread_task_runner.get();
+    //content::BrowserThread::GetTaskRunnerForThread(content::BrowserThread::UI);
+  /*
+    base::CreateSingleThreadTaskRunnerWithTraits(
+      {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      base::SingleThreadTaskRunnerThreadMode::DEDICATED);
+      */
 
-    isolate_holder = new gin::IsolateHolder(thread_task_runner, gin::IsolateHolder::AccessMode::kUseLocker);
+  AdblockPlus::IV8IsolateProvider* isolateProviderPtr =
+    new IsolateHolderV8Provider(
+      new gin::IsolateHolder(thread_task_runner, gin::IsolateHolder::AccessMode::kUseLocker));
 
-    // start receive notifications to apply element hiding
-    SubscribeOnLoadListener();
-  }
-
-  v8::Isolate* isolate = isolate_holder->isolate();
+  // start receive notifications to apply element hiding
+  SubscribeOnLoadListener();
 
   // return isolate pointer
-  LOG(WARNING) << "Adblock: returning (from adblock_bridge.cc) isolate pointer " << isolate;
-  return (jlong)isolate;
+  LOG(WARNING) << "Adblock: returning (from adblock_bridge.cc) isolate provider " << isolateProviderPtr;
+  return (jlong)isolateProviderPtr;
 }

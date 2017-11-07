@@ -381,8 +381,8 @@ public class ChromeTabbedActivity
         mAppIndexingUtil = new AppIndexingUtil();
     }
 
-    private void sendFilterEnginePointer(long ptr) {
-        AdblockBridge.getInstance().setFilterEnginePointer(ptr);
+    private void sendFilterEngineNativePtr(long ptr) {
+        AdblockBridge.getInstance().setFilterEngineNativePtr(ptr);
     }
 
     private void initAdblock() {
@@ -398,14 +398,14 @@ public class ChromeTabbedActivity
             .init(this, basePath, true, AdblockHelper.PREFERENCE_NAME);
 
         Log.w(TAG, "Adblock: getting isolate pointer async in Thread " + java.lang.Thread.currentThread());
-        long isolatePtr = AdblockBridge.getInstance().getIsolatePointer();
+        long isolateProviderPtr = AdblockBridge.getInstance().getIsolateProviderNativePtr();
 
-        Log.w(TAG, "Adblock: got isolate pointer = " + isolatePtr
+        Log.w(TAG, "Adblock: got isolate pointer = " + isolateProviderPtr
                  + " in thread " + Thread.currentThread());
 
         AdblockHelper
             .get()
-            .useV8Isolate(isolatePtr);
+            .useV8IsolateProvider(isolateProviderPtr);
 
         // synchronously (blocks the UI but allows to get pointer here)
         // TODO: (improvement) do it async and wait for engine to be created
@@ -414,7 +414,7 @@ public class ChromeTabbedActivity
             // pass FilterEngine instance pointer to C++ side
             long ptr = AdblockHelper.get().getEngine().getFilterEngine().getNativePtr();
             android.util.Log.w(TAG, "Adblock: Notify C++ FilterEngine is created (passing pointer) " + ptr + " in thread " + Thread.currentThread());
-            sendFilterEnginePointer(ptr);
+            sendFilterEngineNativePtr(ptr);
         }
     }
 
@@ -1989,7 +1989,7 @@ public class ChromeTabbedActivity
         if (AdblockHelper.get().release()) {
             Log.w(TAG, "Adblock: Notify C++ side filterEngine can't be used anymore in thread "
              + Thread.currentThread());
-            sendFilterEnginePointer(0L);
+            sendFilterEngineNativePtr(0L);
         }
     }
 
