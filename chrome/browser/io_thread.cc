@@ -625,6 +625,7 @@ void IOThread::RegisterPrefs(PrefRegistrySimple* registry) {
                                std::string());
   registry->RegisterBooleanPref(prefs::kEnableReferrers, true);
   registry->RegisterBooleanPref(prefs::kEnableAdblock, true);
+  registry->RegisterListPref(prefs::kAdblockWhitelistedDomains);
   data_reduction_proxy::RegisterPrefs(registry);
   registry->RegisterBooleanPref(prefs::kBuiltInDnsClientEnabled, true);
   registry->RegisterBooleanPref(prefs::kQuickCheckEnabled, true);
