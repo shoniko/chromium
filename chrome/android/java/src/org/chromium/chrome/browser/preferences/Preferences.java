@@ -8,6 +8,7 @@ import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Fragment;
 import android.content.Intent;
+import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
@@ -36,7 +37,10 @@ import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.profiles.ProfileManagerUtils;
 
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
+import org.chromium.chrome.browser.adblock.AdblockBridge;
+
 import java.util.List;
+
 import org.adblockplus.libadblockplus.android.AdblockEngine;
 import org.adblockplus.libadblockplus.android.settings.AdblockHelper;
 import org.adblockplus.libadblockplus.android.settings.AdblockSettings;
@@ -80,6 +84,8 @@ public class Preferences extends AppCompatActivity implements
     protected void onCreate(Bundle savedInstanceState) {
         ensureActivityNotExported();
 
+        Log.d(TAG, "Preferences.onCreate() " + this);
+
         // The browser process must be started here because this Activity may be started explicitly
         // from Android notifications, when Android is restoring Preferences after Chrome was
         // killed, or for tests. This should happen before super.onCreate() because it might
@@ -96,13 +102,45 @@ public class Preferences extends AppCompatActivity implements
             return;
         }
 
+        /*
+        if (!AdblockHelper.get().isInit()) {
+            Log.e(TAG, "AdblockHelper is not initialized!!!");
+
+             Log.w(TAG, "Adblock: getting isolate pointer async in Thread " + java.lang.Thread.currentThread());
+             long isolateProviderPtr = AdblockBridge.getInstance().getIsolateProviderNativePtr();
+             Log.w(TAG, "Adblock: got isolate pointer = " + isolateProviderPtr
+                 + " in thread " + Thread.currentThread());
+
+            String basePath = getDir(
+                 AdblockEngine.BASE_PATH_DIRECTORY,
+                 Context.MODE_PRIVATE)
+                     .getAbsolutePath();
+
+            AdblockHelper
+                .get()
+                .init(this, basePath, true, AdblockHelper.PREFERENCE_NAME)
+                .useV8IsolateProvider(isolateProviderPtr);
+        }
+        */
+
         // for Adblock settings we need AdblockEngine instance
         // TODO: since it's required for Adblock fragments only and it takes relatively
         // lot's of memory we need to create it for Adblock settings UI fragments only
         // WARNING: we should do it before activity is started with super.onCreate() as it adds fragment and
         // it requires ready Adblock engine instace or retaining to be done before
-        Log.d(TAG, "Adblock: retaining adblock engine async");
-        AdblockHelper.get().retain(false);
+        Log.d(TAG, "Adblock: retaining adblock engine in " + this);
+        
+        // synchronously (blocks the UI but allows to get pointer here)
+        // TODO: (improvement) do it async and wait for engine to be created
+        // and passed when URL is about to load
+        if (AdblockHelper.get().retain(false)) {
+            // pass FilterEngine instance pointer to C++ side
+            long ptr = AdblockHelper.get().getEngine().getFilterEngine().getNativePtr();
+            android.util.Log.w(TAG, "Adblock: Notify C++ FilterEngine is created (passing pointer) " + ptr + " in thread " + Thread.currentThread());
+            AdblockBridge.getInstance().setFilterEngineNativePtr(ptr);
+        };
+
+        Log.d(TAG, "Adblock: adblock engine counter = " + AdblockHelper.get().getCounter());
 
         super.onCreate(savedInstanceState);
 
@@ -144,8 +182,13 @@ public class Preferences extends AppCompatActivity implements
         super.onDestroy();
 
         // don't forget to release Adblock engine
-        Log.d(TAG, "Adblock: releasing adblock engine");
-        AdblockHelper.get().release();
+        Log.d(TAG, "Adblock: releasing adblock engine in " + this);
+        // if it's the last instance then we need to notify C++ side (stop using it)
+        if (AdblockHelper.get().release()) {
+            Log.w(TAG, "Adblock: Notify C++ side filterEngine can't be used anymore in thread " + Thread.currentThread());
+            AdblockBridge.getInstance().setFilterEngineNativePtr(0L);
+        };
+        Log.d(TAG, "Adblock: adblock engine counter = " + AdblockHelper.get().getCounter());
     }
 
     // OnPreferenceStartFragmentCallback:

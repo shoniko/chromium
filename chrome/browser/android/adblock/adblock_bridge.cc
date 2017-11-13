@@ -121,7 +121,9 @@ console.log('finished injecting css rules');";
 
 void handleOnLoad(content::WebContents* webContents) {
   // it can be released in UI thread while this is not yet invoked
-  if (!AdblockBridge::enable_adblock || !AdblockBridge::filterEnginePtr)
+  if (!AdblockBridge::enable_adblock ||
+      !AdblockBridge::filterEnginePtr ||
+      !AdblockBridge::adblock_whitelisted_domains)
     return;
 
   if (!AdblockBridge::enable_adblock->GetValue()) {
@@ -264,7 +266,9 @@ class AdblockLoadCompleteListener : public content::NotificationObserver {
 
       // run in (background) thread in order not to block main (UI) thread for few seconds
       // prefs can be `nullptr` only if they are released 
-      if (!task_runner)
+      if (!task_runner ||
+          !AdblockBridge::enable_adblock ||
+          !AdblockBridge::adblock_whitelisted_domains)
         return;
 
       // prefs should be moved to the thread they will be accessed from
@@ -296,6 +300,8 @@ base::Thread* thread = nullptr;
 AdblockLoadCompleteListener* completeListener = nullptr;
 
 void AdblockBridge::InitializePrefsOnUIThread(PrefService* pref_service) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
   LOG(WARNING) << "Adblock: init prefs for element hiding";
   
   enable_adblock = new BooleanPrefMember();

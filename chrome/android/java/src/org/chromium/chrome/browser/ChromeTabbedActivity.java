@@ -381,12 +381,13 @@ public class ChromeTabbedActivity
         mAppIndexingUtil = new AppIndexingUtil();
     }
 
-    private void sendFilterEngineNativePtr(long ptr) {
-        AdblockBridge.getInstance().setFilterEngineNativePtr(ptr);
-    }
-
     private void initAdblock() {
         Log.w(TAG, "Adblock ChromeTabbedActivity.java: initAdblock()");
+
+        Log.w(TAG, "Adblock: getting isolate pointer async in Thread " + java.lang.Thread.currentThread());
+        long isolateProviderPtr = AdblockBridge.getInstance().getIsolateProviderNativePtr();
+        Log.w(TAG, "Adblock: got isolate pointer = " + isolateProviderPtr
+                 + " in thread " + Thread.currentThread());
 
         String basePath = getDir(
             AdblockEngine.BASE_PATH_DIRECTORY,
@@ -395,16 +396,7 @@ public class ChromeTabbedActivity
 
         AdblockHelper
             .get()
-            .init(this, basePath, true, AdblockHelper.PREFERENCE_NAME);
-
-        Log.w(TAG, "Adblock: getting isolate pointer async in Thread " + java.lang.Thread.currentThread());
-        long isolateProviderPtr = AdblockBridge.getInstance().getIsolateProviderNativePtr();
-
-        Log.w(TAG, "Adblock: got isolate pointer = " + isolateProviderPtr
-                 + " in thread " + Thread.currentThread());
-
-        AdblockHelper
-            .get()
+            .init(this, basePath, true, AdblockHelper.PREFERENCE_NAME)
             .useV8IsolateProvider(isolateProviderPtr);
 
         // synchronously (blocks the UI but allows to get pointer here)
@@ -414,7 +406,7 @@ public class ChromeTabbedActivity
             // pass FilterEngine instance pointer to C++ side
             long ptr = AdblockHelper.get().getEngine().getFilterEngine().getNativePtr();
             android.util.Log.w(TAG, "Adblock: Notify C++ FilterEngine is created (passing pointer) " + ptr + " in thread " + Thread.currentThread());
-            sendFilterEngineNativePtr(ptr);
+            AdblockBridge.getInstance().setFilterEngineNativePtr(ptr);
         }
     }
 
@@ -1987,9 +1979,8 @@ public class ChromeTabbedActivity
 
         // if it's the last instance then we need to notify C++ side (stop using it)
         if (AdblockHelper.get().release()) {
-            Log.w(TAG, "Adblock: Notify C++ side filterEngine can't be used anymore in thread "
-             + Thread.currentThread());
-            sendFilterEngineNativePtr(0L);
+            Log.w(TAG, "Adblock: Notify C++ side filterEngine can't be used anymore in thread " + Thread.currentThread());
+            AdblockBridge.getInstance().setFilterEngineNativePtr(0L);
         }
     }
 
