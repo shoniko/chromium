@@ -16,6 +16,9 @@ android_aar_prebuilt("libadblockplus_android_aar_java") {
 }
 
 android_aar_prebuilt("libadblockplus_android_settings_aar_java") {
+  deps = [
+    ":libadblockplus_android_aar_java",
+  ]
   aar_path = "libadblockplus-android-settings-debug.aar"
   proguard_configs = [ "proguard-adblock.txt" ]
   ignore_native_libraries = false
