@@ -24,6 +24,12 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
+
+#include "chrome/browser/android/adblock/adblock_bridge.h"
+
+// because of dependency "third_party/libadblockplus_android/include" is added into -I
+#include "AdblockPlus.h"
+
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/net/prediction_options.h"
@@ -711,16 +717,42 @@ static void SetAdblockEnabled(JNIEnv* env,
   GetPrefService()->SetBoolean(prefs::kEnableAdblock, allow);
 }
 
+std::string CreateDomainWhitelistingFilter(std::string domain) {
+  return "@@||" + domain + "^$document";
+}
+
 static void SetAdblockWhitelistedDomains(JNIEnv* env, const
     base::android::JavaParamRef<jobject>& jcaller,
     const base::android::JavaParamRef<jobjectArray>& jdomains) {
-  std::vector<std::string> domains;
-  base::android::AppendJavaStringArrayToStringVector(env, jdomains.obj(), &domains);
+  std::vector<std::string> new_domains;
+  base::android::AppendJavaStringArrayToStringVector(env, jdomains.obj(), &new_domains);
 
+  // AdblockBridge::filterEnginePtr != 0 as FilterEngine is retained on Activity start
+  AdblockPlus::FilterEnginePtr* extFilterEngine =
+    reinterpret_cast<AdblockPlus::FilterEnginePtr*>(AdblockBridge::filterEnginePtr);
+  AdblockPlus::FilterEnginePtr filterEngine(*extFilterEngine);
+
+  // remove domains from previous list
+  StringListPrefMember* adblock_whitelisted_domains = new StringListPrefMember();
+  adblock_whitelisted_domains->Init(prefs::kAdblockWhitelistedDomains, GetPrefService());
+  std::vector<std::string> old_domains = adblock_whitelisted_domains->GetValue();
+  
+  for (const std::string& domain : old_domains) {
+    std::string filter = CreateDomainWhitelistingFilter(domain);
+    filterEngine->GetFilter(filter).RemoveFromList();
+  }
+
+  adblock_whitelisted_domains->Destroy();
+  delete adblock_whitelisted_domains;
+
+  // save and apply domains from new list
   ListPrefUpdate update(GetPrefService(), prefs::kAdblockWhitelistedDomains);
   update->Clear();
-  for (const std::string& domain : domains) {
+  for (const std::string& domain : new_domains) {
     update->AppendString(domain);
+
+    std::string filter = CreateDomainWhitelistingFilter(domain);
+    filterEngine->GetFilter(filter).AddToList();
   }
 }
 

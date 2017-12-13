@@ -145,46 +145,29 @@ void handleOnLoad(content::WebContents* webContents) {
   std::vector<std::string> referrers;
   referrers.push_back(url);
 
-  if ( gurl.SchemeIsHTTPOrHTTPS() &&
-      !gurl.IsAboutBlank() &&
-      !filterEngine->IsDocumentWhitelisted(url, referrers) &&
-      !filterEngine->IsElemhideWhitelisted(url, referrers)) {
+  // user domains whitelisting is implemented as adding exception filter for domain
+  // so we can just use `filterEngine.is...Whitelisted()`
+  if (gurl.SchemeIsHTTPOrHTTPS()) {
+    if (filterEngine->IsDocumentWhitelisted(url, referrers) ||
+        filterEngine->IsElemhideWhitelisted(url, referrers)) {
+       LOG(WARNING) << "Adblock: element hiding - whitelisted";
+    } else {
+      // generate JS
+      LOG(WARNING) << "Adblock: element hiding - generating JS ...";
+      std::string domain = filterEngine->GetHostFromURL(url);
+      std::string js = generateJavascript(filterEngine, url, domain);
+      LOG(WARNING) << "Adblock: element hiding - generated JS";
 
-    // check if domain is whitelisted by user
-    std::string domain = filterEngine->GetHostFromURL(url);
+      // run JS
+      content::RenderFrameHost* frameHost = webContents->GetMainFrame();
+      frameHost->ExecuteJavaScriptInIsolatedWorld(
+        base::UTF8ToUTF16(js),
+        content::RenderFrameHost::JavaScriptResultCallback(),
+        chrome::ISOLATED_WORLD_ID_ADBLOCK);
 
-    std::vector<std::string> whitelisted_domains = AdblockBridge::adblock_whitelisted_domains->GetValue();
-  
-    LOG(WARNING) << "Adblock: element hiding - whitelisted domains: " << whitelisted_domains.size();
-
-    // check if current url's domain is whitelisted
-    bool is_url_whitelisted =
-      std::find(
-        whitelisted_domains.begin(),
-        whitelisted_domains.end(),
-        domain)
-      != whitelisted_domains.end();
-
-    if (is_url_whitelisted) {
-      LOG(ERROR) << "Adblock: element hiding - URL's domain whitelisted";
-      return;
+      LOG(WARNING) << "Adblock: element hiding - called JS";
     }
-
-    LOG(WARNING) << "Adblock: element hiding - URL's domain NOT whitelisted";
-
-    // generate JS
-    std::string js = generateJavascript(filterEngine, url, domain);
-    LOG(WARNING) << "Adblock: element hiding - generated JS";
-
-    // run JS
-    content::RenderFrameHost* frameHost = webContents->GetMainFrame();
-    frameHost->ExecuteJavaScriptInIsolatedWorld(
-      base::UTF8ToUTF16(js),
-      content::RenderFrameHost::JavaScriptResultCallback(),
-      chrome::ISOLATED_WORLD_ID_ADBLOCK);
-
-    LOG(WARNING) << "Adblock: element hiding - called JS";
-  }
+  } 
 }
 
 class IsolateHolderV8Provider : public AdblockPlus::IV8IsolateProvider  

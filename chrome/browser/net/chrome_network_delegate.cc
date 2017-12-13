@@ -385,100 +385,57 @@ int ChromeNetworkDelegate::OnBeforeStartTransaction(
       LOG(WARNING) << "Adblock: No referer";
     }
 
-    // check for it or any referrer is whitelisted
-    bool is_url_whitelisted = false;
-    if (adblock_whitelisted_domains_) {
-      std::vector<std::string> whitelisted_domains = adblock_whitelisted_domains_->GetValue();
-      //if (whitelisted_domains) {
-      LOG(WARNING) << "Adblock: whitelisted domains: " << whitelisted_domains.size();
-
-      // check if current url's domain is whitelisted
-      is_url_whitelisted =
-        std::find(
-          whitelisted_domains.begin(),
-          whitelisted_domains.end(),
-          host)
-        != whitelisted_domains.end();
-
-      if (is_url_whitelisted) {
-        LOG(ERROR) << "Adblock: URL's domain whitelisted";
-      } else {
-        LOG(WARNING) << "Adblock: URL's domain NOT whitelisted";
-
-        // check if referrer's domain is whitelisted
-        if (!referrer.empty()) {
-          std::string referrer_host = filterEngine->GetHostFromURL(referrer);
-          LOG(WARNING) << "Adblock: extracted referrer host \"" << referrer_host << "\"";
-
-          is_url_whitelisted = 
-            std::find(
-              whitelisted_domains.begin(),
-              whitelisted_domains.end(),
-              referrer_host)
-              != whitelisted_domains.end();
-
-          if (is_url_whitelisted) {
-            LOG(ERROR) << "Adblock: referrer domain " << referrer_host << " whitelisted";
-          }  
-        }
-      }
+    LOG(WARNING) << "Adblock: invoking IsDocumentWhitelisted(" << url << ")";  
+    if (filterEngine->IsDocumentWhitelisted(url, documentUrls)) {
+      LOG(WARNING) << "Adblock: document whitelisted " << url;
     } else {
-      LOG(WARNING) << "Adblock: no whitelisted domains pref";
-    }
+      AdblockPlus::FilterEngine::ContentType adblock_content_type;
+      
+      switch (resource_type) {
+        case content::RESOURCE_TYPE_XHR:
+          adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_XMLHTTPREQUEST;
+          break;
 
-    if (!is_url_whitelisted) {
-      LOG(WARNING) << "Adblock: invoking IsDocumentWhitelisted(" << url << ")";  
-      if (filterEngine->IsDocumentWhitelisted(url, documentUrls)) {
-        LOG(ERROR) << "Adblock: document whitelisted";
-      } else {
-        AdblockPlus::FilterEngine::ContentType adblock_content_type;
-        
-        switch (resource_type) {
-          case content::RESOURCE_TYPE_XHR:
-            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_XMLHTTPREQUEST;
-            break;
+        case content::RESOURCE_TYPE_STYLESHEET:
+          adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_STYLESHEET;
+          break;
 
-          case content::RESOURCE_TYPE_STYLESHEET:
-            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_STYLESHEET;
-            break;
+        case content::RESOURCE_TYPE_SCRIPT:
+          adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_SCRIPT;
+          break;
 
-          case content::RESOURCE_TYPE_SCRIPT:
-            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_SCRIPT;
-            break;
+        case content::RESOURCE_TYPE_FONT_RESOURCE:
+          adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_FONT;
+          break;
 
-          case content::RESOURCE_TYPE_FONT_RESOURCE:
-            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_FONT;
-            break;
+        case content::RESOURCE_TYPE_OBJECT:
+          adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_OBJECT;
+          break;
 
-          case content::RESOURCE_TYPE_OBJECT:
-            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_OBJECT;
-            break;
+        case content::RESOURCE_TYPE_SUB_FRAME:
+          adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_SUBDOCUMENT;
+          break;
 
-          case content::RESOURCE_TYPE_SUB_FRAME:
-            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_SUBDOCUMENT;
-            break;
+        case content::RESOURCE_TYPE_MEDIA:
+          adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_MEDIA;
+          break;
 
-          case content::RESOURCE_TYPE_MEDIA:
-            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_MEDIA;
-            break;
+        default:
+          adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_OTHER;
+      }
 
-          default:
-            adblock_content_type = AdblockPlus::FilterEngine::ContentType::CONTENT_TYPE_OTHER;
+      LOG(WARNING) << "Adblock: mapped to adblock content type " << adblock_content_type;
 
-        }
-        LOG(WARNING) << "Adblock: mapped to adblock content type " << adblock_content_type;
+      AdblockPlus::FilterPtr filterPtr = filterEngine->Matches(url, adblock_content_type, documentUrls);
+      if (filterPtr && filterPtr->GetType() != AdblockPlus::Filter::TYPE_EXCEPTION) {
+        LOG(ERROR) << "Adblock: !!! Prevented loading " << url;
 
-        AdblockPlus::FilterPtr filterPtr = filterEngine->Matches(url, adblock_content_type, documentUrls);
-        if (filterPtr && filterPtr->GetType() != AdblockPlus::Filter::TYPE_EXCEPTION) {
-          LOG(ERROR) << "Adblock: !!! Prevented loading " << url;
+        // URL access blocked by Adblock Plus.
+        request->net_log().AddEvent(
+          net::NetLogEventType::CHROME_POLICY_ABORTED_REQUEST,
+          net::NetLog::StringCallback("url", &request->url().possibly_invalid_spec()));
 
-          // URL access blocked by Adblock Plus.
-          request->net_log().AddEvent(
-            net::NetLogEventType::CHROME_POLICY_ABORTED_REQUEST,
-            net::NetLog::StringCallback("url", &request->url().possibly_invalid_spec()));
-
-          return net::ERR_BLOCKED_BY_ADMINISTRATOR;
-        }
+        return net::ERR_BLOCKED_BY_ADMINISTRATOR;
       }
     }
   }
