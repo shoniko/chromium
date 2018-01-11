@@ -1507,7 +1507,7 @@ split_static_library("browser") {
     "//build/config:precompiled_headers",
 
     # libadblockplus-android contains precompiled shared library, including headers here
-    "//third_party/libadblockplus_android:libadblockplus_headers"
+    "//third_party/libadblockplus:headers"
   ]
   defines = []
   libs = []

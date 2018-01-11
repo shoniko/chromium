@@ -1,0 +1,36 @@
+import os
+import io
+import sys
+import subprocess
+
+def main(argv):
+  cwd = os.getcwd()
+  subprocess_env = os.environ.copy()
+  subprocess_args = []
+  for arg in argv:
+    # if it's env var
+    if arg[: 5] == '--env':
+      equal_pos = arg.index('=')
+      key = arg[5 : equal_pos]
+      value = arg[equal_pos + 1 : len(arg)]
+      print('Set env variable %s=%s' % (key, value))
+      subprocess_env[key] = value
+    else:
+      # if it's cwd
+      if arg[: 5] == '--cwd':
+        cwd = arg[5:]
+        print('Set cwd=%s' % cwd)
+      else:
+        # cmd arguments
+        subprocess_args += [ arg ]
+
+  #print("Running: %s" % " ".join(subprocess_args))
+  process = subprocess.Popen(subprocess_args, env=subprocess_env, cwd=cwd, stdout=sys.stdout, stderr=sys.stderr)
+  return process.returncode
+
+if '__main__' == __name__:
+  try:
+    sys.exit(main(sys.argv[1:]))
+  except KeyboardInterrupt:
+    sys.stderr.write('interrupted\n')
+    sys.exit(1)

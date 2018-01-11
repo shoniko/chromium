@@ -1,0 +1,45 @@
+# Build libadblockplus using make
+action("make") {
+  script = "subproc.py"
+  _cwd = rebase_path(".")
+  _build_dir="${target_out_dir}/build"
+  _abs_build_dir=rebase_path("${_build_dir}")
+  
+  inputs = [
+  ]
+
+  outputs = [
+    "${_build_dir}/local/armeabi-v7a/libadblockplus.a",
+    "${_build_dir}/android_arm.release/libv8_libplatform.a",
+  ]
+
+  args = [
+    # command line:
+    # 1. one could add/remove "clean" after "make"
+    # 2. one could add/remove "V=1" to add/remove verbose output
+    "/usr/bin/make", "android_${target_cpu}", "-j8",
+
+    # cwd
+    "--cwd${_cwd}",
+
+    # environment variables
+
+    # skip updating dependencies in `ensure_dependencies.py` while building
+    # (this is done during `gclient sync` or `gclient runhooks`)
+    "--envSKIP_DEPENDENCY_UPDATES=true",
+
+    # Android NDK
+    "--envANDROID_NDK_ROOT=${_cwd}/third_party/android-ndk-r12b",
+
+    # required to set output dir to subdirectory of ${target_out_dir}
+    "--envBUILD_DIR=${_abs_build_dir}",
+
+    # workaround for building for Target platform on Linux GYP issue
+    "--envCXX.host=g++",
+    "--envCC.host=gcc"
+  ]
+}
+
+config("headers") {
+  include_dirs = [ "include" ]
+}

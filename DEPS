@@ -33,6 +33,7 @@ vars = {
   'pdfium_git': 'https://pdfium.googlesource.com',
   'boringssl_git': 'https://boringssl.googlesource.com',
   'skia_git': 'https://skia.googlesource.com',
+  'adblockplus_git': 'https://github.com/adblockplus',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling sfntly
   # and whatever else without interference from each other.
@@ -517,6 +518,16 @@ deps_os = {
 
     'src/third_party/gvr-android-sdk/src':
       Var('chromium_git') + '/external/github.com/googlevr/gvr-android-sdk.git' + '@' + 'ee5cb1c6138d0be57e82ddafc1b54d7d3e3e5560',
+
+    'src/third_party/libadblockplus': {
+      'url': Var('adblockplus_git') + '/libadblockplus' + '@' + 'f6c45f4cbcf9b4ab6534abe88690be98738c7eb6',
+      'condition': 'checkout_android',
+    },
+
+    'src/third_party/libadblockplus_android': {
+      'url': Var('adblockplus_git') + '/libadblockplus-android' + '@' + 'd11cc807b0e34bbf0e04784edbb9d39dea29932b',
+      'condition': 'checkout_android',
+    }
   },
 }
 
@@ -1216,6 +1227,59 @@ hooks_os = {
       'pattern': '.',
       'action': ['python',
                  'src/build/android/download_doclava.py',
+      ],
+    },
+
+    {
+      # Download dependencies for libadblockplus.
+      'name': 'libadblockplus_ensure_dependencies',
+      'pattern': 'dependencies',
+      'condition': 'checkout_android',
+      'action': [
+          'python',
+          'src/third_party/libadblockplus/ensure_dependencies.py'
+      ],
+    },
+
+    {
+      # Prepare libadblockplus V8 dependencies (reusing Chromium V8 dependencies for building libadblockplus)
+      'name': 'libadblockplus_prepare_dependencies',
+      'pattern': 'dependencies',
+      'action': [
+          'python',
+          'src/third_party/libadblockplus/prepare_dependencies.py',
+      ],
+    },
+
+    {
+      # Download official Android NDK
+      'name': 'libadblockplus_download_ndk',
+      'pattern': 'dependencies',
+      'action': [
+          'python',
+          'src/third_party/libadblockplus/download_ndk.py',
+      ],
+    },
+
+    {
+      # Download build tools dependencies for libadblockplus-android.
+      'name': 'libadblockplus_android_prepare_build_tools',
+      'pattern': 'dependencies',
+      'condition': 'checkout_android',
+      'action': [
+          'python',
+          'src/third_party/libadblockplus_android/prepare_build_tools.py'
+      ],
+    },
+
+    {
+      # Download dependencies for libadblockplus-android.
+      'name': 'libadblockplus_android_ensure_dependencies',
+      'pattern': 'dependencies',
+      'condition': 'checkout_android',
+      'action': [
+          'python',
+          'src/third_party/libadblockplus_android/ensure_dependencies.py'
       ],
     },
   ],

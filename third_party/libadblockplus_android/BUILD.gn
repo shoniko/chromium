@@ -1,25 +1,190 @@
-# Copyright 2017 eyeo GmbH. All rights reserved.
-# Use of this source code is governed by a BSD-style license that can be
-# found in the LICENSE file.
-
 import("//build/config/android/rules.gni")
 
-config("libadblockplus_headers") {
-  include_dirs = [ "include" ]
+# Copy libadblockplus headers
+copy("copy_libadblockplus_include") {
+  sources = [ "//third_party/libadblockplus/include" ]
+  outputs = [ "${target_out_dir}/libadblockplus-binaries/include" ]
 }
 
-android_aar_prebuilt("libadblockplus_android_aar_java") {
-  aar_path = "libadblockplus-android-debug.aar"
+if (target_cpu == "arm") {
+  _abi_directory = "armeabi-v7a"
+} else {
+  _abi_directory = "x86"
+}
+
+# Copy libadblockplus archives (.a) for ARM/x86
+copy("copy_libadblockplus_abi") {
+  deps = [
+    "//third_party/libadblockplus:make"
+  ]
+
+  _arm_inputs_dir = "${target_out_dir}/../libadblockplus/build"
+  _arm_outputs_dir = "${target_out_dir}/libadblockplus-binaries/android_${_abi_directory}"
+  
+  sources = [
+    # = outputs of //third_party/libadblockplus:make
+    "${_arm_inputs_dir}/local/${_abi_directory}/libadblockplus.a",
+    "${_arm_inputs_dir}/android_${target_cpu}.release/libv8_libplatform.a",
+  ]
+  outputs = [
+    "${_arm_outputs_dir}/{{source_file_part}}"
+  ]
+}
+
+# Copy libv8.cr.so
+copy("copy_libv8") {
+  deps = [
+    "//v8:v8"
+  ]
+
+  _arm_outputs_dir = "${target_out_dir}/libadblockplus-binaries/android_${_abi_directory}"
+
+  sources = [ "${target_out_dir}/../../../libv8.cr.so" ]
+  outputs = [ "${_arm_outputs_dir}/libv8.cr.so" ]
+}
+
+# Copy libv8_libbase.cr.so
+copy("copy_libv8_libbase") {
+  deps = [
+    "//v8:v8_libbase"
+  ]
+
+  _arm_outputs_dir = "${target_out_dir}/libadblockplus-binaries/android_${_abi_directory}"
+
+  sources = [ "${target_out_dir}/../../../libv8_libbase.cr.so" ]
+  outputs = [ "${_arm_outputs_dir}/libv8_libbase.cr.so" ]
+}
+
+_cwd = rebase_path(".")
+_build_dir = "${target_out_dir}/build"
+_abs_build_dir = rebase_path("${_build_dir}")
+_abs_libadblockplus_dir = rebase_path("//third_party/libadblockplus")
+_abs_sdk_dir = rebase_path("//third_party/android_tools/sdk")
+
+_libadblockplus_binaries_dir = "${target_out_dir}/libadblockplus-binaries"
+_abs_libadblockplus_binaries_dir = rebase_path("${_libadblockplus_binaries_dir}")
+
+action("clear") {
+  script = "clear.py"
+  args = [
+    "${_cwd}/libadblockplus-android/.externalNativeBuild"
+  ]
+  outputs = [
+    "${_build_dir}/tmp"
+  ]
+}
+
+# Build libadblockplus-android using Gradle
+action("make") {
+  deps = [
+    "//third_party/libadblockplus:make",
+    ":clear",
+
+    # from libadblockplus
+    ":copy_libadblockplus_include",
+    ":copy_libadblockplus_abi",
+
+    # from Chromium
+    ":copy_libv8",
+    ":copy_libv8_libbase",
+  ]
+
+  script = "subproc.py"
+  
+  inputs = [
+  ]
+
+  outputs = [
+    "${_build_dir}/libadblockplus-android/outputs/aar/libadblockplus-android-abi_${target_cpu}-release.aar",
+    "${_build_dir}/libadblockplus-android-settings/outputs/aar/libadblockplus-android-settings-release.aar",
+  ]
+
+  args = [
+    # command line:
+    "${_cwd}/gradlew", "assembleAbi_${target_cpu}Release", ":libadblockplus-android-settings:assembleRelease",
+
+    # cwd
+    "--cwd${_cwd}",
+
+    # environment variables
+    "--envANDROID_HOME=${_abs_sdk_dir}",
+    "--envANDROID_NDK_HOME=${_abs_libadblockplus_dir}/third_party/android-ndk-r12b",
+    "--envGRADLE_BUILD_DIR=${_abs_build_dir}",
+
+    # link with libadblockplus
+    "--envSHARED_V8_LIB_DIR=${_abs_libadblockplus_binaries_dir}",
+    "--envSHARED_V8_LIB_FILENAMES=libv8.cr.so libv8_libbase.cr.so"
+  ]
+}
+
+_prebuild_dir = "${target_out_dir}/prebuild"
+_abs_prebuild_dir = rebase_path("${_prebuild_dir}")
+
+# Chromium's "android_aar_prebuilt" target expects .aar file to exist when running 'gn ...'
+# (see `_scanned_files = read_file(_info_path, "scope")` and it means _info_path file should already exist).
+# Since we do generate .aar from sources we can't have .aar existing when running 'gn ...'.
+# So the trick here is to prebuild libadblockplus-android with default V8 to generate .aar
+# right when running 'gn ...' and generate according .info file for it.
+
+# Obviously it slows down running 'gn ...' dramatically, but it allows to run 'gn' and 'ninja' only once.
+# Otherwise you have to run 'gn' and 'ninja' to generate .aar first, then rerun 'gn' with 'update_android_aar_prebuilts=true'
+# to generate .info and then rerun 'ninja' again to build with existing .info file.
+
+#print("Prebuilding libadblockplus-android to ${_abs_prebuild_dir}")
+exec_script("clear.py", [
+  "${_cwd}/libadblockplus-android/.externalNativeBuild"
+  ])
+exec_script("subproc.py", [
+  "${_cwd}/gradlew",  "clean", "assembleAbi_${target_cpu}Release", ":libadblockplus-android-settings:assembleRelease",
+
+  # cwd
+  "--cwd${_cwd}",
+
+  # environment variables
+  "--envANDROID_HOME=${_abs_sdk_dir}",
+  "--envANDROID_NDK_HOME=${_abs_libadblockplus_dir}/third_party/android-ndk-r12b",
+  "--envGRADLE_BUILD_DIR=${_abs_prebuild_dir}",
+])
+
+_pre_aar_path = rebase_path("${_prebuild_dir}/libadblockplus-android/outputs/aar/libadblockplus-android-abi_${target_cpu}-release.aar")
+_info_path = rebase_path("${_build_dir}/libadblockplus-android/outputs/aar/libadblockplus-android-abi_${target_cpu}-release.info")
+
+#print("Generate .info ($_info_path) for .aar ($_pre_aar_path)")
+write_file(_info_path, "") # to mkdirs
+exec_script("//build/android/gyp/aar.py", [
+  "list", _pre_aar_path,
+  "--output", _info_path
+])
+
+_pre_settings_aar_path = rebase_path("${_prebuild_dir}/libadblockplus-android-settings/outputs/aar/libadblockplus-android-settings-release.aar")
+_settings_info_path = rebase_path("${_build_dir}/libadblockplus-android-settings/outputs/aar/libadblockplus-android-settings-release.info")
+
+#print("Generate .info ($_settings_info_path) for settings .aar ($_pre_settings_aar_path)")
+write_file(_settings_info_path, "") # to mkdirs
+exec_script("//build/android/gyp/aar.py", [
+  "list", _pre_settings_aar_path,
+  "--output", _settings_info_path
+])
+
+_aar_path = rebase_path("${_build_dir}/libadblockplus-android/outputs/aar/libadblockplus-android-abi_${target_cpu}-release.aar")
+android_aar_prebuilt("aar_java") {
+  unpack_deps = [
+    ":make"
+  ]
+  aar_path = "${_aar_path}"
+  info_path = "${_info_path}"
   proguard_configs = [ "proguard-adblock.txt" ]
   ignore_native_libraries = false # We need .so from the aar
   # assets are ignored (we don't need them if not using AdblockWebView)
 }
 
-android_aar_prebuilt("libadblockplus_android_settings_aar_java") {
-  deps = [
-    ":libadblockplus_android_aar_java",
+_settings_aar_path = rebase_path("${_build_dir}/libadblockplus-android-settings/outputs/aar/libadblockplus-android-settings-release.aar")
+android_aar_prebuilt("settings_aar_java") {
+  unpack_deps = [
+    ":make"
   ]
-  aar_path = "libadblockplus-android-settings-debug.aar"
+  aar_path = "$_settings_aar_path"
+  info_path = "$_settings_info_path"
   proguard_configs = [ "proguard-adblock.txt" ]
   ignore_native_libraries = false
 }

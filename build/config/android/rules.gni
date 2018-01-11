@@ -3057,8 +3057,11 @@ if (enable_java_templates) {
     #       "android_aar_prebuilt() with .so files is not supported." +
     #           " Use ignore_native_libraries = true to silence this error.")
     assert(_scanned_files.has_classes_jar || _scanned_files.subjars == [])
-
     action(_unpack_target_name) {
+      if (defined(invoker.unpack_deps)) {
+        deps = invoker.unpack_deps
+      }
+
       script = "//build/android/gyp/aar.py"  # Unzips the AAR
       args = [
         "extract",
@@ -3144,7 +3147,6 @@ if (enable_java_templates) {
     # Create native library targets
     if (!_ignore_native_libraries && _scanned_files.has_native_libraries) {
       # TODO: improve ARCH detecting
-
       if (target_cpu == "x86") {
         _native_libraries = _scanned_files.native_libraries_x86
       } else {
