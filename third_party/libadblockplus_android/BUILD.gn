@@ -65,7 +65,7 @@ _libadblockplus_binaries_dir = "${target_out_dir}/libadblockplus-binaries"
 _abs_libadblockplus_binaries_dir = rebase_path("${_libadblockplus_binaries_dir}")
 
 action("clear") {
-  script = "delete_dir.py"
+  script = "//third_party/libadblockplus_common/delete_dir.py"
   args = [
     "${_cwd}/libadblockplus-android/.externalNativeBuild"
   ]
@@ -89,7 +89,7 @@ action("make") {
     ":copy_libv8_libbase",
   ]
 
-  script = "subproc.py"
+  script = "//third_party/libadblockplus_common/subproc.py"
   
   inputs = [
   ]
@@ -131,10 +131,10 @@ _abs_prebuild_dir = rebase_path("${_prebuild_dir}")
 # to generate .info and then rerun 'ninja' again to build with existing .info file.
 
 #print("Prebuilding libadblockplus-android to ${_abs_prebuild_dir}")
-exec_script("delete_dir.py", [
+exec_script("//third_party/libadblockplus_common/delete_dir.py", [
   "${_cwd}/libadblockplus-android/.externalNativeBuild"
   ])
-exec_script("subproc.py", [
+exec_script("//third_party/libadblockplus_common/subproc.py", [
   "${_cwd}/gradlew",  "clean", "assembleAbi_${target_cpu}Release", ":libadblockplus-android-settings:assembleRelease",
 
   # cwd

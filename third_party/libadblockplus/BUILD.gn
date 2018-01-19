@@ -1,6 +1,6 @@
 # Build libadblockplus using make
 action("make") {
-  script = "subproc.py"
+  script = "//third_party/libadblockplus_common/subproc.py"
   _cwd = rebase_path(".")
   _build_dir="${target_out_dir}/build"
   _abs_build_dir=rebase_path("${_build_dir}")

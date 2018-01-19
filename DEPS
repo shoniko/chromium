@@ -1237,7 +1237,7 @@ hooks_os = {
       'condition': 'checkout_android',
       'action': [
           'python',
-          'src/third_party/libadblockplus/delete_dir.py',
+          'src/third_party/libadblockplus_common/delete_dir.py',
           'src/third_party/libadblockplus/third_party/v8'
       ],
     },
