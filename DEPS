@@ -1231,6 +1231,18 @@ hooks_os = {
     },
 
     {
+      # Clear dependencies for libadblockplus (otherwise ensure_dependencies will fail to check deps revisions)
+      'name': 'libadblockplus_clear_dependencies',
+      'pattern': 'dependencies',
+      'condition': 'checkout_android',
+      'action': [
+          'python',
+          'src/third_party/libadblockplus/delete_dir.py',
+          'src/third_party/libadblockplus/third_party/v8'
+      ],
+    },
+
+    {
       # Download dependencies for libadblockplus.
       'name': 'libadblockplus_ensure_dependencies',
       'pattern': 'dependencies',
