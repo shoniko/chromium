@@ -59,7 +59,7 @@ _cwd = rebase_path(".")
 _build_dir = "${target_out_dir}/build"
 _abs_build_dir = rebase_path("${_build_dir}")
 _abs_libadblockplus_dir = rebase_path("//third_party/libadblockplus")
-_abs_sdk_dir = rebase_path("//third_party/android_tools/sdk")
+_abs_sdk_dir = rebase_path("//third_party/libadblockplus_android/third_party/android_sdk")
 
 _libadblockplus_binaries_dir = "${target_out_dir}/libadblockplus-binaries"
 _abs_libadblockplus_binaries_dir = rebase_path("${_libadblockplus_binaries_dir}")
