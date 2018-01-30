@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import os
 import sys
 import subprocess
@@ -9,7 +11,7 @@ def main(argv):
     subprocess_args = []
     for arg in argv:
         # if it's env var
-        if arg[: 5] == '--env':
+        if arg[:5] == '--env':
             equal_pos = arg.index('=')
             key = arg[5:equal_pos]
             value = arg[equal_pos + 1:len(arg)]
@@ -17,7 +19,7 @@ def main(argv):
             subprocess_env[key] = value
         else:
             # if it's cwd
-            if arg[: 5] == '--cwd':
+            if arg[:5] == '--cwd':
                 cwd = arg[5:]
                 print('Set cwd={}'.format(cwd))
             else:
@@ -30,9 +32,8 @@ def main(argv):
     return process.returncode
 
 
-if '__main__' == __name__:
+if __name__ == '__main__':
     try:
         sys.exit(main(sys.argv[1:]))
     except KeyboardInterrupt:
-        sys.stderr.write('interrupted\n')
-        sys.exit(1)
+        sys.exit('interrupted')

@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import os
 import sys
 import subprocess
@@ -77,9 +79,8 @@ def main(argv):
     return 0
 
 
-if '__main__' == __name__:
+if __name__ == '__main__':
     try:
         sys.exit(main(sys.argv[1:]))
     except KeyboardInterrupt:
-        sys.stderr.write('interrupted\n')
-        sys.exit(1)
+        sys.exit('interrupted')

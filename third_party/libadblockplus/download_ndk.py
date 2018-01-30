@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import os
 import urllib
 import zipfile
@@ -41,12 +43,9 @@ def main(argv):
     # Delete zip
     os.remove(ndk_dst)
 
-    return 0
 
-
-if '__main__' == __name__:
+if __name__ == '__main__':
     try:
-        sys.exit(main(sys.argv[1:]))
+        main(sys.argv[1:])
     except KeyboardInterrupt:
-        sys.stderr.write('interrupted\n')
-        sys.exit(1)
+        sys.exit('interrupted')
