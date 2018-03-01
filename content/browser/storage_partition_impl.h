@@ -15,8 +15,8 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/process/process_handle.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
-#include "content/browser/background_fetch/background_fetch_context.h"
 #include "content/browser/background_sync/background_sync_context.h"
 #include "content/browser/blob_storage/blob_url_loader_factory.h"
 #include "content/browser/bluetooth/bluetooth_allowed_devices_map.h"
@@ -42,6 +42,8 @@
 #endif
 
 namespace content {
+
+class BackgroundFetchContext;
 class BlobRegistryWrapper;
 class BlobURLLoaderFactory;
 
@@ -74,6 +76,7 @@ class CONTENT_EXPORT StoragePartitionImpl
   net::URLRequestContextGetter* GetURLRequestContext() override;
   net::URLRequestContextGetter* GetMediaURLRequestContext() override;
   mojom::NetworkContext* GetNetworkContext() override;
+  mojom::URLLoaderFactory* GetURLLoaderFactoryForBrowserProcess() override;
   storage::QuotaManager* GetQuotaManager() override;
   ChromeAppCacheService* GetAppCacheService() override;
   storage::FileSystemContext* GetFileSystemContext() override;
@@ -271,6 +274,11 @@ class CONTENT_EXPORT StoragePartitionImpl
   // provided by the embedder, or is created by the StoragePartition and owned
   // by |network_context_owner_|.
   mojom::NetworkContextPtr network_context_;
+
+  // URLLoaderFactory for use in the browser process only. See the method
+  // comment for StoragePartition::GetURLLoaderFactoryForBrowserProcess() for
+  // more details
+  mojom::URLLoaderFactoryPtr url_loader_factory_for_browser_process_;
 
   // When the network service is disabled, a NetworkContext is created on the IO
   // thread that wraps access to the URLRequestContext.

@@ -240,7 +240,7 @@ InspectorLayerTreeAgent::InspectorLayerTreeAgent(
 
 InspectorLayerTreeAgent::~InspectorLayerTreeAgent() {}
 
-DEFINE_TRACE(InspectorLayerTreeAgent) {
+void InspectorLayerTreeAgent::Trace(blink::Visitor* visitor) {
   visitor->Trace(inspected_frames_);
   InspectorBaseAgent::Trace(visitor);
 }
@@ -301,6 +301,7 @@ InspectorLayerTreeAgent::BuildLayerTree() {
   BuildLayerIdToNodeIdMap(compositor->RootLayer(), layer_id_to_node_id_map);
   int scrolling_layer_id = inspected_frames_->Root()
                                ->View()
+                               ->LayoutViewportScrollableArea()
                                ->LayerForScrolling()
                                ->PlatformLayer()
                                ->Id();
@@ -436,13 +437,24 @@ Response InspectorLayerTreeAgent::makeSnapshot(const String& layer_id,
 
   IntRect interest_rect(IntPoint(0, 0), size);
   suppress_layer_paint_events_ = true;
+
+  inspected_frames_->Root()->View()->UpdateAllLifecyclePhasesExceptPaint();
+  for (auto frame = inspected_frames_->begin();
+       frame != inspected_frames_->end(); ++frame) {
+    frame->GetDocument()->Lifecycle().AdvanceTo(DocumentLifecycle::kInPaint);
+  }
   layer->Paint(&interest_rect);
+  for (auto frame = inspected_frames_->begin();
+       frame != inspected_frames_->end(); ++frame) {
+    frame->GetDocument()->Lifecycle().AdvanceTo(DocumentLifecycle::kPaintClean);
+  }
+
   suppress_layer_paint_events_ = false;
 
   GraphicsContext context(layer->GetPaintController());
   context.BeginRecording(interest_rect);
-  layer->GetPaintController().GetPaintArtifact().Replay(interest_rect, context);
-  RefPtr<PictureSnapshot> snapshot = AdoptRef(
+  layer->GetPaintController().GetPaintArtifact().Replay(context);
+  scoped_refptr<PictureSnapshot> snapshot = WTF::AdoptRef(
       new PictureSnapshot(ToSkPicture(context.EndRecording(), interest_rect)));
 
   *snapshot_id = String::Number(++last_snapshot_id_);
@@ -456,16 +468,17 @@ Response InspectorLayerTreeAgent::loadSnapshot(
     String* snapshot_id) {
   if (!tiles->length())
     return Response::Error("Invalid argument, no tiles provided");
-  Vector<RefPtr<PictureSnapshot::TilePictureStream>> decoded_tiles;
+  Vector<scoped_refptr<PictureSnapshot::TilePictureStream>> decoded_tiles;
   decoded_tiles.Grow(tiles->length());
   for (size_t i = 0; i < tiles->length(); ++i) {
     protocol::LayerTree::PictureTile* tile = tiles->get(i);
-    decoded_tiles[i] = AdoptRef(new PictureSnapshot::TilePictureStream());
+    decoded_tiles[i] = WTF::AdoptRef(new PictureSnapshot::TilePictureStream());
     decoded_tiles[i]->layer_offset.Set(tile->getX(), tile->getY());
     if (!Base64Decode(tile->getPicture(), decoded_tiles[i]->data))
       return Response::Error("Invalid base64 encoding");
   }
-  RefPtr<PictureSnapshot> snapshot = PictureSnapshot::Load(decoded_tiles);
+  scoped_refptr<PictureSnapshot> snapshot =
+      PictureSnapshot::Load(decoded_tiles);
   if (!snapshot)
     return Response::Error("Invalid snapshot format");
   if (snapshot->IsEmpty())
@@ -491,7 +504,7 @@ Response InspectorLayerTreeAgent::GetSnapshotById(
   SnapshotById::iterator it = snapshot_by_id_.find(snapshot_id);
   if (it == snapshot_by_id_.end())
     return Response::Error("Snapshot not found");
-  result = it->value.Get();
+  result = it->value.get();
   return Response::OK();
 }
 
@@ -536,7 +549,7 @@ Response InspectorLayerTreeAgent::profileSnapshot(
     ParseRect(clip_rect.fromJust(), &rect);
   std::unique_ptr<PictureSnapshot::Timings> timings = snapshot->Profile(
       min_repeat_count.fromMaybe(1), min_duration.fromMaybe(0),
-      clip_rect.isJust() ? &rect : 0);
+      clip_rect.isJust() ? &rect : nullptr);
   *out_timings = Array<Array<double>>::create();
   for (size_t i = 0; i < timings->size(); ++i) {
     const Vector<double>& row = (*timings)[i];

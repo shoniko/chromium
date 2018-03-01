@@ -21,6 +21,7 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
@@ -43,8 +44,7 @@ import java.util.concurrent.TimeoutException;
  * Tests the behavior of the bottom sheet when used with the back button.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({BottomSheetTestRule.ENABLE_CHROME_HOME,
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
         BottomSheetTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
 @Restriction(UiRestriction.RESTRICTION_TYPE_PHONE) // ChromeHome is only enabled on phones
 public class BottomSheetBackBehaviorTest {
@@ -128,7 +128,7 @@ public class BottomSheetBackBehaviorTest {
 
         assertEquals("The bottom sheet should be peeking.", BottomSheet.SHEET_STATE_PEEK,
                 mBottomSheet.getSheetState());
-        assertFalse("Chrome should no longer have focus.", mActivity.hasWindowFocus());
+        waitForClose();
     }
 
     @Test
@@ -164,7 +164,7 @@ public class BottomSheetBackBehaviorTest {
 
         assertEquals("The bottom sheet should be peeking.", BottomSheet.SHEET_STATE_PEEK,
                 mBottomSheet.getSheetState());
-        assertFalse("Chrome should no longer have focus.", mActivity.hasWindowFocus());
+        waitForClose();
     }
 
     @Test
@@ -197,8 +197,8 @@ public class BottomSheetBackBehaviorTest {
             throws ExecutionException, InterruptedException, TimeoutException {
         final Tab tab = mBottomSheet.getActiveTab();
 
-        EmbeddedTestServer testServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        EmbeddedTestServer testServer =
+                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
 
         String testUrl = testServer.getURL(TEST_PAGE);
         ChromeTabUtils.loadUrlOnUiThread(tab, testUrl);
@@ -228,10 +228,11 @@ public class BottomSheetBackBehaviorTest {
 
     @Test
     @SmallTest
+    @DisabledTest(message = "crbug.com/766350")
     public void testBackButton_backFromExternalNewTab()
             throws InterruptedException, TimeoutException {
-        EmbeddedTestServer testServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        EmbeddedTestServer testServer =
+                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         launchNewTabFromExternalApp(testServer.getURL(TEST_PAGE));
 
         // Back button should send Chrome to the background.
@@ -240,7 +241,7 @@ public class BottomSheetBackBehaviorTest {
 
         assertEquals("The bottom sheet should be peeking.", BottomSheet.SHEET_STATE_PEEK,
                 mBottomSheet.getSheetState());
-        assertFalse("Chrome should no longer have focus.", mActivity.hasWindowFocus());
+        waitForClose();
     }
 
     /**
@@ -332,6 +333,17 @@ public class BottomSheetBackBehaviorTest {
             @Override
             public void run() {
                 mBottomSheet.endAnimations();
+            }
+        });
+    }
+
+    /** Wait until Chrome doesn't have window focus. */
+    private void waitForClose() {
+        // It takes some time for Chrome to completely close.
+        CriteriaHelper.pollUiThread(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                return !mActivity.hasWindowFocus();
             }
         });
     }

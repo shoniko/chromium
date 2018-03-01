@@ -19,6 +19,11 @@ void LevelDBWrapperImpl::Delegate::MigrateData(
   std::move(callback).Run(nullptr);
 }
 
+std::vector<LevelDBWrapperImpl::Change> LevelDBWrapperImpl::Delegate::FixUpData(
+    const ValueMap& data) {
+  return std::vector<Change>();
+}
+
 void LevelDBWrapperImpl::Delegate::OnMapLoaded(leveldb::mojom::DatabaseError) {}
 
 bool LevelDBWrapperImpl::s_aggressive_flushing_enabled_ = false;
@@ -141,13 +146,16 @@ void LevelDBWrapperImpl::AddObserver(
   observers_.AddPtr(std::move(observer_ptr));
 }
 
-void LevelDBWrapperImpl::Put(const std::vector<uint8_t>& key,
-                             const std::vector<uint8_t>& value,
-                             const std::string& source,
-                             PutCallback callback) {
+void LevelDBWrapperImpl::Put(
+    const std::vector<uint8_t>& key,
+    const std::vector<uint8_t>& value,
+    const base::Optional<std::vector<uint8_t>>& client_old_value,
+    const std::string& source,
+    PutCallback callback) {
   if (!map_) {
     LoadMap(base::Bind(&LevelDBWrapperImpl::Put, base::Unretained(this), key,
-                       value, source, base::Passed(&callback)));
+                       value, client_old_value, source,
+                       base::Passed(&callback)));
     return;
   }
 
@@ -178,9 +186,8 @@ void LevelDBWrapperImpl::Put(const std::vector<uint8_t>& key,
   }
 
   std::vector<uint8_t> old_value;
-  if (has_old_item) {
+  if (has_old_item)
     old_value.swap((*map_)[key]);
-  }
   (*map_)[key] = value;
   bytes_used_ = new_bytes_used;
   if (!has_old_item) {
@@ -199,12 +206,14 @@ void LevelDBWrapperImpl::Put(const std::vector<uint8_t>& key,
   std::move(callback).Run(true);
 }
 
-void LevelDBWrapperImpl::Delete(const std::vector<uint8_t>& key,
-                                const std::string& source,
-                                DeleteCallback callback) {
+void LevelDBWrapperImpl::Delete(
+    const std::vector<uint8_t>& key,
+    const base::Optional<std::vector<uint8_t>>& client_old_value,
+    const std::string& source,
+    DeleteCallback callback) {
   if (!map_) {
     LoadMap(base::Bind(&LevelDBWrapperImpl::Delete, base::Unretained(this), key,
-                       source, base::Passed(&callback)));
+                       client_old_value, source, base::Passed(&callback)));
     return;
   }
 
@@ -346,6 +355,31 @@ void LevelDBWrapperImpl::OnMapLoaded(
     bytes_used_ += it->key.size() - prefix_.size() + it->value.size();
   }
 
+  std::vector<Change> changes = delegate_->FixUpData(*map_);
+  if (!changes.empty()) {
+    DCHECK(database_);
+    CreateCommitBatchIfNeeded();
+    for (auto& change : changes) {
+      auto it = map_->find(change.first);
+      if (!change.second) {
+        DCHECK(it != map_->end());
+        bytes_used_ -= it->first.size() + it->second.size();
+        map_->erase(it);
+      } else {
+        if (it != map_->end()) {
+          bytes_used_ -= it->second.size();
+          it->second = std::move(*change.second);
+          bytes_used_ += it->second.size();
+        } else {
+          bytes_used_ += change.first.size() + change.second->size();
+          (*map_)[change.first] = std::move(*change.second);
+        }
+      }
+      commit_batch_->changed_keys.insert(std::move(change.first));
+    }
+    CommitChanges();
+  }
+
   // We proceed without using a backing store, nothing will be persisted but the
   // class is functional for the lifetime of the object.
   delegate_->OnMapLoaded(status);
@@ -425,10 +459,13 @@ base::TimeDelta LevelDBWrapperImpl::ComputeCommitDelay() const {
 }
 
 void LevelDBWrapperImpl::CommitChanges() {
-  DCHECK(database_);
-  DCHECK(map_);
+  // Note: commit_batch_ may be null if ScheduleImmediateCommit was called
+  // after a delayed commit task was scheduled.
   if (!commit_batch_)
     return;
+
+  DCHECK(database_);
+  DCHECK(map_);
 
   commit_rate_limiter_.add_samples(1);
 
@@ -443,7 +480,7 @@ void LevelDBWrapperImpl::CommitChanges() {
     operations.push_back(std::move(item));
   }
   size_t data_size = 0;
-  for (const auto& key: commit_batch_->changed_keys) {
+  for (const auto& key : commit_batch_->changed_keys) {
     data_size += key.size();
     leveldb::mojom::BatchedOperationPtr item =
         leveldb::mojom::BatchedOperation::New();

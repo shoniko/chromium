@@ -6,11 +6,14 @@ cr.define('extensions', function() {
   const ItemList = Polymer({
     is: 'extensions-item-list',
 
-    behaviors: [Polymer.IronResizableBehavior],
+    behaviors: [CrContainerShadowBehavior],
 
     properties: {
-      /** @type {Array<!chrome.developerPrivate.ExtensionInfo>} */
-      items: Array,
+      /** @type {!Array<!chrome.developerPrivate.ExtensionInfo>} */
+      apps: Array,
+
+      /** @type {!Array<!chrome.developerPrivate.ExtensionInfo>} */
+      extensions: Array,
 
       /** @type {extensions.ItemDelegate} */
       delegate: Object,
@@ -20,56 +23,45 @@ cr.define('extensions', function() {
         value: false,
       },
 
+      isGuest: Boolean,
+
       filter: String,
 
-      /** @private {Array<!chrome.developerPrivate.ExtensionInfo>} */
-      shownItems_: {
+      /** @private {!Array<!chrome.developerPrivate.ExtensionInfo>} */
+      shownApps_: {
         type: Array,
-        computed: 'computeShownItems_(items.*, filter)',
+        computed: 'computeShownItems_(apps, apps.*, filter)',
+      },
+
+      /** @private {!Array<!chrome.developerPrivate.ExtensionInfo>} */
+      shownExtensions_: {
+        type: Array,
+        computed: 'computeShownItems_(extensions, extensions.*, filter)',
       }
-    },
-
-    listeners: {
-      'list.extension-item-size-changed': 'itemSizeChanged_',
-      'view-enter-start': 'onViewEnterStart_',
-    },
-
-    /**
-     * Updates the size for a given item.
-     * @param {CustomEvent} e
-     * @private
-     * @suppress {checkTypes} Closure doesn't know $.list is an IronList.
-     */
-    itemSizeChanged_: function(e) {
-      this.$.list.updateSizeForItem(e.detail.item);
-      this.fire('resize');
     },
 
     /**
      * Computes the list of items to be shown.
-     * @param {Object} changeRecord The changeRecord for |items|.
-     * @param {string} filter The updated filter string.
-     * @return {Array<!chrome.developerPrivate.ExtensionInfo>}
+     * @param {!Array<!chrome.developerPrivate.ExtensionInfo>} items
+     * @return {!Array<!chrome.developerPrivate.ExtensionInfo>}
      * @private
      */
-    computeShownItems_: function(changeRecord, filter) {
-      return this.items.filter(function(item) {
-        return item.name.toLowerCase().includes(this.filter.toLowerCase());
-      }, this);
-    },
-
-    shouldShowEmptyItemsMessage_: function() {
-      return this.items.length === 0;
-    },
-
-    shouldShowEmptySearchMessage_: function() {
-      return !this.shouldShowEmptyItemsMessage_() &&
-          this.shownItems_.length === 0;
+    computeShownItems_: function(items) {
+      const formattedFilter = this.filter.trim().toLowerCase();
+      return items.filter(
+          item => item.name.toLowerCase().includes(formattedFilter));
     },
 
     /** @private */
-    onViewEnterStart_: function() {
-      this.fire('resize');  // This is needed to correctly render iron-list.
+    shouldShowEmptyItemsMessage_: function() {
+      return !this.isGuest && this.apps.length === 0 &&
+          this.extensions.length === 0;
+    },
+
+    /** @private */
+    shouldShowEmptySearchMessage_: function() {
+      return !this.isGuest && !this.shouldShowEmptyItemsMessage_() &&
+          this.shownApps_.length === 0 && this.shownExtensions_.length === 0;
     },
   });
 

@@ -34,7 +34,7 @@ class PluginInfo;
 class PLATFORM_EXPORT MimeClassInfo final
     : public GarbageCollectedFinalized<MimeClassInfo> {
  public:
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   MimeClassInfo(const String& type, const String& desc, PluginInfo&);
 
@@ -56,12 +56,13 @@ class PLATFORM_EXPORT MimeClassInfo final
 class PLATFORM_EXPORT PluginInfo final
     : public GarbageCollectedFinalized<PluginInfo> {
  public:
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   PluginInfo(const String& name, const String& filename, const String& desc);
 
   void AddMimeType(MimeClassInfo*);
 
+  const HeapVector<Member<MimeClassInfo>>& Mimes() const { return mimes_; }
   const MimeClassInfo* GetMimeClassInfo(size_t index) const;
   const MimeClassInfo* GetMimeClassInfo(const String& type) const;
   size_t GetMimeClassInfoSize() const;
@@ -86,13 +87,13 @@ class PLATFORM_EXPORT PluginData final
   WTF_MAKE_NONCOPYABLE(PluginData);
 
  public:
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   static PluginData* Create() { return new PluginData(); }
 
   const HeapVector<Member<PluginInfo>>& Plugins() const { return plugins_; }
   const HeapVector<Member<MimeClassInfo>>& Mimes() const { return mimes_; }
-  const SecurityOrigin* Origin() const { return main_frame_origin_.Get(); }
+  const SecurityOrigin* Origin() const { return main_frame_origin_.get(); }
   void UpdatePluginList(SecurityOrigin* main_frame_origin);
   void ResetPluginData();
 

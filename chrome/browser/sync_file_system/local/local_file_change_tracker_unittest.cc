@@ -21,12 +21,12 @@
 #include "chrome/browser/sync_file_system/sync_status_code.h"
 #include "chrome/browser/sync_file_system/syncable_file_system_util.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/test_utils.h"
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/quota/quota_manager.h"
 #include "storage/browser/test/mock_blob_url_request_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/leveldatabase/src/helpers/memenv/memenv.h"
-#include "third_party/leveldatabase/src/include/leveldb/env.h"
+#include "third_party/leveldatabase/leveldb_chrome.h"
 
 using content::MockBlobURLRequestContext;
 using content::ScopedTextBlob;
@@ -40,7 +40,7 @@ class LocalFileChangeTrackerTest : public testing::Test {
  public:
   LocalFileChangeTrackerTest()
       : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
-        in_memory_env_(leveldb::NewMemEnv(leveldb::Env::Default())),
+        in_memory_env_(leveldb_chrome::NewMemEnv(leveldb::Env::Default())),
         file_system_(GURL("http://example.com"),
                      in_memory_env_.get(),
                      base::ThreadTaskRunnerHandle::Get().get(),
@@ -63,7 +63,7 @@ class LocalFileChangeTrackerTest : public testing::Test {
     sync_context_->ShutdownOnUIThread();
     sync_context_ = nullptr;
 
-    base::RunLoop().RunUntilIdle();
+    content::RunAllTasksUntilIdle();
     file_system_.TearDown();
     // Make sure we don't leave the external filesystem.
     // (CannedSyncableFileSystem::TearDown does not do this as there may be

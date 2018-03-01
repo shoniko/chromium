@@ -37,11 +37,6 @@
 #ifndef CONTENT_COMMON_CLIPBOARD_MESSAGES_H_
 #error "Failed to include content/common/clipboard_messages.h"
 #endif
-#undef CONTENT_COMMON_DATABASE_MESSAGES_H_
-#include "content/common/database_messages.h"
-#ifndef CONTENT_COMMON_DATABASE_MESSAGES_H_
-#error "Failed to include content/common/database_messages.h"
-#endif
 #undef CONTENT_COMMON_DEVTOOLS_MESSAGES_H_
 #include "content/common/devtools_messages.h"
 #ifndef CONTENT_COMMON_DEVTOOLS_MESSAGES_H_
@@ -58,11 +53,6 @@
 #error "Failed to include content/common/drag_messages.h"
 #endif
 #include "content/common/drag_traits.h"
-#undef CONTENT_COMMON_FILE_UTILITIES_MESSAGES_H_
-#include "content/common/file_utilities_messages.h"
-#ifndef CONTENT_COMMON_FILE_UTILITIES_MESSAGES_H_
-#error "Failed to include content/common/file_utilities_messages.h"
-#endif
 #undef CONTENT_COMMON_FILEAPI_FILE_SYSTEM_MESSAGES_H_
 #include "content/common/fileapi/file_system_messages.h"
 #ifndef CONTENT_COMMON_FILEAPI_FILE_SYSTEM_MESSAGES_H_
@@ -166,11 +156,6 @@
 #include "content/common/view_messages.h"
 #ifndef CONTENT_COMMON_VIEW_MESSAGES_H_
 #error "Failed to include content/common/view_messages.h"
-#endif
-#undef CONTENT_COMMON_WORKER_MESSAGES_H_
-#include "content/common/worker_messages.h"
-#ifndef CONTENT_COMMON_WORKER_MESSAGES_H_
-#error "Failed to include content/common/worker_messages.h"
 #endif
 #include "media/media_features.h"
 

@@ -21,8 +21,9 @@ using DeviceList = std::vector<const ui::TouchscreenDevice*>;
 // Helper method to associate |display| and |device|.
 void Associate(ManagedDisplayInfo* display,
                const ui::TouchscreenDevice* device) {
-  display->AddInputDevice(device->id);
-  display->set_touch_support(Display::TOUCH_SUPPORT_AVAILABLE);
+  uint32_t touch_device_identifier =
+      TouchCalibrationData::GenerateTouchDeviceIdentifier(*device);
+  display->AddTouchDevice(touch_device_identifier);
 }
 
 // Returns true if |path| is likely a USB device.
@@ -140,7 +141,7 @@ void AssociateInternalDevices(DisplayInfoList* displays, DeviceList* devices) {
   VLOG(2) << "Trying to match internal devices (" << displays->size()
           << " displays and " << devices->size() << " devices to match)";
 
-  // Internal device assocation has a couple of gotchas:
+  // Internal device association has a couple of gotchas:
   // - There can be internal devices but no internal display, or visa-versa.
   // - There can be multiple internal devices matching one internal display. We
   //   assume there is at most one internal display.
@@ -261,7 +262,7 @@ void AssociateTouchscreens(
   // Construct our initial set of display/devices that we will process.
   DisplayInfoList displays;
   for (ManagedDisplayInfo& display : *all_displays) {
-    display.ClearInputDevices();
+    display.ClearTouchDevices();
 
     if (display.GetNativeModeSize().IsEmpty()) {
       VLOG(2) << "Will not match display " << display.id()

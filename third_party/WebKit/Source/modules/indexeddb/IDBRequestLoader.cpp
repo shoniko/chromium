@@ -14,8 +14,9 @@
 
 namespace blink {
 
-IDBRequestLoader::IDBRequestLoader(IDBRequestQueueItem* queue_item,
-                                   Vector<RefPtr<IDBValue>>* result_values)
+IDBRequestLoader::IDBRequestLoader(
+    IDBRequestQueueItem* queue_item,
+    Vector<scoped_refptr<IDBValue>>* result_values)
     : queue_item_(queue_item), values_(result_values) {
   DCHECK(IDBValueUnwrapper::IsWrapped(*values_));
   loader_ = FileReaderLoader::Create(FileReaderLoader::kReadByClient, this);
@@ -59,7 +60,7 @@ void IDBRequestLoader::StartNextValue() {
       ReportSuccess();
       return;
     }
-    if (unwrapper.Parse(current_value_->Get()))
+    if (unwrapper.Parse(current_value_->get()))
       break;
     ++current_value_;
   }
@@ -102,7 +103,7 @@ void IDBRequestLoader::DidFinishLoading() {
 #endif  // DCHECK_IS_ON()
 
   *current_value_ = IDBValueUnwrapper::Unwrap(
-      current_value_->Get(), SharedBuffer::AdoptVector(wrapped_data_));
+      current_value_->get(), SharedBuffer::AdoptVector(wrapped_data_));
   ++current_value_;
 
   StartNextValue();

@@ -85,22 +85,20 @@ Polymer({
     if (!this.networkProperties)
       return;
 
+    var properties = this.networkProperties;
     if (newValue.GUID != (oldValue && oldValue.GUID))
       this.savedStaticIp_ = undefined;
 
     // Update the 'automatic' property.
-    if (this.networkProperties.IPAddressConfigType) {
-      var ipConfigType =
-          CrOnc.getActiveValue(this.networkProperties.IPAddressConfigType);
+    if (properties.IPAddressConfigType) {
+      var ipConfigType = CrOnc.getActiveValue(properties.IPAddressConfigType);
       this.automatic_ = (ipConfigType != CrOnc.IPConfigType.STATIC);
     }
 
-    if (this.networkProperties.IPConfigs) {
+    if (properties.IPConfigs || properties.StaticIPConfig) {
       // Update the 'ipConfig' property.
-      var ipv4 =
-          CrOnc.getIPConfigForType(this.networkProperties, CrOnc.IPType.IPV4);
-      var ipv6 =
-          CrOnc.getIPConfigForType(this.networkProperties, CrOnc.IPType.IPV6);
+      var ipv4 = CrOnc.getIPConfigForType(properties, CrOnc.IPType.IPV4);
+      var ipv6 = CrOnc.getIPConfigForType(properties, CrOnc.IPType.IPV6);
       this.ipConfig_ = {
         ipv4: this.getIPConfigUIProperties_(ipv4),
         ipv6: this.getIPConfigUIProperties_(ipv6)
@@ -113,15 +111,18 @@ Polymer({
   /** @private */
   automaticChanged_: function() {
     if (!this.automatic_) {
-      // Ensure that there is a valid IPConfig object.
-      this.ipConfig_ = this.ipConfig_ || {
-        ipv4: {
-          Gateway: '192.168.1.1',
-          IPAddress: '192.168.1.1',
-          RoutingPrefix: '255.255.255.0',
-          Type: CrOnc.IPType.IPV4,
-        },
+      var defaultIpv4 = {
+        Gateway: '192.168.1.1',
+        IPAddress: '192.168.1.1',
+        RoutingPrefix: '255.255.255.0',
+        Type: CrOnc.IPType.IPV4,
       };
+      // Ensure that there is a valid IPConfig object. Copy any set properties
+      // over the default properties to ensure all properties are set.
+      if (this.ipConfig_)
+        this.ipConfig_.ipv4 = Object.assign(defaultIpv4, this.ipConfig_.ipv4);
+      else
+        this.ipConfig_ = {ipv4: defaultIpv4};
       this.sendStaticIpConfig_();
       return;
     }

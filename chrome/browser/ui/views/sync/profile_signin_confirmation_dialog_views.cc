@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/harmony/chrome_typography.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
@@ -169,7 +170,7 @@ void ProfileSigninConfirmationDialogViews::ViewHierarchyChanged(
   prompt_label->SetDisplayedOnBackgroundColor(kPromptBarBackgroundColor);
 
   views::StyledLabel::RangeStyleInfo bold_style;
-  bold_style.weight = gfx::Font::Weight::BOLD;
+  bold_style.text_style = STYLE_EMPHASIZED;
   prompt_label->AddStyleRange(
       gfx::Range(offset, offset + domain.size()), bold_style);
 
@@ -200,8 +201,8 @@ void ProfileSigninConfirmationDialogViews::ViewHierarchyChanged(
 
   // Layout the components.
   const gfx::Insets content_insets =
-      views::LayoutProvider::Get()->GetInsetsMetric(
-          views::INSETS_DIALOG_CONTENTS);
+      views::LayoutProvider::Get()->GetDialogInsetsForContentType(
+          views::CONTROL, views::TEXT);
   // The prompt bar needs to go to the edge of the dialog, so remove horizontal
   // insets.
   SetBorder(views::CreateEmptyBorder(content_insets.top(), 0,
@@ -213,7 +214,7 @@ void ProfileSigninConfirmationDialogViews::ViewHierarchyChanged(
       views::GridLayout::CreateAndInstall(prompt_bar);
   prompt_bar->SetBorder(
       views::CreateEmptyBorder(ChromeLayoutProvider::Get()->GetInsetsMetric(
-          views::INSETS_DIALOG_CONTENTS)));
+          views::INSETS_DIALOG_SUBSECTION)));
   constexpr int kPromptBarColumnSetId = 0;
   prompt_layout->AddColumnSet(kPromptBarColumnSetId)
       ->AddColumn(views::GridLayout::FILL, views::GridLayout::CENTER, 100,

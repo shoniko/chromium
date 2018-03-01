@@ -4,13 +4,12 @@
 
 #include "ash/mus/shell_delegate_mus.h"
 
+#include <memory>
 #include <utility>
 
-#include "ash/default_accessibility_delegate.h"
+#include "ash/accessibility/default_accessibility_delegate.h"
 #include "ash/gpu_support_stub.h"
 #include "ash/mus/wallpaper_delegate_mus.h"
-#include "ash/palette_delegate.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "components/user_manager/user_info_impl.h"
@@ -27,16 +26,6 @@ ShellDelegateMus::~ShellDelegateMus() {}
 
 service_manager::Connector* ShellDelegateMus::GetShellConnector() const {
   return connector_;
-}
-
-bool ShellDelegateMus::IsIncognitoAllowed() const {
-  NOTIMPLEMENTED();
-  return false;
-}
-
-bool ShellDelegateMus::IsMultiProfilesEnabled() const {
-  NOTIMPLEMENTED();
-  return true;  // For manual testing of multi-profile under mash.
 }
 
 bool ShellDelegateMus::IsRunningInForcedAppMode() const {
@@ -62,24 +51,12 @@ void ShellDelegateMus::PreShutdown() {
   NOTIMPLEMENTED();
 }
 
-void ShellDelegateMus::Exit() {
-  NOTIMPLEMENTED();
-}
-
 std::unique_ptr<keyboard::KeyboardUI> ShellDelegateMus::CreateKeyboardUI() {
   NOTIMPLEMENTED();
   return nullptr;
 }
 
 void ShellDelegateMus::OpenUrlFromArc(const GURL& url) {
-  NOTIMPLEMENTED();
-}
-
-void ShellDelegateMus::ShelfInit() {
-  NOTIMPLEMENTED();
-}
-
-void ShellDelegateMus::ShelfShutdown() {
   NOTIMPLEMENTED();
 }
 
@@ -91,17 +68,11 @@ NetworkingConfigDelegate* ShellDelegateMus::GetNetworkingConfigDelegate() {
 }
 
 std::unique_ptr<WallpaperDelegate> ShellDelegateMus::CreateWallpaperDelegate() {
-  return base::MakeUnique<WallpaperDelegateMus>();
+  return std::make_unique<WallpaperDelegateMus>();
 }
 
 AccessibilityDelegate* ShellDelegateMus::CreateAccessibilityDelegate() {
   return new DefaultAccessibilityDelegate;
-}
-
-std::unique_ptr<PaletteDelegate> ShellDelegateMus::CreatePaletteDelegate() {
-  // TODO: http://crbug.com/647417.
-  NOTIMPLEMENTED();
-  return nullptr;
 }
 
 GPUSupport* ShellDelegateMus::CreateGPUSupport() {
@@ -120,17 +91,6 @@ gfx::Image ShellDelegateMus::GetDeprecatedAcceleratorImage() const {
   return gfx::Image();
 }
 
-bool ShellDelegateMus::GetTouchscreenEnabled(
-    TouchscreenEnabledSource source) const {
-  NOTIMPLEMENTED();
-  return true;
-}
-
-void ShellDelegateMus::SetTouchscreenEnabled(bool enabled,
-                                             TouchscreenEnabledSource source) {
-  NOTIMPLEMENTED();
-}
-
 ui::InputDeviceControllerClient*
 ShellDelegateMus::GetInputDeviceControllerClient() {
   if (!connector_)
@@ -138,7 +98,7 @@ ShellDelegateMus::GetInputDeviceControllerClient() {
 
   if (!input_device_controller_client_) {
     input_device_controller_client_ =
-        base::MakeUnique<ui::InputDeviceControllerClient>(connector_);
+        std::make_unique<ui::InputDeviceControllerClient>(connector_);
   }
   return input_device_controller_client_.get();
 }

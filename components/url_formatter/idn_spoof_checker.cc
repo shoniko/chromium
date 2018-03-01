@@ -64,13 +64,14 @@ IDNSpoofChecker::IDNSpoofChecker() {
   // MIXED_SCRIPT_CONFUSABLE, WHOLE_SCRIPT_CONFUSABLE, MIXED_NUMBERS, ANY_CASE})
   // This default configuration is adjusted below as necessary.
 
-  // Set the restriction level to moderate. It allows mixing Latin with another
-  // script (+ COMMON and INHERITED). Except for Chinese(Han + Bopomofo),
-  // Japanese(Hiragana + Katakana + Han), and Korean(Hangul + Han), only one
-  // script other than Common and Inherited can be mixed with Latin. Cyrillic
-  // and Greek are not allowed to mix with Latin.
+  // Set the restriction level to high. It allows mixing Latin with one logical
+  // CJK script (+ COMMON and INHERITED), but does not allow any other script
+  // mixing (e.g. Latin + Cyrillic, Latin + Armenian, Cyrillic + Greek). Note
+  // that each of {Han + Bopomofo} for Chinese, {Hiragana, Katakana, Han} for
+  // Japanese, and {Hangul, Han} for Korean is treated as a single logical
+  // script.
   // See http://www.unicode.org/reports/tr39/#Restriction_Level_Detection
-  uspoof_setRestrictionLevel(checker_, USPOOF_MODERATELY_RESTRICTIVE);
+  uspoof_setRestrictionLevel(checker_, USPOOF_HIGHLY_RESTRICTIVE);
 
   // Sets allowed characters in IDN labels and turns on USPOOF_CHAR_LIMIT.
   SetAllowedUnicodeSet(&status);
@@ -156,7 +157,7 @@ bool IDNSpoofChecker::SafeToDisplayAsUnicode(base::StringPiece16 label,
   UErrorCode status = U_ZERO_ERROR;
   int32_t result =
       uspoof_check(checker_, label.data(),
-                   base::checked_cast<int32_t>(label.size()), NULL, &status);
+                   base::checked_cast<int32_t>(label.size()), nullptr, &status);
   // If uspoof_check fails (due to library failure), or if any of the checks
   // fail, treat the IDN as unsafe.
   if (U_FAILURE(status) || (result & USPOOF_ALL_CHECKS))
@@ -234,14 +235,11 @@ bool IDNSpoofChecker::SafeToDisplayAsUnicode(base::StringPiece16 label,
     //   label otherwise entirely in Katakna or Hiragana.
     // - Disallow U+0585 (Armenian Small Letter Oh) and U+0581 (Armenian Small
     //   Letter Co) to be next to Latin.
-    // - Disallow Latin 'o' and 'g' next to Armenian.
-    // - Disalow mixing of Latin and Canadian Syllabary.
-    // - Disalow mixing of Latin and Tifinagh.
     // - Disallow combining diacritical mark (U+0300-U+0339) after a non-LGC
     //   character. Other combining diacritical marks are not in the allowed
     //   character set.
-    // - Disallow Arabic non-spacing marks after non-Arabic characters.
-    // - Disallow Hebrew non-spacing marks after non-Hebrew characters.
+    // - Disallow U+0307 (dot above) after 'i', 'j', 'l' or dotless i (U+0131).
+    //   Dotless j (U+0237) is not in the allowed set to begin with.
     dangerous_pattern = new icu::RegexMatcher(
         icu::UnicodeString(
             R"([^\p{scx=kana}\p{scx=hira}\p{scx=hani}])"
@@ -252,15 +250,8 @@ bool IDNSpoofChecker::SafeToDisplayAsUnicode(base::StringPiece16 label,
             R"(^[\p{scx=kana}]+[\u3078-\u307a][\p{scx=kana}]+$|)"
             R"(^[\p{scx=hira}]+[\u30d8-\u30da][\p{scx=hira}]+$|)"
             R"([a-z]\u30fb|\u30fb[a-z]|)"
-            R"(^[\u0585\u0581]+[a-z]|[a-z][\u0585\u0581]+$|)"
-            R"([a-z][\u0585\u0581]+[a-z]|)"
-            R"(^[og]+[\p{scx=armn}]|[\p{scx=armn}][og]+$|)"
-            R"([\p{scx=armn}][og]+[\p{scx=armn}]|)"
-            R"([\p{sc=cans}].*[a-z]|[a-z].*[\p{sc=cans}]|)"
-            R"([\p{sc=tfng}].*[a-z]|[a-z].*[\p{sc=tfng}]|)"
             R"([^\p{scx=latn}\p{scx=grek}\p{scx=cyrl}][\u0300-\u0339]|)"
-            R"([^\p{scx=arab}][\u064b-\u0655\u0670]|)"
-            R"([^\p{scx=hebr}]\u05b4)",
+            R"([ijl\u0131]\u0307)",
             -1, US_INV),
         0, status);
     tls_index.Set(dangerous_pattern);
@@ -327,39 +318,6 @@ void IDNSpoofChecker::SetAllowedUnicodeSet(UErrorCode* status) {
   allowed_set.addAll(*recommended_set);
   const icu::UnicodeSet* inclusion_set = uspoof_getInclusionUnicodeSet(status);
   allowed_set.addAll(*inclusion_set);
-
-// Five aspirational scripts are taken from UTR 31 Table 6 at
-// http://www.unicode.org/reports/tr31/#Aspirational_Use_Scripts .
-// Not all the characters of aspirational scripts are suitable for
-// identifiers. Therefore, only characters belonging to
-// [:Identifier_Type=Aspirational:] (listed in 'Status/Type=Aspirational'
-// section at
-// http://www.unicode.org/Public/security/latest/xidmodifications.txt) are
-// are added to the allowed set. The list has to be updated when a new
-// version of Unicode is released. The current version is 9.0.0 and ICU 60
-// will have Unicode 10.0 data.
-#if U_ICU_VERSION_MAJOR_NUM < 60
-  const icu::UnicodeSet aspirational_scripts(
-      icu::UnicodeString(
-          // Unified Canadian Syllabics
-          "[\\u1401-\\u166C\\u166F-\\u167F"
-          // Mongolian
-          "\\u1810-\\u1819\\u1820-\\u1877\\u1880-\\u18AA"
-          // Unified Canadian Syllabics
-          "\\u18B0-\\u18F5"
-          // Tifinagh
-          "\\u2D30-\\u2D67\\u2D7F"
-          // Yi
-          "\\uA000-\\uA48C"
-          // Miao
-          "\\U00016F00-\\U00016F44\\U00016F50-\\U00016F7E"
-          "\\U00016F8F-\\U00016F9F]",
-          -1, US_INV),
-      *status);
-  allowed_set.addAll(aspirational_scripts);
-#else
-#error "Update aspirational_scripts per Unicode 10.0"
-#endif
 
   // The sections below refer to Mozilla's IDN blacklist:
   // http://kb.mozillazine.org/Network.IDN.blacklist_chars

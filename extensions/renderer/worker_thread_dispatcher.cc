@@ -4,12 +4,13 @@
 
 #include "extensions/renderer/worker_thread_dispatcher.h"
 
+#include "base/lazy_instance.h"
 #include "base/memory/ptr_util.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_local.h"
 #include "base/values.h"
-#include "content/public/child/worker_thread.h"
 #include "content/public/renderer/render_thread.h"
+#include "content/public/renderer/worker_thread.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/feature_switch.h"
@@ -89,7 +90,7 @@ bool WorkerThreadDispatcher::OnControlMessageReceived(
     // IPC. Probably using mojo?
     bool found = base::PickleIterator(message).ReadInt(&worker_thread_id);
     CHECK(found);
-    if (worker_thread_id == kNonWorkerThreadId)
+    if (worker_thread_id == kMainThreadId)
       return false;
     base::TaskRunner* runner = GetTaskRunnerFor(worker_thread_id);
     bool task_posted = runner->PostTask(

@@ -9,6 +9,7 @@
 #import "ios/chrome/browser/ui/browser_list/browser.h"
 #import "ios/chrome/browser/ui/commands/command_dispatcher.h"
 #import "ios/chrome/browser/ui/coordinators/browser_coordinator+internal.h"
+#import "ios/chrome/browser/web/sad_tab_tab_helper.h"
 #import "ios/clean/chrome/browser/ui/commands/context_menu_commands.h"
 #import "ios/clean/chrome/browser/ui/dialogs/context_menu/context_menu_dialog_coordinator.h"
 #import "ios/clean/chrome/browser/ui/dialogs/context_menu/context_menu_dialog_request.h"
@@ -60,6 +61,13 @@
   self.webState->SetDelegate(_webStateDelegate.get());
   self.mediator.webState = self.webState;
   [self setWebStateOverlayParent];
+  SadTabTabHelper* sadTabHelper = SadTabTabHelper::FromWebState(self.webState);
+  // Set the mediator as a SadTabHelper delegate, and set the mediator's
+  // dispatcher.
+  if (sadTabHelper) {
+    sadTabHelper->SetDelegate(self.mediator);
+    self.mediator.dispatcher = static_cast<id>(self.dispatcher);
+  }
 }
 
 - (void)start {
@@ -73,18 +81,20 @@
 
 - (void)stop {
   [self resetWebStateOverlayParent];
+  SadTabTabHelper* sadTabHelper = SadTabTabHelper::FromWebState(self.webState);
+  if (sadTabHelper)
+    sadTabHelper->SetDelegate(nil);
   [super stop];
 }
 
 - (void)childCoordinatorDidStart:(BrowserCoordinator*)childCoordinator {
   // Register to receive relevant ContextMenuCommands.
   if ([childCoordinator isKindOfClass:[ContextMenuDialogCoordinator class]]) {
-    [self.browser->dispatcher()
+    [self.dispatcher
         startDispatchingToTarget:self
                      forSelector:@selector(executeContextMenuScript:)];
-    [self.browser->dispatcher()
-        startDispatchingToTarget:self
-                     forSelector:@selector(openContextMenuImage:)];
+    [self.dispatcher startDispatchingToTarget:self
+                                  forSelector:@selector(openContextMenuImage:)];
   }
   [self.viewController presentViewController:childCoordinator.viewController
                                     animated:YES
@@ -94,9 +104,9 @@
 - (void)childCoordinatorWillStop:(BrowserCoordinator*)childCoordinator {
   // Unregister ContextMenuCommands once the UI has been dismissed.
   if ([childCoordinator isKindOfClass:[ContextMenuDialogCoordinator class]]) {
-    [self.browser->dispatcher()
+    [self.dispatcher
         stopDispatchingForSelector:@selector(executeContextMenuScript:)];
-    [self.browser->dispatcher()
+    [self.dispatcher
         stopDispatchingForSelector:@selector(openContextMenuImage:)];
   }
 }

@@ -32,7 +32,6 @@
 #include "ios/chrome/browser/ui/ntp/recent_tabs/synced_sessions.h"
 #import "ios/chrome/browser/ui/ntp/recent_tabs/views/signed_in_sync_off_view.h"
 #import "ios/chrome/browser/ui/ntp/recent_tabs/views/signed_in_sync_on_no_sessions_view.h"
-#import "ios/chrome/browser/ui/ntp/recent_tabs/views/signed_out_view.h"
 #import "ios/chrome/browser/ui/tab_switcher/tab_switcher_cache.h"
 #import "ios/chrome/browser/ui/tab_switcher/tab_switcher_header_view.h"
 #import "ios/chrome/browser/ui/tab_switcher/tab_switcher_model.h"
@@ -43,6 +42,7 @@
 #import "ios/chrome/browser/ui/tab_switcher/tab_switcher_session_cell_data.h"
 #include "ios/chrome/browser/ui/tab_switcher/tab_switcher_transition_context.h"
 #import "ios/chrome/browser/ui/tab_switcher/tab_switcher_view.h"
+#import "ios/chrome/browser/ui/tabs/requirements/tab_strip_fold_animation.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_controller.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_owner.h"
 #include "ios/chrome/browser/ui/ui_util.h"
@@ -155,19 +155,6 @@ enum class SnapshotViewOption {
 // Returns the tab model of the currently selected tab.
 - (TabModel*)currentSelectedModel;
 
-// Calls tabSwitcherDismissWithModel:animated: with the |animated| parameter
-// set to YES.
-- (void)tabSwitcherDismissWithModel:(TabModel*)model;
-
-// Dismisses the tab switcher using the given tab model. The completion block is
-// called at the end of the animation. The tab switcher delegate method
-// -tabSwitcherPresentationTransitionDidEnd: must be called in the completion
-// block. The dismissal of the tab switcher will be animated if the |animated|
-// parameter is set to YES.
-- (void)tabSwitcherDismissWithModel:(TabModel*)model
-                           animated:(BOOL)animated
-                     withCompletion:(ProceduralBlock)completion;
-
 // Dismisses the tab switcher using the currently selected tab's tab model.
 - (void)tabSwitcherDismissWithCurrentSelectedModel;
 
@@ -191,6 +178,7 @@ enum class SnapshotViewOption {
 
 @implementation TabSwitcherController
 
+@synthesize animationDelegate = _animationDelegate;
 @synthesize transitionContext = _transitionContext;
 
 - (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
@@ -368,6 +356,8 @@ enum class SnapshotViewOption {
                            withModel:_onLoadActiveModel
                             animated:YES
                       withCompletion:^{
+                        [self.animationDelegate
+                            tabSwitcherPresentationAnimationDidEnd:self];
                         [self.delegate
                             tabSwitcherPresentationTransitionDidEnd:self];
                       }];
@@ -616,7 +606,7 @@ enum class SnapshotViewOption {
                       finalTabScreenshotFrame);
   finalTabScreenshotFrame.origin.y += cellTopBarHeight;
 
-  TabSwitcherTabStripPlaceholderView* tabStripPlaceholderView =
+  UIView<TabStripFoldAnimation>* tabStripPlaceholderView =
       [transitionContextContent generateTabStripPlaceholderView];
   tabStripPlaceholderView.clipsToBounds = YES;
   tabStripPlaceholderView.backgroundColor = [UIColor clearColor];
@@ -813,22 +803,7 @@ enum class SnapshotViewOption {
   return nil;
 }
 
-- (void)tabSwitcherDismissWithModel:(TabModel*)model {
-  [self tabSwitcherDismissWithModel:model animated:YES];
-}
-
 - (void)tabSwitcherDismissWithModel:(TabModel*)model animated:(BOOL)animated {
-  [self tabSwitcherDismissWithModel:model
-                           animated:animated
-                     withCompletion:^{
-                       [self.delegate tabSwitcherDismissTransitionDidEnd:self];
-                     }];
-}
-
-- (void)tabSwitcherDismissWithModel:(TabModel*)model
-                           animated:(BOOL)animated
-                     withCompletion:(ProceduralBlock)completion {
-  DCHECK(completion);
   DCHECK(model);
   [[self presentedViewController] dismissViewControllerAnimated:NO
                                                      completion:nil];
@@ -838,15 +813,14 @@ enum class SnapshotViewOption {
                            withModel:model
                             animated:animated
                       withCompletion:^{
-                        [self.view removeFromSuperview];
-                        completion();
+                        [self.delegate tabSwitcherDismissTransitionDidEnd:self];
                       }];
 }
 
 - (void)tabSwitcherDismissWithCurrentSelectedModel {
   TabModel* model = [self currentSelectedModel];
   base::RecordAction(base::UserMetricsAction("MobileTabSwitcherClose"));
-  [self tabSwitcherDismissWithModel:model];
+  [self tabSwitcherDismissWithModel:model animated:YES];
 }
 
 - (Tab*)dismissWithNewTabAnimation:(const GURL&)URL
@@ -866,11 +840,7 @@ enum class SnapshotViewOption {
                                        atIndex:tabIndex
                                   inBackground:NO];
 
-  [self tabSwitcherDismissWithModel:tabModel
-                           animated:YES
-                     withCompletion:^{
-                       [self.delegate tabSwitcherDismissTransitionDidEnd:self];
-                     }];
+  [self tabSwitcherDismissWithModel:tabModel animated:YES];
 
   return tab;
 }
@@ -904,12 +874,7 @@ enum class SnapshotViewOption {
 
     // Reenable touch events.
     [_tabSwitcherView setUserInteractionEnabled:YES];
-    [self
-        tabSwitcherDismissWithModel:tabModel
-                           animated:YES
-                     withCompletion:^{
-                       [self.delegate tabSwitcherDismissTransitionDidEnd:self];
-                     }];
+    [self tabSwitcherDismissWithModel:tabModel animated:YES];
   }
 }
 
@@ -1199,7 +1164,7 @@ enum class SnapshotViewOption {
   [tabModel setCurrentTab:tab];
   [self.delegate tabSwitcher:self
       dismissTransitionWillStartWithActiveModel:tabModel];
-  [self tabSwitcherDismissWithModel:tabModel];
+  [self tabSwitcherDismissWithModel:tabModel animated:YES];
   if (panelSessionType == TabSwitcherSessionType::OFF_THE_RECORD_SESSION) {
     base::RecordAction(
         base::UserMetricsAction("MobileTabSwitcherOpenIncognitoTab"));

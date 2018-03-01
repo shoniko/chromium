@@ -16,7 +16,7 @@
 #if defined(USE_AURA)
 #include "base/run_loop.h"
 #include "components/ui_devtools/devtools_server.h"
-#include "components/ui_devtools/views/ui_devtools_css_agent.h"
+#include "components/ui_devtools/views/css_agent.h"
 #include "components/ui_devtools/views/ui_devtools_dom_agent.h"
 #include "components/ui_devtools/views/ui_devtools_overlay_agent.h"
 #include "content/public/browser/browser_thread.h"
@@ -49,6 +49,8 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/ash_config.h"
+#include "mash/common/config.h"                                   // nogncheck
+#include "mash/quick_launch/public/interfaces/constants.mojom.h"  // nogncheck
 #endif
 
 namespace {
@@ -116,7 +118,7 @@ void ChromeBrowserMainExtraPartsViews::PreProfileInit() {
         base::MakeUnique<ui_devtools::UIDevToolsOverlayAgent>(
             dom_backend.get());
     auto css_backend =
-        base::MakeUnique<ui_devtools::UIDevToolsCSSAgent>(dom_backend.get());
+        base::MakeUnique<ui_devtools::CSSAgent>(dom_backend.get());
     auto devtools_client = base::MakeUnique<ui_devtools::UiDevToolsClient>(
         "UiDevToolsClient", devtools_server_.get());
     devtools_client->AddAgent(std::move(dom_backend));
@@ -166,6 +168,17 @@ void ChromeBrowserMainExtraPartsViews::ServiceManagerConnectionStarted(
 #if defined(USE_AURA)
   if (aura::Env::GetInstance()->mode() == aura::Env::Mode::LOCAL)
     return;
+
+#if defined(OS_CHROMEOS)
+  if (chromeos::GetAshConfig() == ash::Config::MASH) {
+    connection->GetConnector()->StartService(
+        service_manager::Identity(ui::mojom::kServiceName));
+    connection->GetConnector()->StartService(
+        service_manager::Identity(mash::common::GetWindowManagerServiceName()));
+    connection->GetConnector()->StartService(
+        service_manager::Identity(mash::quick_launch::mojom::kServiceName));
+  }
+#endif
 
   input_device_client_ = base::MakeUnique<ui::InputDeviceClient>();
   ui::mojom::InputDeviceServerPtr server;

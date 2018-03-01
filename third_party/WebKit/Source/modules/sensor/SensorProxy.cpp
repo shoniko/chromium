@@ -38,7 +38,7 @@ void SensorProxy::Dispose() {
   client_binding_.Close();
 }
 
-DEFINE_TRACE(SensorProxy) {
+void SensorProxy::Trace(blink::Visitor* visitor) {
   visitor->Trace(observers_);
   visitor->Trace(provider_);
   PageVisibilityObserver::Trace(visitor);
@@ -270,7 +270,7 @@ void SensorProxy::RemoveActiveFrequency(double frequency) {
     return;
   }
 
-  active_frequencies_.erase(std::distance(active_frequencies_.begin(), it));
+  active_frequencies_.erase(it);
   UpdatePollingStatus();
 }
 

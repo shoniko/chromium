@@ -26,7 +26,6 @@
 
 #include "core/dom/TreeScope.h"
 
-#include "core/HTMLNames.h"
 #include "core/css/StyleChangeReason.h"
 #include "core/css/resolver/ScopedStyleResolver.h"
 #include "core/dom/ContainerNode.h"
@@ -45,12 +44,13 @@
 #include "core/html/HTMLAnchorElement.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/html/HTMLMapElement.h"
+#include "core/html_names.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/api/LayoutViewItem.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
 #include "core/svg/SVGTreeScopeResources.h"
-#include "platform/ScriptForbiddenScope.h"
+#include "platform/bindings/ScriptForbiddenScope.h"
 #include "platform/wtf/Vector.h"
 
 namespace blink {
@@ -191,11 +191,13 @@ HTMLMapElement* TreeScope::GetImageMap(const String& url) const {
     return nullptr;
   size_t hash_pos = url.find('#');
   String name = hash_pos == kNotFound ? url : url.Substring(hash_pos + 1);
-  return toHTMLMapElement(
+  return ToHTMLMapElement(
       image_maps_by_name_->GetElementByMapName(AtomicString(name), *this));
 }
 
-static bool PointWithScrollAndZoomIfPossible(const Document& document,
+// If the point is not in the viewport, returns false. Otherwise, adjusts the
+// point to account for the frame's zoom and scroll.
+static bool PointWithScrollAndZoomIfPossible(Document& document,
                                              IntPoint& point) {
   LocalFrame* frame = document.GetFrame();
   if (!frame)
@@ -203,6 +205,9 @@ static bool PointWithScrollAndZoomIfPossible(const Document& document,
   LocalFrameView* frame_view = frame->View();
   if (!frame_view)
     return false;
+
+  // The visibleContentRect check below requires that scrollbars are up-to-date.
+  document.UpdateStyleAndLayoutIgnorePendingStylesheets();
 
   FloatPoint point_in_document(point);
   point_in_document.Scale(frame->PageZoomFactor(), frame->PageZoomFactor());
@@ -216,15 +221,15 @@ static bool PointWithScrollAndZoomIfPossible(const Document& document,
   return true;
 }
 
-HitTestResult HitTestInDocument(const Document* document,
+HitTestResult HitTestInDocument(Document* document,
                                 int x,
                                 int y,
                                 const HitTestRequest& request) {
-  IntPoint hit_point(x, y);
-  if (!PointWithScrollAndZoomIfPossible(*document, hit_point))
+  if (!document->IsActive())
     return HitTestResult();
 
-  if (!document->IsActive())
+  IntPoint hit_point(x, y);
+  if (!PointWithScrollAndZoomIfPossible(*document, hit_point))
     return HitTestResult();
 
   HitTestResult result(request, hit_point);
@@ -528,7 +533,7 @@ void TreeScope::SetNeedsStyleRecalcForViewportUnits() {
   }
 }
 
-DEFINE_TRACE(TreeScope) {
+void TreeScope::Trace(blink::Visitor* visitor) {
   visitor->Trace(root_node_);
   visitor->Trace(document_);
   visitor->Trace(parent_tree_scope_);

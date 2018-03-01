@@ -12,31 +12,15 @@
 
 namespace blink {
 
-struct PaintLayerPainterTestParam {
-  PaintLayerPainterTestParam(bool root_layer_scrolling, bool slimming_paint_v2)
-      : root_layer_scrolling(root_layer_scrolling),
-        slimming_paint_v2(slimming_paint_v2) {}
-
-  bool root_layer_scrolling;
-  bool slimming_paint_v2;
-};
-
-class PaintLayerPainterTest
-    : public ::testing::WithParamInterface<PaintLayerPainterTestParam>,
-      private ScopedRootLayerScrollingForTest,
-      public PaintControllerPaintTestBase {
+class PaintLayerPainterTest : public PaintControllerPaintTest {
   USING_FAST_MALLOC(PaintLayerPainterTest);
 
  public:
-  PaintLayerPainterTest()
-      : ScopedRootLayerScrollingForTest(GetParam().root_layer_scrolling),
-        PaintControllerPaintTestBase(GetParam().slimming_paint_v2) {}
-
   void ExpectPaintedOutputInvisible(const char* element_name,
                                     bool expected_value) {
     // The optimization to skip painting for effectively-invisible content is
     // limited to SPv1.
-    if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled())
+    if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled())
       return;
 
     PaintLayer* target_layer =
@@ -46,8 +30,8 @@ class PaintLayerPainterTest
     bool invisible =
         PaintLayerPainter(*target_layer).PaintedOutputInvisible(painting_info);
     EXPECT_EQ(expected_value, invisible)
-        << "Failed painted output visibility [spv2_enabled="
-        << RuntimeEnabledFeatures::SlimmingPaintV2Enabled()
+        << "Failed painted output visibility [spv175_enabled="
+        << RuntimeEnabledFeatures::SlimmingPaintV175Enabled()
         << ", expected=" << expected_value << ", actual=" << invisible << "].";
   }
 
@@ -60,22 +44,14 @@ class PaintLayerPainterTest
 
  private:
   void SetUp() override {
-    PaintControllerPaintTestBase::SetUp();
+    PaintControllerPaintTest::SetUp();
     EnableCompositing();
   }
 };
 
 INSTANTIATE_TEST_CASE_P(All,
                         PaintLayerPainterTest,
-                        ::testing::Values(
-                            // non-root-layer-scrolls, slimming-paint-v1
-                            PaintLayerPainterTestParam(false, false),
-                            // non-root-layer-scrolls, slimming-paint-v2
-                            PaintLayerPainterTestParam(false, true),
-                            // root-layer-scrolls, slimming-paint-v1
-                            PaintLayerPainterTestParam(true, false),
-                            // root-layer-scrolls, slimming-paint-v2
-                            PaintLayerPainterTestParam(true, true)));
+                        ::testing::ValuesIn(kDefaultPaintTestConfigurations));
 
 TEST_P(PaintLayerPainterTest, CachedSubsequence) {
   SetBodyInnerHTML(
@@ -129,7 +105,7 @@ TEST_P(PaintLayerPainterTest, CachedSubsequence) {
   auto* container2_layer = ToLayoutBoxModelObject(container2).Layer();
   auto* filler2_layer = ToLayoutBoxModelObject(filler2).Layer();
 
-  if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled()) {
+  if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
     // Check that new paint chunks were forced for |container1| and
     // |container2|.
     Vector<PaintChunk> paint_chunks =
@@ -162,7 +138,7 @@ TEST_P(PaintLayerPainterTest, CachedSubsequence) {
       TestDisplayItem(content2, kBackgroundType),
       TestDisplayItem(filler2, kBackgroundType));
 
-  if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled()) {
+  if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
     // We should still have the paint chunks forced by the cached subsequences.
     Vector<PaintChunk> paint_chunks =
         RootPaintController().GetPaintArtifact().PaintChunks();
@@ -200,7 +176,7 @@ TEST_P(PaintLayerPainterTest, CachedSubsequenceOnInterestRectChange) {
       "  <div id='content3' style='position: absolute; width: 200px;"
       "      height: 200px; background-color: green'></div>"
       "</div>");
-  RootPaintController().InvalidateAll();
+  InvalidateAll(RootPaintController());
 
   LayoutObject& container1 =
       *GetDocument().getElementById("container1")->GetLayoutObject();
@@ -269,6 +245,29 @@ TEST_P(PaintLayerPainterTest, CachedSubsequenceOnInterestRectChange) {
       TestDisplayItem(container2, kBackgroundType),
       TestDisplayItem(content2a, kBackgroundType),
       TestDisplayItem(content2b, kBackgroundType));
+}
+
+TEST_P(PaintLayerPainterTest,
+       CachedSubsequenceOnInterestRectChangeUnderInvalidationChecking) {
+  ScopedPaintUnderInvalidationCheckingForTest under_invalidation_checking(true);
+
+  SetBodyInnerHTML(
+      "<style>p { width: 200px; height: 50px; background: green }</style>"
+      "<div id='target' style='position: relative; z-index: 1'>"
+      "  <p></p><p></p><p></p><p></p>"
+      "</div>");
+  InvalidateAll(RootPaintController());
+
+  // |target| will be fully painted.
+  GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint();
+  IntRect interest_rect(0, 0, 400, 300);
+  Paint(&interest_rect);
+
+  // |target| will be partially painted. Should not trigger under-invalidation
+  // checking DCHECKs.
+  GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint();
+  IntRect new_interest_rect(0, 100, 300, 1000);
+  Paint(&new_interest_rect);
 }
 
 TEST_P(PaintLayerPainterTest,
@@ -381,7 +380,7 @@ TEST_P(PaintLayerPainterTest, PaintPhaseOutline) {
   EXPECT_FALSE(non_self_painting_layer.NeedsPaintPhaseDescendantOutlines());
   EXPECT_TRUE(DisplayItemListContains(
       RootPaintController().GetDisplayItemList(), self_painting_layer_object,
-      DisplayItem::PaintPhaseToDrawingType(kPaintPhaseSelfOutlineOnly)));
+      DisplayItem::PaintPhaseToDrawingType(PaintPhase::kSelfOutlineOnly)));
 
   // needsPaintPhaseDescendantOutlines should be set when any descendant on the
   // same layer has outline.
@@ -393,7 +392,7 @@ TEST_P(PaintLayerPainterTest, PaintPhaseOutline) {
   Paint();
   EXPECT_TRUE(DisplayItemListContains(
       RootPaintController().GetDisplayItemList(), outline_div,
-      DisplayItem::PaintPhaseToDrawingType(kPaintPhaseSelfOutlineOnly)));
+      DisplayItem::PaintPhaseToDrawingType(PaintPhase::kSelfOutlineOnly)));
 
   // needsPaintPhaseDescendantOutlines should be reset when no outline is
   // actually painted.
@@ -560,7 +559,7 @@ TEST_P(PaintLayerPainterTest, PaintPhaseBlockBackground) {
   ToHTMLElement(background_div.GetNode())
       ->setAttribute(HTMLNames::styleAttr, style_without_background);
   GetDocument().View()->UpdateAllLifecyclePhases();
-  if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled() ||
+  if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled() ||
       !RuntimeEnabledFeatures::RootLayerScrollingEnabled()) {
     // In RootLayerScrolls+SPv1, the empty paint phase optimization doesn't
     // apply to the composited scrolling layer so we don't need this check.

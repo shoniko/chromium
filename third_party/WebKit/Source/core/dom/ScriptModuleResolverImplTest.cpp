@@ -26,7 +26,7 @@ class ScriptModuleResolverImplTestModulator final : public DummyModulator {
   ScriptModuleResolverImplTestModulator() {}
   virtual ~ScriptModuleResolverImplTestModulator() {}
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   void SetScriptState(ScriptState* script_state) {
     script_state_ = script_state;
@@ -42,7 +42,7 @@ class ScriptModuleResolverImplTestModulator final : public DummyModulator {
 
  private:
   // Implements Modulator:
-  ScriptState* GetScriptState() override { return script_state_.Get(); }
+  ScriptState* GetScriptState() override { return script_state_.get(); }
 
   ModuleScript* GetFetchedModuleScript(const KURL&) override;
 
@@ -50,18 +50,18 @@ class ScriptModuleResolverImplTestModulator final : public DummyModulator {
     return ScriptModuleState::kInstantiated;
   }
   ScriptValue GetError(const ModuleScript* module_script) override {
-    ScriptState::Scope scope(script_state_.Get());
-    return ScriptValue(script_state_.Get(),
+    ScriptState::Scope scope(script_state_.get());
+    return ScriptValue(script_state_.get(),
                        module_script->CreateError(script_state_->GetIsolate()));
   }
 
-  RefPtr<ScriptState> script_state_;
+  scoped_refptr<ScriptState> script_state_;
   int get_fetched_module_script_called_ = 0;
   KURL fetched_url_;
   Member<ModuleScript> module_script_;
 };
 
-DEFINE_TRACE(ScriptModuleResolverImplTestModulator) {
+void ScriptModuleResolverImplTestModulator::Trace(blink::Visitor* visitor) {
   visitor->Trace(module_script_);
   DummyModulator::Trace(visitor);
 }
@@ -77,12 +77,12 @@ ModuleScript* CreateReferrerModuleScript(Modulator* modulator,
                                          V8TestingScope& scope) {
   ScriptModule referrer_record = ScriptModule::Compile(
       scope.GetIsolate(), "import './target.js'; export const a = 42;",
-      "referrer.js", kSharableCrossOrigin, TextPosition::MinimumPosition(),
-      ASSERT_NO_EXCEPTION);
-  KURL referrer_url(kParsedURLString, "https://example.com/referrer.js");
-  ModuleScript* referrer_module_script = ModuleScript::CreateForTest(
-      modulator, referrer_record, referrer_url, "", kParserInserted,
-      WebURLRequest::kFetchCredentialsModeOmit);
+      "referrer.js", kSharableCrossOrigin,
+      WebURLRequest::kFetchCredentialsModeOmit, "", kParserInserted,
+      TextPosition::MinimumPosition(), ASSERT_NO_EXCEPTION);
+  KURL referrer_url("https://example.com/referrer.js");
+  auto* referrer_module_script =
+      ModuleScript::CreateForTest(modulator, referrer_record, referrer_url);
   return referrer_module_script;
 }
 
@@ -92,12 +92,10 @@ ModuleScript* CreateTargetModuleScript(
     ScriptModuleState state = ScriptModuleState::kInstantiated) {
   ScriptModule record = ScriptModule::Compile(
       scope.GetIsolate(), "export const pi = 3.14;", "target.js",
-      kSharableCrossOrigin, TextPosition::MinimumPosition(),
-      ASSERT_NO_EXCEPTION);
-  KURL url(kParsedURLString, "https://example.com/target.js");
-  ModuleScript* module_script =
-      ModuleScript::CreateForTest(modulator, record, url, "", kParserInserted,
-                                  WebURLRequest::kFetchCredentialsModeOmit);
+      kSharableCrossOrigin, WebURLRequest::kFetchCredentialsModeOmit, "",
+      kParserInserted, TextPosition::MinimumPosition(), ASSERT_NO_EXCEPTION);
+  KURL url("https://example.com/target.js");
+  auto* module_script = ModuleScript::CreateForTest(modulator, record, url);
   if (state != ScriptModuleState::kInstantiated) {
     EXPECT_EQ(ScriptModuleState::kErrored, state);
     v8::Local<v8::Value> error =

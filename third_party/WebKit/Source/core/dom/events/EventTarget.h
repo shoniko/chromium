@@ -34,12 +34,12 @@
 
 #include <memory>
 #include "core/CoreExport.h"
-#include "core/EventNames.h"
-#include "core/EventTargetNames.h"
-#include "core/EventTypeNames.h"
 #include "core/dom/events/AddEventListenerOptionsResolved.h"
 #include "core/dom/events/EventDispatchResult.h"
 #include "core/dom/events/EventListenerMap.h"
+#include "core/event_names.h"
+#include "core/event_target_names.h"
+#include "core/event_type_names.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Allocator.h"
@@ -78,8 +78,8 @@ class CORE_EXPORT EventTargetData final
   EventTargetData();
   ~EventTargetData();
 
-  DECLARE_TRACE();
-  DECLARE_TRACE_WRAPPERS();
+  void Trace(blink::Visitor*);
+  void TraceWrappers(const ScriptWrappableVisitor*) const;
 
   EventListenerMap event_listener_map;
   std::unique_ptr<FiringEventIteratorVector> firing_event_iterators;
@@ -114,8 +114,7 @@ DEFINE_TRAIT_FOR_TRACE_WRAPPERS(EventTargetData);
 //   depending on the base class of your class.
 // - EventTargets do not support EAGERLY_FINALIZE. You need to use
 //   a pre-finalizer instead.
-class CORE_EXPORT EventTarget : public GarbageCollectedFinalized<EventTarget>,
-                                public ScriptWrappable {
+class CORE_EXPORT EventTarget : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -175,9 +174,6 @@ class CORE_EXPORT EventTarget : public GarbageCollectedFinalized<EventTarget>,
 
   static DispatchEventResult GetDispatchEventResult(const Event&);
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
-  DEFINE_INLINE_VIRTUAL_TRACE_WRAPPERS() {}
-
   virtual bool KeepEventInNode(Event*) { return false; }
 
  protected:
@@ -212,12 +208,13 @@ class CORE_EXPORT EventTarget : public GarbageCollectedFinalized<EventTarget>,
                                          EventListener*,
                                          AddEventListenerOptionsResolved&);
 
+  RegisteredEventListener* GetAttributeRegisteredEventListener(
+      const AtomicString& event_type);
+
   bool FireEventListeners(Event*, EventTargetData*, EventListenerVector&);
   void CountLegacyEvents(const AtomicString& legacy_type_name,
                          EventListenerVector*,
                          EventListenerVector*);
-
-  bool ClearAttributeEventListener(const AtomicString& event_type);
 
   friend class EventListenerIterator;
 };
@@ -226,12 +223,12 @@ class CORE_EXPORT EventTargetWithInlineData : public EventTarget {
  public:
   ~EventTargetWithInlineData() override {}
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(event_target_data_);
     EventTarget::Trace(visitor);
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE_WRAPPERS() {
+  virtual void TraceWrappers(const ScriptWrappableVisitor* visitor) const {
     visitor->TraceWrappers(event_target_data_);
     EventTarget::TraceWrappers(visitor);
   }
@@ -250,12 +247,12 @@ class CORE_EXPORT EventTargetWithInlineData : public EventTarget {
 
 // FIXME: These macros should be split into separate DEFINE and DECLARE
 // macros to avoid causing so many header includes.
-#define DEFINE_ATTRIBUTE_EVENT_LISTENER(attribute)                        \
-  EventListener* on##attribute() {                                        \
-    return this->GetAttributeEventListener(EventTypeNames::attribute);    \
-  }                                                                       \
-  void setOn##attribute(EventListener* listener) {                        \
-    this->SetAttributeEventListener(EventTypeNames::attribute, listener); \
+#define DEFINE_ATTRIBUTE_EVENT_LISTENER(attribute)                  \
+  EventListener* on##attribute() {                                  \
+    return GetAttributeEventListener(EventTypeNames::attribute);    \
+  }                                                                 \
+  void setOn##attribute(EventListener* listener) {                  \
+    SetAttributeEventListener(EventTypeNames::attribute, listener); \
   }
 
 #define DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(attribute)                    \

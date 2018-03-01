@@ -53,7 +53,8 @@ V8NodeFilterCondition::V8NodeFilterCondition(v8::Local<v8::Value> filter,
 
 V8NodeFilterCondition::~V8NodeFilterCondition() {}
 
-DEFINE_TRACE_WRAPPERS(V8NodeFilterCondition) {
+void V8NodeFilterCondition::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(filter_.Cast<v8::Value>());
 }
 
@@ -94,7 +95,7 @@ unsigned V8NodeFilterCondition::acceptNode(
     receiver = filter;
   }
 
-  v8::Local<v8::Value> node_wrapper = ToV8(node, script_state_.Get());
+  v8::Local<v8::Value> node_wrapper = ToV8(node, script_state_.get());
   if (node_wrapper.IsEmpty()) {
     if (exception_catcher.HasCaught())
       exception_state.RethrowV8Exception(exception_catcher.Exception());
@@ -104,7 +105,7 @@ unsigned V8NodeFilterCondition::acceptNode(
   v8::Local<v8::Value> result;
   v8::Local<v8::Value> args[] = {node_wrapper};
   if (!V8ScriptRunner::CallFunction(callback,
-                                    ExecutionContext::From(script_state_.Get()),
+                                    ExecutionContext::From(script_state_.get()),
                                     receiver, 1, args, isolate)
            .ToLocal(&result)) {
     exception_state.RethrowV8Exception(exception_catcher.Exception());

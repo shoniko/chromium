@@ -26,6 +26,7 @@ IntersectionObserverController::IntersectionObserverController(
 IntersectionObserverController::~IntersectionObserverController() {}
 
 void IntersectionObserverController::PostTaskToDeliverObservations() {
+  DCHECK(GetExecutionContext());
   // TODO(ojan): These tasks decide whether to throttle a subframe, so they
   // need to be unthrottled, but we should throttle all the other tasks
   // (e.g. ones coming from the web page).
@@ -69,14 +70,13 @@ void IntersectionObserverController::DeliverIntersectionObservations() {
 }
 
 void IntersectionObserverController::ComputeTrackedIntersectionObservations() {
+  if (!GetExecutionContext())
+    return;
   TRACE_EVENT0(
       "blink",
       "IntersectionObserverController::computeTrackedIntersectionObservations");
-  for (auto& observer : tracked_intersection_observers_) {
+  for (auto& observer : tracked_intersection_observers_)
     observer->ComputeIntersectionObservations();
-    if (observer->HasEntries())
-      ScheduleIntersectionObserverForDelivery(*observer);
-  }
 }
 
 void IntersectionObserverController::AddTrackedObserver(
@@ -94,7 +94,7 @@ void IntersectionObserverController::RemoveTrackedObserversForRoot(
   tracked_intersection_observers_.RemoveAll(to_remove);
 }
 
-DEFINE_TRACE(IntersectionObserverController) {
+void IntersectionObserverController::Trace(blink::Visitor* visitor) {
   visitor->Trace(tracked_intersection_observers_);
   visitor->Trace(pending_intersection_observers_);
   SuspendableObject::Trace(visitor);

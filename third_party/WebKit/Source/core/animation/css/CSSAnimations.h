@@ -35,6 +35,7 @@
 #include "core/animation/Interpolation.h"
 #include "core/animation/css/CSSAnimationData.h"
 #include "core/animation/css/CSSAnimationUpdate.h"
+#include "core/animation/css/CSSTransitionData.h"
 #include "core/css/CSSKeyframesRule.h"
 #include "core/css/StylePropertySet.h"
 #include "core/dom/Document.h"
@@ -101,7 +102,7 @@ class CSSAnimations final {
   }
   void Cancel();
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   class RunningAnimation final
@@ -122,7 +123,7 @@ class CSSAnimations final {
       specified_timing = update.specified_timing;
     }
 
-    DEFINE_INLINE_TRACE() {
+    void Trace(blink::Visitor* visitor) {
       visitor->Trace(animation);
       visitor->Trace(style_rule);
     }
@@ -139,12 +140,12 @@ class CSSAnimations final {
     DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 
    public:
-    DEFINE_INLINE_TRACE() { visitor->Trace(animation); }
+    void Trace(blink::Visitor* visitor) { visitor->Trace(animation); }
 
     Member<Animation> animation;
-    RefPtr<const ComputedStyle> from;
-    RefPtr<const ComputedStyle> to;
-    RefPtr<const ComputedStyle> reversing_adjusted_start_value;
+    scoped_refptr<const ComputedStyle> from;
+    scoped_refptr<const ComputedStyle> to;
+    scoped_refptr<const ComputedStyle> reversing_adjusted_start_value;
     double reversing_shortening_factor;
   };
 
@@ -165,7 +166,7 @@ class CSSAnimations final {
     Member<const Element> animating_element;
     const ComputedStyle& old_style;
     const ComputedStyle& style;
-    RefPtr<const ComputedStyle> cloned_style;
+    scoped_refptr<const ComputedStyle> cloned_style;
     const TransitionMap* active_transitions;
     HashSet<PropertyHandle>& listed_properties;
     const CSSTransitionData& transition_data;
@@ -203,7 +204,7 @@ class CSSAnimations final {
           previous_iteration_(NullValue()) {}
     bool RequiresIterationEvents(const AnimationEffectReadOnly&) override;
     void OnEventCondition(const AnimationEffectReadOnly&) override;
-    DECLARE_VIRTUAL_TRACE();
+    void Trace(blink::Visitor*) override;
 
    private:
     const Element& AnimationTarget() const { return *animation_target_; }
@@ -231,7 +232,7 @@ class CSSAnimations final {
       return false;
     }
     void OnEventCondition(const AnimationEffectReadOnly&) override;
-    DECLARE_VIRTUAL_TRACE();
+    void Trace(blink::Visitor*) override;
 
    private:
     const Element& TransitionTarget() const { return *transition_target_; }

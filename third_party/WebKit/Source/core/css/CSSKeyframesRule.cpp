@@ -59,7 +59,7 @@ void StyleRuleKeyframes::WrapperAppendKeyframe(StyleRuleKeyframe* keyframe) {
 }
 
 void StyleRuleKeyframes::WrapperRemoveKeyframe(unsigned index) {
-  keyframes_.erase(index);
+  keyframes_.EraseAt(index);
   StyleChanged();
 }
 
@@ -74,7 +74,7 @@ int StyleRuleKeyframes::FindKeyframeIndex(const String& key) const {
   return -1;
 }
 
-DEFINE_TRACE_AFTER_DISPATCH(StyleRuleKeyframes) {
+void StyleRuleKeyframes::TraceAfterDispatch(blink::Visitor* visitor) {
   visitor->Trace(keyframes_);
   StyleRuleBase::TraceAfterDispatch(visitor);
 }
@@ -126,8 +126,8 @@ void CSSKeyframesRule::deleteRule(const String& s) {
   keyframes_rule_->WrapperRemoveKeyframe(i);
 
   if (child_rule_cssom_wrappers_[i])
-    child_rule_cssom_wrappers_[i]->SetParentRule(0);
-  child_rule_cssom_wrappers_.erase(i);
+    child_rule_cssom_wrappers_[i]->SetParentRule(nullptr);
+  child_rule_cssom_wrappers_.EraseAt(i);
 }
 
 CSSKeyframeRule* CSSKeyframesRule::findRule(const String& s) {
@@ -195,7 +195,7 @@ void CSSKeyframesRule::Reattach(StyleRuleBase* rule) {
   keyframes_rule_ = ToStyleRuleKeyframes(rule);
 }
 
-DEFINE_TRACE(CSSKeyframesRule) {
+void CSSKeyframesRule::Trace(blink::Visitor* visitor) {
   CSSRule::Trace(visitor);
   visitor->Trace(child_rule_cssom_wrappers_);
   visitor->Trace(keyframes_rule_);

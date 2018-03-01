@@ -758,9 +758,12 @@ void NavigationControllerImpl::LoadURLWithParams(const LoadURLParams& params) {
 
   // Otherwise, create a pending entry for the main frame.
   if (!entry) {
+    // extra_headers in params are \n separated, navigation entries want \r\n.
+    std::string extra_headers_crlf;
+    base::ReplaceChars(params.extra_headers, "\n", "\r\n", &extra_headers_crlf);
     entry = NavigationEntryImpl::FromNavigationEntry(CreateNavigationEntry(
         params.url, params.referrer, params.transition_type,
-        params.is_renderer_initiated, params.extra_headers, browser_context_));
+        params.is_renderer_initiated, extra_headers_crlf, browser_context_));
     entry->set_source_site_instance(
         static_cast<SiteInstanceImpl*>(params.source_site_instance.get()));
     entry->SetRedirectChain(params.redirect_chain);
@@ -933,14 +936,18 @@ bool NavigationControllerImpl::RendererDidNavigate(
   active_entry->SetTimestamp(timestamp);
   active_entry->SetHttpStatusCode(params.http_status_code);
 
+  // Grab the corresponding FrameNavigationEntry for a few updates, but only if
+  // the SiteInstance matches (to avoid updating the wrong entry by mistake).
+  // A mismatch can occur if the renderer lies or due to a unique name collision
+  // after a race with an OOPIF (see https://crbug.com/616820).
   FrameNavigationEntry* frame_entry =
       active_entry->GetFrameEntry(rfh->frame_tree_node());
-  // Update the frame-specific PageState and RedirectChain
-  // We may not find a frame_entry in some cases; ignore the PageState if so.
+  if (frame_entry && frame_entry->site_instance() != rfh->GetSiteInstance())
+    frame_entry = nullptr;
+  // Make sure we've updated the PageState in one of the helper methods.
   // TODO(creis): Remove the "if" once https://crbug.com/522193 is fixed.
   if (frame_entry) {
-    frame_entry->SetPageState(params.page_state);
-    frame_entry->set_redirect_chain(params.redirects);
+    DCHECK(params.page_state == frame_entry->page_state());
   }
 
   // When a navigation in the main frame is blocked, it will display an error
@@ -990,7 +997,8 @@ bool NavigationControllerImpl::RendererDidNavigate(
 
   NotifyNavigationEntryCommitted(details);
 
-  if (active_entry->GetURL().SchemeIs(url::kHttpsScheme) && !rfh->GetParent()) {
+  if (active_entry->GetURL().SchemeIs(url::kHttpsScheme) && !rfh->GetParent() &&
+      navigation_handle->GetNetErrorCode() == net::OK) {
     UMA_HISTOGRAM_BOOLEAN("Navigation.SecureSchemeHasSSLStatus",
                           !!active_entry->GetSSL().certificate);
   }
@@ -1143,9 +1151,11 @@ void NavigationControllerImpl::RendererDidNavigateToNewPage(
   // does not have any subframe history items.
   if (is_same_document && GetLastCommittedEntry()) {
     FrameNavigationEntry* frame_entry = new FrameNavigationEntry(
-        params.frame_unique_name, params.item_sequence_number,
+        rfh->frame_tree_node()->unique_name(), params.item_sequence_number,
         params.document_sequence_number, rfh->GetSiteInstance(), nullptr,
-        params.url, params.referrer, params.method, params.post_id);
+        params.url, params.referrer, params.redirects, params.page_state,
+        params.method, params.post_id);
+
     new_entry = GetLastCommittedEntry()->CloneAndReplace(
         frame_entry, true, rfh->frame_tree_node(),
         delegate_->GetFrameTree()->root());
@@ -1155,8 +1165,8 @@ void NavigationControllerImpl::RendererDidNavigateToNewPage(
       // this case.
       new_entry->GetSSL() = SSLStatus();
 
-      if (new_entry->GetURL().SchemeIs(url::kHttpsScheme) &&
-          !rfh->GetParent()) {
+      if (params.url.SchemeIs(url::kHttpsScheme) && !rfh->GetParent() &&
+          handle->GetNetErrorCode() == net::OK) {
         UMA_HISTOGRAM_BOOLEAN(
             "Navigation.SecureSchemeHasSSLStatus.NewPageInPageOriginMismatch",
             !!new_entry->GetSSL().certificate);
@@ -1169,7 +1179,8 @@ void NavigationControllerImpl::RendererDidNavigateToNewPage(
 
     update_virtual_url = new_entry->update_virtual_url_with_url();
 
-    if (new_entry->GetURL().SchemeIs(url::kHttpsScheme) && !rfh->GetParent()) {
+    if (params.url.SchemeIs(url::kHttpsScheme) && !rfh->GetParent() &&
+        handle->GetNetErrorCode() == net::OK) {
       UMA_HISTOGRAM_BOOLEAN("Navigation.SecureSchemeHasSSLStatus.NewPageInPage",
                             !!new_entry->GetSSL().certificate);
     }
@@ -1193,7 +1204,8 @@ void NavigationControllerImpl::RendererDidNavigateToNewPage(
     update_virtual_url = new_entry->update_virtual_url_with_url();
     new_entry->GetSSL() = handle->ssl_status();
 
-    if (new_entry->GetURL().SchemeIs(url::kHttpsScheme) && !rfh->GetParent()) {
+    if (params.url.SchemeIs(url::kHttpsScheme) && !rfh->GetParent() &&
+        handle->GetNetErrorCode() == net::OK) {
       UMA_HISTOGRAM_BOOLEAN(
           "Navigation.SecureSchemeHasSSLStatus.NewPagePendingEntryMatches",
           !!new_entry->GetSSL().certificate);
@@ -1220,7 +1232,8 @@ void NavigationControllerImpl::RendererDidNavigateToNewPage(
     update_virtual_url = needs_update;
     new_entry->GetSSL() = handle->ssl_status();
 
-    if (new_entry->GetURL().SchemeIs(url::kHttpsScheme) && !rfh->GetParent()) {
+    if (params.url.SchemeIs(url::kHttpsScheme) && !rfh->GetParent() &&
+        handle->GetNetErrorCode() == net::OK) {
       UMA_HISTOGRAM_BOOLEAN(
           "Navigation.SecureSchemeHasSSLStatus.NewPageNoMatchingEntry",
           !!new_entry->GetSSL().certificate);
@@ -1245,9 +1258,11 @@ void NavigationControllerImpl::RendererDidNavigateToNewPage(
   // Update the FrameNavigationEntry for new main frame commits.
   FrameNavigationEntry* frame_entry =
       new_entry->GetFrameEntry(rfh->frame_tree_node());
-  frame_entry->set_frame_unique_name(params.frame_unique_name);
+  frame_entry->set_frame_unique_name(rfh->frame_tree_node()->unique_name());
   frame_entry->set_item_sequence_number(params.item_sequence_number);
   frame_entry->set_document_sequence_number(params.document_sequence_number);
+  frame_entry->set_redirect_chain(params.redirects);
+  frame_entry->SetPageState(params.page_state);
   frame_entry->set_method(params.method);
   frame_entry->set_post_id(params.post_id);
 
@@ -1298,7 +1313,8 @@ void NavigationControllerImpl::RendererDidNavigateToExistingPage(
     if (!is_same_document)
       entry->GetSSL() = handle->ssl_status();
 
-    if (entry->GetURL().SchemeIs(url::kHttpsScheme) && !rfh->GetParent()) {
+    if (params.url.SchemeIs(url::kHttpsScheme) && !rfh->GetParent() &&
+        handle->GetNetErrorCode() == net::OK) {
       bool has_cert = !!entry->GetSSL().certificate;
       if (is_same_document) {
         UMA_HISTOGRAM_BOOLEAN(
@@ -1337,7 +1353,8 @@ void NavigationControllerImpl::RendererDidNavigateToExistingPage(
         entry->GetSSL() = handle->ssl_status();
     }
 
-    if (entry->GetURL().SchemeIs(url::kHttpsScheme) && !rfh->GetParent()) {
+    if (params.url.SchemeIs(url::kHttpsScheme) && !rfh->GetParent() &&
+        handle->GetNetErrorCode() == net::OK) {
       bool has_cert = !!entry->GetSSL().certificate;
       if (is_same_document && was_restored) {
         UMA_HISTOGRAM_BOOLEAN(
@@ -1371,7 +1388,8 @@ void NavigationControllerImpl::RendererDidNavigateToExistingPage(
     if (!is_same_document)
       entry->GetSSL() = handle->ssl_status();
 
-    if (entry->GetURL().SchemeIs(url::kHttpsScheme) && !rfh->GetParent()) {
+    if (params.url.SchemeIs(url::kHttpsScheme) && !rfh->GetParent() &&
+        handle->GetNetErrorCode() == net::OK) {
       bool has_cert = !!entry->GetSSL().certificate;
       if (is_same_document) {
         UMA_HISTOGRAM_BOOLEAN(
@@ -1463,7 +1481,7 @@ void NavigationControllerImpl::RendererDidNavigateToSamePage(
   existing_entry->GetSSL() = handle->ssl_status();
 
   if (existing_entry->GetURL().SchemeIs(url::kHttpsScheme) &&
-      !rfh->GetParent()) {
+      !rfh->GetParent() && handle->GetNetErrorCode() == net::OK) {
     UMA_HISTOGRAM_BOOLEAN("Navigation.SecureSchemeHasSSLStatus.SamePage",
                           !!existing_entry->GetSSL().certificate);
   }
@@ -1499,18 +1517,15 @@ void NavigationControllerImpl::RendererDidNavigateNewSubframe(
 
   // Make sure we don't leak frame_entry if new_entry doesn't take ownership.
   scoped_refptr<FrameNavigationEntry> frame_entry(new FrameNavigationEntry(
-      params.frame_unique_name, params.item_sequence_number,
+      rfh->frame_tree_node()->unique_name(), params.item_sequence_number,
       params.document_sequence_number, rfh->GetSiteInstance(), nullptr,
-      params.url, params.referrer, params.method, params.post_id));
+      params.url, params.referrer, params.redirects, params.page_state,
+      params.method, params.post_id));
+
   std::unique_ptr<NavigationEntryImpl> new_entry =
       GetLastCommittedEntry()->CloneAndReplace(
           frame_entry.get(), is_same_document, rfh->frame_tree_node(),
           delegate_->GetFrameTree()->root());
-
-  if (new_entry->GetURL().SchemeIs(url::kHttpsScheme) && !rfh->GetParent()) {
-    UMA_HISTOGRAM_BOOLEAN("Navigation.SecureSchemeHasSSLStatus.NewSubFrame",
-                          !!new_entry->GetSSL().certificate);
-  }
 
   // TODO(creis): Update this to add the frame_entry if we can't find the one
   // to replace, which can happen due to a unique name change.  See
@@ -1589,27 +1604,27 @@ int NavigationControllerImpl::GetIndexOfEntry(
   return -1;
 }
 
-// There are two general cases where a navigation is "in page":
+// There are two general cases where a navigation is "same-document":
 // 1. A fragment navigation, in which the url is kept the same except for the
 //    reference fragment.
 // 2. A history API navigation (pushState and replaceState). This case is
-//    always in-page, but the urls are not guaranteed to match excluding the
-//    fragment. The relevant spec allows pushState/replaceState to any URL on
-//    the same origin.
+//    always same-document, but the urls are not guaranteed to match excluding
+//    the fragment. The relevant spec allows pushState/replaceState to any URL
+//    on the same origin.
 // However, due to reloads, even identical urls are *not* guaranteed to be
-// in-page navigations, we have to trust the renderer almost entirely.
+// same-document navigations, we have to trust the renderer almost entirely.
 // The one thing we do know is that cross-origin navigations will *never* be
-// in-page. Therefore, trust the renderer if the URLs are on the same origin,
-// and assume the renderer is malicious if a cross-origin navigation claims to
-// be in-page.
+// same-document. Therefore, trust the renderer if the URLs are on the same
+// origin, and assume the renderer is malicious if a cross-origin navigation
+// claims to be same-document.
 //
 // TODO(creis): Clean up and simplify the about:blank and origin checks below,
 // which are likely redundant with each other.  Be careful about data URLs vs
 // about:blank, both of which are unique origins and thus not considered equal.
-bool NavigationControllerImpl::IsURLInPageNavigation(
+bool NavigationControllerImpl::IsURLSameDocumentNavigation(
     const GURL& url,
     const url::Origin& origin,
-    bool renderer_says_in_page,
+    bool renderer_says_same_document,
     RenderFrameHost* rfh) const {
   RenderFrameHostImpl* rfhi = static_cast<RenderFrameHostImpl*>(rfh);
   GURL last_committed_url;
@@ -1645,11 +1660,11 @@ bool NavigationControllerImpl::IsURLInPageNavigation(
                         !prefs.web_security_enabled ||
                         (prefs.allow_universal_access_from_file_urls &&
                          committed_origin.scheme() == url::kFileScheme);
-  if (!is_same_origin && renderer_says_in_page) {
+  if (!is_same_origin && renderer_says_same_document) {
     bad_message::ReceivedBadMessage(rfh->GetProcess(),
                                     bad_message::NC_IN_PAGE_NAVIGATION);
   }
-  return is_same_origin && renderer_says_in_page;
+  return is_same_origin && renderer_says_same_document;
 }
 
 void NavigationControllerImpl::CopyStateFrom(const NavigationController& temp,

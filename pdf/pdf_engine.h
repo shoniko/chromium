@@ -18,7 +18,7 @@
 #include <vector>
 
 #include "base/strings/string16.h"
-
+#include "base/time/time.h"
 #include "ppapi/c/dev/pp_cursor_type_dev.h"
 #include "ppapi/c/dev/ppp_printing_dev.h"
 #include "ppapi/c/ppb_input_event.h"
@@ -58,6 +58,31 @@ class PDFEngine {
     PERMISSION_PRINT_HIGH_QUALITY,
   };
 
+  // Values other then |kCount| are persisted to logs as part of metric
+  // collection, so should not be changed.
+  enum class FormType {
+    kNone = 0,
+    kAcroForm = 1,
+    kXFAFull = 2,
+    kXFAForeground = 3,
+    kCount = 4,
+  };
+
+  struct DocumentFeatures {
+    // Number of pages in document.
+    size_t page_count = 0;
+    // Whether any files are attached to document (see "File Attachment
+    // Annotations" on page 637 of PDF Reference 1.7).
+    bool has_attachments = false;
+    // Whether the document is linearized (see Appendix F "Linearized PDF" of
+    // PDF Reference 1.7).
+    bool is_linearized = false;
+    // Whether the PDF is Tagged (see 10.7 "Tagged PDF" in PDF Reference 1.7).
+    bool is_tagged = false;
+    // What type of form the document contains.
+    FormType form_type = FormType::kNone;
+  };
+
   // The interface that's provided to the rendering engine.
   class Client {
    public:
@@ -73,8 +98,13 @@ class PDFEngine {
     virtual void Scroll(const pp::Point& point) = 0;
 
     // Scroll the horizontal/vertical scrollbars to a given position.
-    virtual void ScrollToX(int position) = 0;
-    virtual void ScrollToY(int position) = 0;
+    // Values are in screen coordinates, where 0 is the top/left of the document
+    // and a positive value is the distance in pixels from that line.
+    // For ScrollToY, setting |compensate_for_toolbar| will align the position
+    // with the bottom of the toolbar so the given position is always visible.
+    virtual void ScrollToX(int x_in_screen_coords) = 0;
+    virtual void ScrollToY(int y_in_screen_coords,
+                           bool compensate_for_toolbar) = 0;
 
     // Scroll to zero-based |page|.
     virtual void ScrollToPage(int page) = 0;
@@ -134,18 +164,14 @@ class PDFEngine {
                             const void* data,
                             int length) = 0;
 
-    // Pops up a file selection dialog and returns the result.
-    virtual std::string ShowFileSelectionDialog() = 0;
-
     // Creates and returns new URL loader for partial document requests.
     virtual pp::URLLoader CreateURLLoader() = 0;
 
-    // Calls the client's OnCallback() function in |delay_in_ms| with the given
-    // |id|.
-    virtual void ScheduleCallback(int id, int delay_in_ms) = 0;
-    // Calls the client's OnTouchTimerCallback() function in |delay_in_ms| with
-    // the given |id|.
-    virtual void ScheduleTouchTimerCallback(int id, int delay_in_ms) = 0;
+    // Calls the client's OnCallback() function in |delay| with the given |id|.
+    virtual void ScheduleCallback(int id, base::TimeDelta delay) = 0;
+    // Calls the client's OnTouchTimerCallback() function in |delay| with the
+    // given |id|.
+    virtual void ScheduleTouchTimerCallback(int id, base::TimeDelta delay) = 0;
 
     // Searches the given string for "term" and returns the results.  Unicode-
     // aware.
@@ -153,16 +179,17 @@ class PDFEngine {
       int start_index;
       int length;
     };
-    virtual void SearchString(const base::char16* string,
-                              const base::char16* term,
-                              bool case_sensitive,
-                              std::vector<SearchStringResult>* results) = 0;
+    virtual std::vector<SearchStringResult> SearchString(
+        const base::char16* string,
+        const base::char16* term,
+        bool case_sensitive) = 0;
 
     // Notifies the client that the engine has painted a page from the document.
     virtual void DocumentPaintOccurred() = 0;
 
     // Notifies the client that the document has finished loading.
-    virtual void DocumentLoadComplete(int page_count) = 0;
+    virtual void DocumentLoadComplete(
+        const DocumentFeatures& document_features) = 0;
 
     // Notifies the client that the document has failed to load.
     virtual void DocumentLoadFailed() = 0;
@@ -187,6 +214,9 @@ class PDFEngine {
 
     // Get the background color of the PDF.
     virtual uint32_t GetBackgroundColor() = 0;
+
+    // Cancel browser initiated document download.
+    virtual void CancelBrowserDownload() = 0;
 
     // Sets selection status.
     virtual void IsSelectingChanged(bool is_selecting) {}
@@ -311,8 +341,6 @@ class PDFEngine {
   // general scrolling - the engine will not repaint due to this.
   virtual void SetScrollPosition(const pp::Point& position) = 0;
 #endif
-
-  virtual bool IsProgressiveLoad() = 0;
 
   virtual std::string GetMetadata(const std::string& key) = 0;
 

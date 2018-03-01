@@ -18,8 +18,8 @@
 #include "ui/display/screen.h"
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/slide_animation.h"
-#include "ui/message_center/message_center_style.h"
 #include "ui/message_center/notification.h"
+#include "ui/message_center/public/cpp/message_center_constants.h"
 #include "ui/message_center/views/message_popup_collection.h"
 #include "ui/message_center/views/message_view.h"
 #include "ui/message_center/views/popup_alignment_delegate.h"
@@ -358,19 +358,11 @@ void ToastContentsView::RemoveNotification(
 }
 
 std::unique_ptr<ui::MenuModel> ToastContentsView::CreateMenuModel(
-    const NotifierId& notifier_id,
-    const base::string16& display_source) {
+    const Notification& notification) {
   // Should not reach, the context menu should be handled in
   // MessagePopupCollection.
   NOTREACHED();
   return nullptr;
-}
-
-bool ToastContentsView::HasClickedListener(
-    const std::string& notification_id) {
-  if (!collection_)
-    return false;
-  return collection_->HasClickedListener(notification_id);
 }
 
 void ToastContentsView::ClickOnNotificationButton(
@@ -411,7 +403,7 @@ void ToastContentsView::CreateWidget(
   // default. But it is not good for popup. So we override it with the normal
   // WindowTargeter.
   gfx::NativeWindow native_window = widget->GetNativeWindow();
-  native_window->SetEventTargeter(base::MakeUnique<aura::WindowTargeter>());
+  native_window->SetEventTargeter(std::make_unique<aura::WindowTargeter>());
 #endif
 }
 

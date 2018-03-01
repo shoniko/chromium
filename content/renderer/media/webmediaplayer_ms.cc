@@ -623,7 +623,9 @@ bool WebMediaPlayerMS::DidLoadingProgress() {
 
 void WebMediaPlayerMS::Paint(blink::WebCanvas* canvas,
                              const blink::WebRect& rect,
-                             cc::PaintFlags& flags) {
+                             cc::PaintFlags& flags,
+                             int already_uploaded_id,
+                             VideoFrameUploadMetadata* out_metadata) {
   DVLOG(3) << __func__;
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -764,7 +766,9 @@ bool WebMediaPlayerMS::CopyVideoTextureToPlatformTexture(
     unsigned type,
     int level,
     bool premultiply_alpha,
-    bool flip_y) {
+    bool flip_y,
+    int already_uploaded_id,
+    VideoFrameUploadMetadata* out_metadata) {
   TRACE_EVENT0("webmediaplayerms", "copyVideoTextureToPlatformTexture");
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -817,11 +821,11 @@ bool WebMediaPlayerMS::TexImageImpl(TexImageFunctionID functionID,
     // GPU Process crashed.
     if (!provider)
       return false;
-    return media::SkCanvasVideoRenderer::TexImage2D(
+    return media::PaintCanvasVideoRenderer::TexImage2D(
         target, texture, gl, provider->ContextCapabilities(), video_frame.get(),
         level, internalformat, format, type, flip_y, premultiply_alpha);
   } else if (functionID == kTexSubImage2D) {
-    return media::SkCanvasVideoRenderer::TexSubImage2D(
+    return media::PaintCanvasVideoRenderer::TexSubImage2D(
         target, gl, video_frame.get(), level, format, type, xoffset, yoffset,
         flip_y, premultiply_alpha);
   }
@@ -888,7 +892,8 @@ void WebMediaPlayerMS::SetReadyState(WebMediaPlayer::ReadyState state) {
   get_client()->ReadyStateChanged();
 }
 
-media::SkCanvasVideoRenderer* WebMediaPlayerMS::GetSkCanvasVideoRenderer() {
+media::PaintCanvasVideoRenderer*
+WebMediaPlayerMS::GetPaintCanvasVideoRenderer() {
   return &video_renderer_;
 }
 

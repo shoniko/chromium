@@ -30,6 +30,7 @@
 #include "platform/loader/fetch/ResourceLoader.h"
 
 #include "platform/SharedBuffer.h"
+#include "platform/WebTaskRunner.h"
 #include "platform/exported/WrappedResourceRequest.h"
 #include "platform/exported/WrappedResourceResponse.h"
 #include "platform/loader/fetch/FetchContext.h"
@@ -37,6 +38,7 @@
 #include "platform/loader/fetch/ResourceError.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/network/NetworkInstrumentation.h"
+#include "platform/scheduler/child/web_scheduler.h"
 #include "platform/weborigin/SecurityViolationReportingPolicy.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/CurrentTime.h"
@@ -44,7 +46,6 @@
 #include "platform/wtf/text/StringBuilder.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCORS.h"
-#include "public/platform/WebCachePolicy.h"
 #include "public/platform/WebData.h"
 #include "public/platform/WebURLError.h"
 #include "public/platform/WebURLRequest.h"
@@ -52,6 +53,15 @@
 #include "services/network/public/interfaces/fetch_api.mojom-blink.h"
 
 namespace blink {
+
+static RefPtr<WebTaskRunner> GetTaskRunnerFor(const ResourceRequest& request,
+                                              FetchContext& context) {
+  if (!request.GetKeepalive())
+    return context.GetLoadingTaskRunner();
+  // The loader should be able to work after the frame destruction, so we
+  // cannot use the task runner associated with the frame.
+  return Platform::Current()->CurrentThread()->Scheduler()->LoadingTaskRunner();
+}
 
 ResourceLoader* ResourceLoader::Create(ResourceFetcher* fetcher,
                                        ResourceLoadScheduler* scheduler,
@@ -66,7 +76,11 @@ ResourceLoader::ResourceLoader(ResourceFetcher* fetcher,
       fetcher_(fetcher),
       scheduler_(scheduler),
       resource_(resource),
-      is_cache_aware_loading_activated_(false) {
+      is_cache_aware_loading_activated_(false),
+      cancel_timer_(
+          GetTaskRunnerFor(resource_->GetResourceRequest(), Context()),
+          this,
+          &ResourceLoader::CancelTimerFired) {
   DCHECK(resource_);
   DCHECK(fetcher_);
 
@@ -75,7 +89,7 @@ ResourceLoader::ResourceLoader(ResourceFetcher* fetcher,
 
 ResourceLoader::~ResourceLoader() {}
 
-DEFINE_TRACE(ResourceLoader) {
+void ResourceLoader::Trace(blink::Visitor* visitor) {
   visitor->Trace(fetcher_);
   visitor->Trace(scheduler_);
   visitor->Trace(resource_);
@@ -85,7 +99,8 @@ DEFINE_TRACE(ResourceLoader) {
 void ResourceLoader::Start() {
   const ResourceRequest& request = resource_->GetResourceRequest();
   ActivateCacheAwareLoadingIfNeeded(request);
-  loader_ = Context().CreateURLLoader(request);
+  loader_ =
+      Context().CreateURLLoader(request, GetTaskRunnerFor(request, Context()));
 
   // Synchronous requests should not work with a throttling. Also, tentatively
   // disables throttling for fetch requests that could keep on holding an active
@@ -119,7 +134,8 @@ void ResourceLoader::StartWith(const ResourceRequest& request) {
     // Override cache policy for cache-aware loading. If this request fails, a
     // reload with original request will be triggered in DidFail().
     ResourceRequest cache_aware_request(request);
-    cache_aware_request.SetCachePolicy(WebCachePolicy::kReturnCacheDataIfValid);
+    cache_aware_request.SetCacheMode(
+        mojom::FetchCacheMode::kUnspecifiedOnlyIfCachedStrict);
     loader_->LoadAsynchronously(WrappedResourceRequest(cache_aware_request),
                                 this);
     return;
@@ -141,7 +157,8 @@ void ResourceLoader::Release(ResourceLoadScheduler::ReleaseOption option) {
 void ResourceLoader::Restart(const ResourceRequest& request) {
   CHECK_EQ(resource_->Options().synchronous_policy, kRequestAsynchronously);
 
-  loader_ = Context().CreateURLLoader(request);
+  loader_ =
+      Context().CreateURLLoader(request, GetTaskRunnerFor(request, Context()));
   StartWith(request);
 }
 
@@ -157,6 +174,16 @@ void ResourceLoader::DidChangePriority(ResourceLoadPriority load_priority,
         static_cast<WebURLRequest::Priority>(load_priority),
         intra_priority_value);
   }
+}
+
+void ResourceLoader::ScheduleCancel() {
+  if (!cancel_timer_.IsActive())
+    cancel_timer_.StartOneShot(0, BLINK_FROM_HERE);
+}
+
+void ResourceLoader::CancelTimerFired(TimerBase*) {
+  if (loader_ && !resource_->HasClientsOrObservers())
+    Cancel();
 }
 
 void ResourceLoader::Cancel() {
@@ -271,9 +298,9 @@ bool ResourceLoader::WillFollowRedirect(
             kEnableCORSHandlingByResourceFetcher &&
         fetch_request_mode == WebURLRequest::kFetchRequestModeCORS) {
       RefPtr<SecurityOrigin> source_origin = options.security_origin;
-      if (!source_origin.Get())
+      if (!source_origin.get())
         source_origin = Context().GetSecurityOrigin();
-      WebSecurityOrigin source_web_origin(source_origin.Get());
+      WebSecurityOrigin source_web_origin(source_origin.get());
       WrappedResourceRequest new_request_wrapper(new_request);
       WebString cors_error_msg;
       if (!WebCORS::HandleRedirect(
@@ -337,7 +364,8 @@ bool ResourceLoader::WillFollowRedirect(
   Context().PrepareRequest(new_request,
                            FetchContext::RedirectType::kForRedirect);
   Context().DispatchWillSendRequest(resource_->Identifier(), new_request,
-                                    redirect_response, options.initiator_info);
+                                    redirect_response, resource_->GetType(),
+                                    options.initiator_info);
 
   // First-party cookie logic moved from DocumentLoader in Blink to
   // net::URLRequest in the browser. Assert that Blink didn't try to change it
@@ -400,7 +428,7 @@ CORSStatus ResourceLoader::DetermineCORSStatus(const ResourceResponse& response,
   if (resource_->GetType() == Resource::Type::kMainResource)
     return CORSStatus::kNotApplicable;
 
-  SecurityOrigin* source_origin = resource_->Options().security_origin.Get();
+  SecurityOrigin* source_origin = resource_->Options().security_origin.get();
 
   if (!source_origin)
     source_origin = Context().GetSecurityOrigin();
@@ -711,7 +739,11 @@ void ResourceLoader::ActivateCacheAwareLoadingIfNeeded(
     return;
 
   // Don't activate if cache policy is explicitly set.
-  if (request.GetCachePolicy() != WebCachePolicy::kUseProtocolCachePolicy)
+  if (request.GetCacheMode() != mojom::FetchCacheMode::kDefault)
+    return;
+
+  // Don't activate if the page is controlled by service worker.
+  if (fetcher_->IsControlledByServiceWorker())
     return;
 
   is_cache_aware_loading_activated_ = true;

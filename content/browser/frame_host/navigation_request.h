@@ -104,6 +104,7 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
   ~NavigationRequest() override;
 
   // Called on the UI thread by the Navigator to start the navigation.
+  // The NavigationRequest can be deleted while BeginNavigation() is called.
   void BeginNavigation();
 
   const CommonNavigationParams& common_params() const { return common_params_; }
@@ -141,7 +142,7 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
 
   bool browser_initiated() const { return browser_initiated_ ; }
 
-  bool may_transfer() const { return may_transfer_; }
+  bool from_begin_navigation() const { return from_begin_navigation_; }
 
   AssociatedSiteInstanceType associated_site_instance_type() const {
     return associated_site_instance_type_;
@@ -191,7 +192,7 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
                     const BeginNavigationParams& begin_params,
                     const RequestNavigationParams& request_params,
                     bool browser_initiated,
-                    bool may_transfer,
+                    bool from_begin_navigation,
                     const FrameNavigationEntry* frame_navigation_entry,
                     const NavigationEntryImpl* navitation_entry);
 
@@ -215,12 +216,25 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
                        bool should_ssl_errors_be_fatal) override;
   void OnRequestStarted(base::TimeTicks timestamp) override;
 
+  // A version of OnRequestFailed() that allows skipping throttles, to be used
+  // when a request failed due to a throttle result itself.
+  void OnRequestFailedInternal(bool has_stale_copy_in_cache,
+                               int net_error,
+                               const base::Optional<net::SSLInfo>& ssl_info,
+                               bool should_ssl_errors_be_fatal,
+                               bool skip_throttles);
+
   // Called when the NavigationThrottles have been checked by the
   // NavigationHandle.
   void OnStartChecksComplete(NavigationThrottle::ThrottleCheckResult result);
   void OnRedirectChecksComplete(NavigationThrottle::ThrottleCheckResult result);
+  void OnFailureChecksComplete(RenderFrameHostImpl* render_frame_host,
+                               NavigationThrottle::ThrottleCheckResult result);
   void OnWillProcessResponseChecksComplete(
       NavigationThrottle::ThrottleCheckResult result);
+
+  // Called either by OnFailureChecksComplete() or OnRequestFailed() directly.
+  void CommitErrorPage(RenderFrameHostImpl* render_frame_host);
 
   // Have a RenderFrameHost commit the navigation. The NavigationRequest will
   // be destroyed after this call.
@@ -302,14 +316,11 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
   // SiteInstance was a brand new SiteInstance, it is not stored.
   scoped_refptr<SiteInstance> speculative_site_instance_;
 
-  // Whether the request may be transferred to a different process upon commit.
-  // True for browser-initiated navigations and renderer-inititated navigations
-  // started via the OpenURL path.
-  // Note: the RenderFrameHostManager may still decide to have the navigation
-  // commit in a different renderer process if it detects that a renderer
-  // transfer is needed. This is the case in particular when --site-per-process
-  // is enabled.
-  bool may_transfer_;
+  // Whether the NavigationRequest was created after receiving a BeginNavigation
+  // IPC. When true, main frame navigations should not commit in a different
+  // process (unless asked by the content/ embedder). When true, the renderer
+  // process expects to be notified if the navigation is aborted.
+  bool from_begin_navigation_;
 
   std::unique_ptr<NavigationHandleImpl> navigation_handle_;
 
@@ -319,6 +330,13 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
   scoped_refptr<ResourceResponse> response_;
   std::unique_ptr<StreamHandle> body_;
   mojo::ScopedDataPipeConsumerHandle handle_;
+  SSLStatus ssl_status_;
+  bool is_download_;
+
+  // Holds information for the navigation while the WillFailRequest
+  // checks are performed by the NavigationHandle.
+  bool has_stale_copy_in_cache_;
+  int net_error_;
 
   base::Closure on_start_checks_complete_closure_;
 

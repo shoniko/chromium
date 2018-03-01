@@ -18,7 +18,6 @@
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/media_stream_ui_proxy.h"
-#include "content/common/media/media_stream_options.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "media/audio/audio_device_description.h"
@@ -68,7 +67,7 @@ const char kMockSalt[] = "";
 class MockAudioManager : public AudioManagerPlatform {
  public:
   MockAudioManager()
-      : AudioManagerPlatform(base::MakeUnique<media::TestAudioThread>(),
+      : AudioManagerPlatform(std::make_unique<media::TestAudioThread>(),
                              &fake_audio_log_factory_),
         num_output_devices_(2),
         num_input_devices_(2) {}
@@ -136,9 +135,10 @@ class MediaStreamManagerTest : public ::testing::Test {
  public:
   MediaStreamManagerTest()
       : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {
-    audio_manager_.reset(new MockAudioManager());
-    audio_system_ = media::AudioSystemImpl::Create(audio_manager_.get());
-    media_stream_manager_ = base::MakeUnique<MediaStreamManager>(
+    audio_manager_ = std::make_unique<MockAudioManager>();
+    audio_system_ =
+        std::make_unique<media::AudioSystemImpl>(audio_manager_.get());
+    media_stream_manager_ = std::make_unique<MediaStreamManager>(
         audio_system_.get(), audio_manager_->GetTaskRunner());
     base::RunLoop().RunUntilIdle();
   }
@@ -233,7 +233,7 @@ TEST_F(MediaStreamManagerTest, MakeAndCancelMultipleRequests) {
 }
 
 TEST_F(MediaStreamManagerTest, DeviceID) {
-  url::Origin security_origin(GURL("http://localhost"));
+  url::Origin security_origin = url::Origin::Create(GURL("http://localhost"));
   const std::string unique_default_id(
       media::AudioDeviceDescription::kDefaultDeviceId);
   const std::string hashed_default_id =

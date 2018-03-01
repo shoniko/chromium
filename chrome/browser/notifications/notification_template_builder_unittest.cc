@@ -52,15 +52,18 @@ class NotificationTemplateBuilderTest : public ::testing::Test {
   // the given |notification_data|, and writes that to |*xml_template|. Calls
   // must be wrapped in ASSERT_NO_FATAL_FAILURE().
   void BuildTemplate(const NotificationData& notification_data,
+                     const std::vector<message_center::ButtonInfo>& buttons,
                      base::string16* xml_template) {
     GURL origin_url(notification_data.origin);
 
-    Notification notification(
+    message_center::Notification notification(
         message_center::NOTIFICATION_TYPE_SIMPLE, notification_data.id,
         base::UTF8ToUTF16(notification_data.title),
         base::UTF8ToUTF16(notification_data.message), gfx::Image() /* icon */,
         base::string16() /* display_source */, origin_url,
         NotifierId(origin_url), RichNotificationData(), nullptr /* delegate */);
+    if (buttons.size())
+      notification.set_buttons(buttons);
 
     template_ =
         NotificationTemplateBuilder::Build(notification_data.id, notification);
@@ -79,18 +82,155 @@ class NotificationTemplateBuilderTest : public ::testing::Test {
 TEST_F(NotificationTemplateBuilderTest, SimpleToast) {
   NotificationData notification_data;
   base::string16 xml_template;
+  std::vector<message_center::ButtonInfo> buttons;
 
-  ASSERT_NO_FATAL_FAILURE(BuildTemplate(notification_data, &xml_template));
+  ASSERT_NO_FATAL_FAILURE(
+      BuildTemplate(notification_data, buttons, &xml_template));
 
   const wchar_t kExpectedXml[] =
       LR"(<toast launch="notification_id">
  <visual>
-  <binding template="ToastText04">
-   <text id="1">My Title</text>
-   <text id="2">My Message</text>
-   <text id="3">example.com</text>
+  <binding template="ToastGeneric">
+   <text>My Title</text>
+   <text>My Message</text>
+   <text>example.com</text>
   </binding>
  </visual>
+</toast>
+)";
+
+  EXPECT_EQ(xml_template, kExpectedXml);
+}
+
+TEST_F(NotificationTemplateBuilderTest, Buttons) {
+  NotificationData notification_data;
+  base::string16 xml_template;
+
+  std::vector<message_center::ButtonInfo> buttons;
+  buttons.emplace_back(base::ASCIIToUTF16("Button1"));
+  buttons.emplace_back(base::ASCIIToUTF16("Button2"));
+
+  ASSERT_NO_FATAL_FAILURE(
+      BuildTemplate(notification_data, buttons, &xml_template));
+
+  const wchar_t kExpectedXml[] =
+      LR"(<toast launch="notification_id">
+ <visual>
+  <binding template="ToastGeneric">
+   <text>My Title</text>
+   <text>My Message</text>
+   <text>example.com</text>
+  </binding>
+ </visual>
+ <actions>
+  <action activationType="foreground" content="Button1" arguments="buttonIndex=0"/>
+  <action activationType="foreground" content="Button2" arguments="buttonIndex=1"/>
+ </actions>
+</toast>
+)";
+
+  EXPECT_EQ(xml_template, kExpectedXml);
+}
+
+TEST_F(NotificationTemplateBuilderTest, InlineReplies) {
+  NotificationData notification_data;
+  base::string16 xml_template;
+
+  std::vector<message_center::ButtonInfo> buttons;
+  message_center::ButtonInfo button1(base::ASCIIToUTF16("Button1"));
+  button1.type = message_center::ButtonType::TEXT;
+  button1.placeholder = base::ASCIIToUTF16("Reply here");
+  buttons.emplace_back(button1);
+  buttons.emplace_back(base::ASCIIToUTF16("Button2"));
+
+  ASSERT_NO_FATAL_FAILURE(
+      BuildTemplate(notification_data, buttons, &xml_template));
+
+  const wchar_t kExpectedXml[] =
+      LR"(<toast launch="notification_id">
+ <visual>
+  <binding template="ToastGeneric">
+   <text>My Title</text>
+   <text>My Message</text>
+   <text>example.com</text>
+  </binding>
+ </visual>
+ <actions>
+  <input id="userResponse" type="text" placeHolderContent="Reply here"/>
+  <action activationType="foreground" content="Button1" arguments="buttonIndex=0"/>
+  <action activationType="foreground" content="Button2" arguments="buttonIndex=1"/>
+ </actions>
+</toast>
+)";
+
+  EXPECT_EQ(xml_template, kExpectedXml);
+}
+
+TEST_F(NotificationTemplateBuilderTest, InlineRepliesDoubleInput) {
+  NotificationData notification_data;
+  base::string16 xml_template;
+
+  std::vector<message_center::ButtonInfo> buttons;
+  message_center::ButtonInfo button1(base::ASCIIToUTF16("Button1"));
+  button1.type = message_center::ButtonType::TEXT;
+  button1.placeholder = base::ASCIIToUTF16("Reply here");
+  buttons.emplace_back(button1);
+  message_center::ButtonInfo button2(base::ASCIIToUTF16("Button2"));
+  button2.type = message_center::ButtonType::TEXT;
+  button2.placeholder = base::ASCIIToUTF16("Should not appear");
+  buttons.emplace_back(button2);
+
+  ASSERT_NO_FATAL_FAILURE(
+      BuildTemplate(notification_data, buttons, &xml_template));
+
+  const wchar_t kExpectedXml[] =
+      LR"(<toast launch="notification_id">
+ <visual>
+  <binding template="ToastGeneric">
+   <text>My Title</text>
+   <text>My Message</text>
+   <text>example.com</text>
+  </binding>
+ </visual>
+ <actions>
+  <input id="userResponse" type="text" placeHolderContent="Reply here"/>
+  <action activationType="foreground" content="Button1" arguments="buttonIndex=0"/>
+  <action activationType="foreground" content="Button2" arguments="buttonIndex=1"/>
+ </actions>
+</toast>
+)";
+
+  EXPECT_EQ(xml_template, kExpectedXml);
+}
+
+TEST_F(NotificationTemplateBuilderTest, InlineRepliesTextTypeNotFirst) {
+  NotificationData notification_data;
+  base::string16 xml_template;
+
+  std::vector<message_center::ButtonInfo> buttons;
+  buttons.emplace_back(base::ASCIIToUTF16("Button1"));
+  message_center::ButtonInfo button2(base::ASCIIToUTF16("Button2"));
+  button2.type = message_center::ButtonType::TEXT;
+  button2.placeholder = base::ASCIIToUTF16("Reply here");
+  buttons.emplace_back(button2);
+
+  ASSERT_NO_FATAL_FAILURE(
+      BuildTemplate(notification_data, buttons, &xml_template));
+
+  const wchar_t kExpectedXml[] =
+      LR"(<toast launch="notification_id">
+ <visual>
+  <binding template="ToastGeneric">
+   <text>My Title</text>
+   <text>My Message</text>
+   <text>example.com</text>
+  </binding>
+ </visual>
+ <actions>
+  <input id="userResponse" type="text" placeHolderContent="Reply here"/>
+  <action activationType="foreground" content="Button1" arguments="buttonIndex=0"/>
+  <action activationType="foreground" content="Button2" arguments="buttonIndex=1"/>
+ </actions>
 </toast>
 )";
 

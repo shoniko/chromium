@@ -4,6 +4,7 @@
 
 #include "chrome/browser/notifications/notification_platform_bridge_android.h"
 
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -15,7 +16,6 @@
 #include "base/strings/nullable_string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_common.h"
 #include "chrome/browser/notifications/notification_display_service.h"
 #include "chrome/browser/notifications/notification_display_service_factory.h"
@@ -32,6 +32,7 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/image/image.h"
+#include "ui/message_center/notification.h"
 
 using base::android::AttachCurrentThread;
 using base::android::ConvertJavaStringToUTF8;
@@ -104,8 +105,9 @@ void ProfileLoadedCallback(NotificationCommon::Operation operation,
                            NotificationCommon::Type notification_type,
                            const std::string& origin,
                            const std::string& notification_id,
-                           int action_index,
-                           const base::NullableString16& reply,
+                           const base::Optional<int>& action_index,
+                           const base::Optional<base::string16>& reply,
+                           const base::Optional<bool>& by_user,
                            Profile* profile) {
   if (!profile) {
     // TODO(miguelg): Add UMA for this condition.
@@ -119,7 +121,7 @@ void ProfileLoadedCallback(NotificationCommon::Operation operation,
 
   display_service->ProcessNotificationOperation(operation, notification_type,
                                                 origin, notification_id,
-                                                action_index, reply);
+                                                action_index, reply, by_user);
 }
 
 }  // namespace
@@ -165,11 +167,10 @@ void NotificationPlatformBridgeAndroid::OnNotificationClicked(
   std::string profile_id = ConvertJavaStringToUTF8(env, java_profile_id);
   std::string webapk_package =
       ConvertJavaStringToUTF8(env, java_webapk_package);
-  base::NullableString16 reply =
-      java_reply
-          ? base::NullableString16(ConvertJavaStringToUTF16(env, java_reply),
-                                   false /* is_null */)
-          : base::NullableString16();
+
+  base::Optional<base::string16> reply;
+  if (java_reply)
+    reply = ConvertJavaStringToUTF16(env, java_reply);
 
   GURL origin(ConvertJavaStringToUTF8(env, java_origin));
   GURL scope_url(ConvertJavaStringToUTF8(env, java_scope_url));
@@ -184,7 +185,7 @@ void NotificationPlatformBridgeAndroid::OnNotificationClicked(
       profile_id, incognito,
       base::Bind(&ProfileLoadedCallback, NotificationCommon::CLICK,
                  NotificationCommon::PERSISTENT, origin.spec(), notification_id,
-                 action_index, reply));
+                 action_index, std::move(reply), base::nullopt /* by_user */));
 }
 
 void NotificationPlatformBridgeAndroid::
@@ -230,7 +231,8 @@ void NotificationPlatformBridgeAndroid::OnNotificationClosed(
       base::Bind(&ProfileLoadedCallback, NotificationCommon::CLOSE,
                  NotificationCommon::PERSISTENT,
                  ConvertJavaStringToUTF8(env, java_origin), notification_id,
-                 -1 /* action index */, base::NullableString16() /* reply */));
+                 base::nullopt /* action index */, base::nullopt /* reply */,
+                 by_user));
 }
 
 void NotificationPlatformBridgeAndroid::Display(
@@ -238,18 +240,21 @@ void NotificationPlatformBridgeAndroid::Display(
     const std::string& notification_id,
     const std::string& profile_id,
     bool incognito,
-    const Notification& notification) {
+    const message_center::Notification& notification,
+    std::unique_ptr<NotificationCommon::Metadata> metadata) {
   JNIEnv* env = AttachCurrentThread();
+
+  GURL origin_url(notification.origin_url().GetOrigin());
+
   // TODO(miguelg): Store the notification type in java instead of assuming it's
   // persistent once/if non persistent notifications are ever implemented on
   // Android.
   DCHECK_EQ(notification_type, NotificationCommon::PERSISTENT);
-
-  GURL origin_url(notification.origin_url().GetOrigin());
-
-  GURL scope_url(notification.service_worker_scope());
+  GURL scope_url(PersistentNotificationMetadata::From(metadata.get())
+                     ->service_worker_scope);
   if (!scope_url.is_valid())
     scope_url = origin_url;
+
   ScopedJavaLocalRef<jstring> j_scope_url =
         ConvertUTF8ToJavaString(env, scope_url.spec());
 
@@ -257,8 +262,10 @@ void NotificationPlatformBridgeAndroid::Display(
       ConvertUTF8ToJavaString(env, notification_id);
   ScopedJavaLocalRef<jstring> j_origin =
       ConvertUTF8ToJavaString(env, origin_url.spec());
+  // TODO(estade,peter): remove the tag field from Java and just use the
+  // notification id.
   ScopedJavaLocalRef<jstring> tag =
-      ConvertUTF8ToJavaString(env, notification.tag());
+      ConvertUTF8ToJavaString(env, notification_id);
   ScopedJavaLocalRef<jstring> title =
       ConvertUTF16ToJavaString(env, notification.title());
   ScopedJavaLocalRef<jstring> body =
@@ -296,7 +303,7 @@ void NotificationPlatformBridgeAndroid::Display(
 
   regenerated_notification_infos_[notification_id] =
       RegeneratedNotificationInfo(origin_url.spec(), scope_url.spec(),
-                                  notification.tag(), base::nullopt);
+                                  notification_id, base::nullopt);
 }
 
 void NotificationPlatformBridgeAndroid::Close(
@@ -340,7 +347,7 @@ void NotificationPlatformBridgeAndroid::GetDisplayed(
     const std::string& profile_id,
     bool incognito,
     const GetDisplayedNotificationsCallback& callback) const {
-  auto displayed_notifications = base::MakeUnique<std::set<std::string>>();
+  auto displayed_notifications = std::make_unique<std::set<std::string>>();
   content::BrowserThread::PostTask(
       content::BrowserThread::UI, FROM_HERE,
       base::Bind(callback, base::Passed(&displayed_notifications),

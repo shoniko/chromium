@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <limits>
-#include <map>
 
 #include "base/debug/alias.h"
 #include "base/macros.h"
@@ -25,11 +24,6 @@ void WatcherDispatcher::NotifyHandleState(Dispatcher* dispatcher,
   auto it = watched_handles_.find(dispatcher);
   if (it == watched_handles_.end())
     return;
-
-  // TODO(crbug.com/740044): Remove this.
-  uint32_t sentinel = sentinel_value_for_debugging_;
-  base::debug::Alias(&sentinel);
-  CHECK_EQ(0x12345678u, sentinel);
 
   // Maybe fire a notification to the watch associated with this dispatcher,
   // provided we're armed and it cares about the new state.
@@ -58,11 +52,6 @@ void WatcherDispatcher::NotifyHandleClosed(Dispatcher* dispatcher) {
     ready_watches_.erase(watch.get());
     watched_handles_.erase(it);
   }
-
-  // TODO(crbug.com/740044): Remove this.
-  uint32_t sentinel = sentinel_value_for_debugging_;
-  base::debug::Alias(&sentinel);
-  CHECK_EQ(0x12345678u, sentinel);
 
   // NOTE: It's important that this is called outside of |lock_| since it
   // acquires internal Watch locks.
@@ -102,7 +91,7 @@ Dispatcher::Type WatcherDispatcher::GetType() const {
 MojoResult WatcherDispatcher::Close() {
   // We swap out all the watched handle information onto the stack so we can
   // call into their dispatchers without our own lock held.
-  std::map<uintptr_t, scoped_refptr<Watch>> watches;
+  base::flat_map<uintptr_t, scoped_refptr<Watch>> watches;
   {
     base::AutoLock lock(lock_);
     if (closed_)
@@ -185,11 +174,6 @@ MojoResult WatcherDispatcher::CancelWatch(uintptr_t context) {
     watches_.erase(it);
   }
 
-  // TODO(crbug.com/740044): Remove this.
-  uint32_t sentinel = sentinel_value_for_debugging_;
-  base::debug::Alias(&sentinel);
-  CHECK_EQ(0x12345678u, sentinel);
-
   // Mark the watch as cancelled so no further notifications get through.
   watch->Cancel();
 
@@ -269,10 +253,7 @@ MojoResult WatcherDispatcher::Arm(
   return MOJO_RESULT_FAILED_PRECONDITION;
 }
 
-WatcherDispatcher::~WatcherDispatcher() {
-  // TODO(crbug.com/740044): Remove this.
-  sentinel_value_for_debugging_ = 0x87654321;
-}
+WatcherDispatcher::~WatcherDispatcher() = default;
 
 }  // namespace edk
 }  // namespace mojo

@@ -26,15 +26,9 @@ CONTENT_EXPORT bool IsPartialRasterEnabled();
 // Returns true if all compositor resources should use GPU memory buffers.
 CONTENT_EXPORT bool IsGpuMemoryBufferCompositorResourcesEnabled();
 
-// Returns true if gpu rasterization is on (via flags) for the renderer.
-CONTENT_EXPORT bool IsGpuRasterizationEnabled();
-
 // Returns the number of multisample antialiasing samples (via flags) for
 // GPU rasterization.
 CONTENT_EXPORT int GpuRasterizationMSAASampleCount();
-
-// Returns true if force-gpu-rasterization is on (via flags) for the renderer.
-CONTENT_EXPORT bool IsForceGpuRasterizationEnabled();
 
 // Returns the number of raster threads to use for compositing.
 CONTENT_EXPORT int NumberOfRendererRasterThreads();
@@ -44,6 +38,12 @@ CONTENT_EXPORT bool IsMainFrameBeforeActivationEnabled();
 
 // Returns true if images can be decode asynchronously from rasterization.
 CONTENT_EXPORT bool IsCheckerImagingEnabled();
+
+// Returns true if worker context runs asynchronously in the gpu process.
+CONTENT_EXPORT bool IsGpuAsyncWorkerContextEnabled();
+
+// Returns true if image animations should run in the compositor.
+CONTENT_EXPORT bool IsCompositorImageAnimationEnabled();
 
 CONTENT_EXPORT std::unique_ptr<base::DictionaryValue> GetFeatureStatus();
 CONTENT_EXPORT std::unique_ptr<base::ListValue> GetProblems();

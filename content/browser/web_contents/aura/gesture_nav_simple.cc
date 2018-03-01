@@ -110,8 +110,9 @@ NavigationDirection GetDirectionFromMode(OverscrollMode mode) {
   return NavigationDirection::NONE;
 }
 
-// Records UMA historgram and also user action for the cancelled overscroll.
-void RecordCancelled(NavigationDirection direction, OverscrollSource source) {
+// Records UMA histogram and also user action for the cancelled overscroll.
+void RecordGestureOverscrollCancelled(NavigationDirection direction,
+                                      OverscrollSource source) {
   DCHECK_NE(direction, NavigationDirection::NONE);
   DCHECK_NE(source, OverscrollSource::NONE);
   UMA_HISTOGRAM_ENUMERATION("Overscroll.Cancelled3",
@@ -138,7 +139,8 @@ class Arrow : public ui::LayerDelegate {
   // ui::LayerDelegate:
   void OnPaintLayer(const ui::PaintContext& context) override;
   void OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) override;
-  void OnDeviceScaleFactorChanged(float device_scale_factor) override;
+  void OnDeviceScaleFactorChanged(float old_device_scale_factor,
+                                  float new_device_scale_factor) override;
 
   const OverscrollMode mode_;
   ui::Layer layer_;
@@ -185,7 +187,8 @@ void Arrow::OnPaintLayer(const ui::PaintContext& context) {
 
 void Arrow::OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) {}
 
-void Arrow::OnDeviceScaleFactorChanged(float device_scale_factor) {}
+void Arrow::OnDeviceScaleFactorChanged(float old_device_scale_factor,
+                                       float new_device_scale_factor) {}
 
 }  // namespace
 
@@ -240,7 +243,8 @@ class Affordance : public ui::LayerDelegate, public gfx::AnimationDelegate {
   // ui::LayerDelegate:
   void OnPaintLayer(const ui::PaintContext& context) override;
   void OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) override;
-  void OnDeviceScaleFactorChanged(float device_scale_factor) override;
+  void OnDeviceScaleFactorChanged(float old_device_scale_factor,
+                                  float new_device_scale_factor) override;
 
   // gfx::AnimationDelegate:
   void AnimationEnded(const gfx::Animation* animation) override;
@@ -504,7 +508,8 @@ void Affordance::OnPaintLayer(const ui::PaintContext& context) {
 
 void Affordance::OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) {}
 
-void Affordance::OnDeviceScaleFactorChanged(float device_scale_factor) {}
+void Affordance::OnDeviceScaleFactorChanged(float old_device_scale_factor,
+                                            float new_device_scale_factor) {}
 
 void Affordance::AnimationEnded(const gfx::Animation* animation) {
   owner_->OnAffordanceAnimationEnded();
@@ -588,7 +593,8 @@ void GestureNavSimple::OnOverscrollComplete(OverscrollMode overscroll_mode) {
     else
       RecordAction(base::UserMetricsAction("Overscroll_Navigated.Reload"));
   } else {
-    RecordCancelled(GetDirectionFromMode(overscroll_mode), overscroll_source);
+    RecordGestureOverscrollCancelled(GetDirectionFromMode(overscroll_mode),
+                                     overscroll_source);
   }
 }
 
@@ -606,7 +612,7 @@ void GestureNavSimple::OnOverscrollModeChange(OverscrollMode old_mode,
       !ShouldReload(controller, mode_)) {
     // If there is an overscroll in progress - record its cancellation.
     if (affordance_ && !affordance_->IsFinishing()) {
-      RecordCancelled(GetDirectionFromMode(old_mode), source_);
+      RecordGestureOverscrollCancelled(GetDirectionFromMode(old_mode), source_);
       affordance_->Abort();
     }
     source_ = OverscrollSource::NONE;

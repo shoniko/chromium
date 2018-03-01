@@ -21,12 +21,13 @@
 #ifndef SVGStopElement_h
 #define SVGStopElement_h
 
-#include "core/SVGNames.h"
 #include "core/svg/SVGAnimatedNumber.h"
 #include "core/svg/SVGElement.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
+
+class Color;
 
 class SVGStopElement final : public SVGElement {
   DEFINE_WRAPPERTYPEINFO();
@@ -38,7 +39,7 @@ class SVGStopElement final : public SVGElement {
 
   SVGAnimatedNumber* offset() const { return offset_.Get(); }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit SVGStopElement(Document&);

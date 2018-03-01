@@ -30,6 +30,9 @@ class SadTabTabHelper : public web::WebStateUserData<SadTabTabHelper>,
                                 double repeat_failure_interval,
                                 id<SadTabTabHelperDelegate> delegate);
 
+  // Sets the SadTabHelper delegate.
+  void SetDelegate(id<SadTabTabHelperDelegate> delegate);
+
   ~SadTabTabHelper() override;
 
  private:
@@ -65,11 +68,11 @@ class SadTabTabHelper : public web::WebStateUserData<SadTabTabHelper>,
   void RemoveApplicationDidBecomeActiveObserver();
 
   // WebStateObserver:
-  void WasShown() override;
-  void WasHidden() override;
-  void RenderProcessGone() override;
-  void DidFinishNavigation(web::NavigationContext* navigation_context) override;
-  void WebStateDestroyed() override;
+  void WasShown(web::WebState* web_state) override;
+  void RenderProcessGone(web::WebState* web_state) override;
+  void DidFinishNavigation(web::WebState* web_state,
+                           web::NavigationContext* navigation_context) override;
+  void WebStateDestroyed(web::WebState* web_state) override;
 
   // The default window of time a failure of the same URL needs to occur
   // to be considered a repeat failure.
@@ -86,9 +89,6 @@ class SadTabTabHelper : public web::WebStateUserData<SadTabTabHelper>,
   // Stores the interval window in seconds during which a second
   // RenderProcessGone failure will be considered a repeat failure.
   double repeat_failure_interval_ = kDefaultRepeatFailureInterval;
-
-  // Whether or not WebState is currently being displayed.
-  bool is_visible_ = false;
 
   // true if the WebState needs to be reloaded after web state becomes visible.
   bool requires_reload_on_becoming_visible_ = false;

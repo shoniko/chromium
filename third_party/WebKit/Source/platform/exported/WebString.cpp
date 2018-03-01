@@ -59,7 +59,7 @@ void WebString::Assign(const WebString& other) {
 }
 
 void WebString::Assign(const WebUChar* data, size_t length) {
-  Assign(StringImpl::Create8BitIfPossible(data, length).Get());
+  Assign(StringImpl::Create8BitIfPossible(data, length).get());
 }
 
 size_t WebString::length() const {
@@ -71,11 +71,11 @@ bool WebString::Is8Bit() const {
 }
 
 const WebLChar* WebString::Data8() const {
-  return !private_.IsNull() && Is8Bit() ? private_->Characters8() : 0;
+  return !private_.IsNull() && Is8Bit() ? private_->Characters8() : nullptr;
 }
 
 const WebUChar* WebString::Data16() const {
-  return !private_.IsNull() && !Is8Bit() ? private_->Characters16() : 0;
+  return !private_.IsNull() && !Is8Bit() ? private_->Characters16() : nullptr;
 }
 
 std::string WebString::Utf8(UTF8ConversionMode mode) const {
@@ -100,6 +100,15 @@ WebString WebString::FromUTF16(const base::NullableString16& s) {
     string.Reset();
   else
     string.Assign(s.string().data(), s.string().length());
+  return string;
+}
+
+WebString WebString::FromUTF16(const base::Optional<base::string16>& s) {
+  WebString string;
+  if (!s)
+    string.Reset();
+  else
+    string.Assign(s->data(), s->length());
   return string;
 }
 

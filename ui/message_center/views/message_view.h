@@ -44,9 +44,6 @@ class MESSAGE_CENTER_EXPORT MessageView
   // Updates this view with the new data contained in the notification.
   virtual void UpdateWithNotification(const Notification& notification);
 
-  // Returns the insets for the shadow it will have for rich notification.
-  static gfx::Insets GetShadowInsets();
-
   // Creates a shadow around the notification and changes slide-out behavior.
   void SetIsNested();
 
@@ -80,9 +77,7 @@ class MESSAGE_CENTER_EXPORT MessageView
   bool GetPinned() const;
 
   void set_scroller(views::ScrollView* scroller) { scroller_ = scroller; }
-  std::string notification_id() { return notification_id_; }
-  NotifierId notifier_id() { return notifier_id_; }
-  const base::string16& display_source() const { return display_source_; }
+  std::string notification_id() const { return notification_id_; }
   void set_controller(MessageCenterController* controller) {
     controller_ = controller;
   }
@@ -109,13 +104,10 @@ class MESSAGE_CENTER_EXPORT MessageView
  private:
   MessageCenterController* controller_;  // Weak, lives longer then views.
   std::string notification_id_;
-  NotifierId notifier_id_;
   views::View* background_view_ = nullptr;  // Owned by views hierarchy.
   views::ScrollView* scroller_ = nullptr;
 
   base::string16 accessible_name_;
-
-  base::string16 display_source_;
 
   // Flag if the notification is set to pinned or not.
   bool pinned_ = false;

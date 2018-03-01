@@ -14,7 +14,7 @@ import org.chromium.components.payments.PaymentManifestDownloader;
 import org.chromium.components.payments.PaymentManifestDownloader.ManifestDownloadCallback;
 import org.chromium.components.payments.PaymentManifestParser;
 import org.chromium.components.payments.PaymentManifestParser.ManifestParseCallback;
-import org.chromium.payments.mojom.WebAppManifestSection;
+import org.chromium.components.payments.WebAppManifestSection;
 
 import java.net.URI;
 import java.security.MessageDigest;
@@ -381,7 +381,7 @@ public class PaymentManifestVerifier
             Set<URI> downloadedSupportedOrigins = new HashSet<>();
             for (int i = 0; i < supportedOrigins.length; i++) {
                 downloadedSupportedOrigins.add(supportedOrigins[i]);
-                mAppIdentifiersToCache.add(downloadedSupportedOrigins.toString());
+                mAppIdentifiersToCache.add(supportedOrigins[i].toString());
             }
             if (mIsManifestCacheStaleOrUnusable) {
                 downloadedSupportedOrigins.retainAll(mSupportedOrigins);

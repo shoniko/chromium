@@ -5,9 +5,8 @@
 #include "modules/navigatorcontentutils/NavigatorContentUtilsClient.h"
 
 #include "core/frame/WebLocalFrameImpl.h"
-#include "platform/wtf/Assertions.h"
+#include "platform/weborigin/KURL.h"
 #include "public/web/WebFrameClient.h"
-#include "public/web/WebNavigatorContentUtilsClient.h"
 
 namespace blink {
 
@@ -20,7 +19,7 @@ NavigatorContentUtilsClient::NavigatorContentUtilsClient(
     WebLocalFrameImpl* web_frame)
     : web_frame_(web_frame) {}
 
-DEFINE_TRACE(NavigatorContentUtilsClient) {
+void NavigatorContentUtilsClient::Trace(blink::Visitor* visitor) {
   visitor->Trace(web_frame_);
 }
 

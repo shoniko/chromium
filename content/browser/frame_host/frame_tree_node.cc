@@ -13,7 +13,6 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "content/browser/frame_host/frame_tree.h"
@@ -97,11 +96,17 @@ class FrameTreeNode::OpenerDestroyedObserver : public FrameTreeNode::Observer {
   // FrameTreeNode::Observer
   void OnFrameTreeNodeDestroyed(FrameTreeNode* node) override {
     if (observing_original_opener_) {
+      // The "original owner" is special. It's used for attribution, and clients
+      // walk down the original owner chain. Therefore, if a link in the chain
+      // is being destroyed, reconnect the observation to the parent of the link
+      // being destroyed.
       CHECK_EQ(owner_->original_opener(), node);
-      owner_->SetOriginalOpener(nullptr);
+      owner_->SetOriginalOpener(node->original_opener());
+      // |this| is deleted at this point.
     } else {
       CHECK_EQ(owner_->opener(), node);
       owner_->SetOpener(nullptr);
+      // |this| is deleted at this point.
     }
   }
 
@@ -131,6 +136,7 @@ FrameTreeNode::FrameTreeNode(FrameTree* frame_tree,
                              blink::WebTreeScopeType scope,
                              const std::string& name,
                              const std::string& unique_name,
+                             const base::UnguessableToken& devtools_frame_token,
                              const FrameOwnerProperties& frame_owner_properties)
     : frame_tree_(frame_tree),
       navigator_(navigator),
@@ -141,20 +147,17 @@ FrameTreeNode::FrameTreeNode(FrameTree* frame_tree,
       frame_tree_node_id_(next_frame_tree_node_id_++),
       parent_(parent),
       opener_(nullptr),
-      opener_observer_(nullptr),
       original_opener_(nullptr),
-      original_opener_observer_(nullptr),
       has_committed_real_load_(false),
       is_collapsed_(false),
       replication_state_(
           scope,
           name,
           unique_name,
-          blink::WebSandboxFlags::kNone,
           false /* should enforce strict mixed content checking */,
           false /* is a potentially trustworthy unique origin */,
           false /* has received a user gesture */),
-      pending_sandbox_flags_(blink::WebSandboxFlags::kNone),
+      devtools_frame_token_(devtools_frame_token),
       frame_owner_properties_(frame_owner_properties),
       loading_progress_(kLoadingProgressNotStarted),
       blame_context_(frame_tree_node_id_, parent) {
@@ -257,20 +260,23 @@ void FrameTreeNode::SetOpener(FrameTreeNode* opener) {
   opener_ = opener;
 
   if (opener_) {
-    if (!opener_observer_)
-      opener_observer_ = base::MakeUnique<OpenerDestroyedObserver>(this, false);
+    opener_observer_ = base::MakeUnique<OpenerDestroyedObserver>(this, false);
     opener_->AddObserver(opener_observer_.get());
   }
 }
 
 void FrameTreeNode::SetOriginalOpener(FrameTreeNode* opener) {
-  DCHECK(!original_opener_ || !opener);
+  // The original opener tracks main frames only.
   DCHECK(opener == nullptr || !opener->parent());
+
+  if (original_opener_) {
+    original_opener_->RemoveObserver(original_opener_observer_.get());
+    original_opener_observer_.reset();
+  }
 
   original_opener_ = opener;
 
   if (original_opener_) {
-    DCHECK(!original_opener_observer_);
     original_opener_observer_ =
         base::MakeUnique<OpenerDestroyedObserver>(this, true);
     original_opener_->AddObserver(original_opener_observer_.get());
@@ -362,21 +368,17 @@ void FrameTreeNode::SetInsecureRequestPolicy(
   replication_state_.insecure_request_policy = policy;
 }
 
-void FrameTreeNode::SetPendingSandboxFlags(
-    blink::WebSandboxFlags sandbox_flags) {
-  pending_sandbox_flags_ = sandbox_flags;
+void FrameTreeNode::SetPendingFramePolicy(FramePolicy frame_policy) {
+  pending_frame_policy_.sandbox_flags = frame_policy.sandbox_flags;
 
-  // Subframes should always inherit their parent's sandbox flags.
-  if (parent())
-    pending_sandbox_flags_ |= parent()->effective_sandbox_flags();
-}
-
-void FrameTreeNode::SetPendingContainerPolicy(
-    const ParsedFeaturePolicyHeader& container_policy) {
-  // This should only be called on subframes; container policy is not mutable on
-  // main frame.
-  DCHECK(!IsMainFrame());
-  pending_container_policy_ = container_policy;
+  if (parent()) {
+    // Subframes should always inherit their parent's sandbox flags.
+    pending_frame_policy_.sandbox_flags |=
+        parent()->effective_frame_policy().sandbox_flags;
+    // This is only applied on subframes; container policy is not mutable on
+    // main frame.
+    pending_frame_policy_.container_policy = frame_policy.container_policy;
+  }
 }
 
 bool FrameTreeNode::IsDescendantOf(FrameTreeNode* other) const {
@@ -423,14 +425,17 @@ bool FrameTreeNode::IsLoading() const {
 }
 
 bool FrameTreeNode::CommitPendingFramePolicy() {
-  bool did_change_flags =
-      pending_sandbox_flags_ != replication_state_.sandbox_flags;
+  bool did_change_flags = pending_frame_policy_.sandbox_flags !=
+                          replication_state_.frame_policy.sandbox_flags;
   bool did_change_container_policy =
-      pending_container_policy_ != replication_state_.container_policy;
+      pending_frame_policy_.container_policy !=
+      replication_state_.frame_policy.container_policy;
   if (did_change_flags)
-    replication_state_.sandbox_flags = pending_sandbox_flags_;
+    replication_state_.frame_policy.sandbox_flags =
+        pending_frame_policy_.sandbox_flags;
   if (did_change_container_policy)
-    replication_state_.container_policy = pending_container_policy_;
+    replication_state_.frame_policy.container_policy =
+        pending_frame_policy_.container_policy;
   return did_change_flags || did_change_container_policy;
 }
 
@@ -472,7 +477,12 @@ void FrameTreeNode::ResetNavigationRequest(bool keep_state,
   CHECK(IsBrowserSideNavigationEnabled());
   if (!navigation_request_)
     return;
-  bool was_renderer_initiated = !navigation_request_->browser_initiated();
+
+  // The renderer should be informed if the caller allows to do so and the
+  // navigation came from a BeginNavigation IPC.
+  int need_to_inform_renderer =
+      inform_renderer && navigation_request_->from_begin_navigation();
+
   NavigationRequest::AssociatedSiteInstanceType site_instance_type =
       navigation_request_->associated_site_instance_type();
   navigation_request_.reset();
@@ -497,9 +507,9 @@ void FrameTreeNode::ResetNavigationRequest(bool keep_state,
   // process asked for the navigation to be aborted, e.g. following a
   // document.open, do not send an IPC to the renderer process as it already
   // expects the navigation to stop.
-  if (was_renderer_initiated && inform_renderer) {
+  if (need_to_inform_renderer) {
     current_frame_host()->Send(
-        new FrameMsg_Stop(current_frame_host()->GetRoutingID()));
+        new FrameMsg_DroppedNavigation(current_frame_host()->GetRoutingID()));
   }
 
 }

@@ -174,7 +174,7 @@ bool WebsiteSettingsFilterAdapter(
   return predicate.Run(url);
 }
 
-#if !defined(DISABLE_NACL)
+#if BUILDFLAG(ENABLE_NACL)
 void ClearNaClCacheOnIOThread(const base::Closure& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
@@ -339,13 +339,12 @@ ChromeBrowsingDataRemoverDelegate::ChromeBrowsingDataRemoverDelegate(
       clear_form_(sub_task_forward_callback_),
       clear_history_(sub_task_forward_callback_),
       clear_keyword_data_(sub_task_forward_callback_),
-#if !defined(DISABLE_NACL)
+#if BUILDFLAG(ENABLE_NACL)
       clear_nacl_cache_(sub_task_forward_callback_),
       clear_pnacl_cache_(sub_task_forward_callback_),
 #endif
       clear_hostname_resolution_cache_(sub_task_forward_callback_),
       clear_network_predictor_(sub_task_forward_callback_),
-      clear_networking_history_(sub_task_forward_callback_),
       clear_passwords_(sub_task_forward_callback_),
       clear_passwords_stats_(sub_task_forward_callback_),
       clear_http_auth_cache_(sub_task_forward_callback_),
@@ -886,7 +885,7 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
     // in content/browser.
     web_cache::WebCacheManager::GetInstance()->ClearCache();
 
-#if !defined(DISABLE_NACL)
+#if BUILDFLAG(ENABLE_NACL)
     clear_nacl_cache_.Start();
 
     BrowserThread::PostTask(
@@ -911,13 +910,6 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
       prerender_manager->ClearData(
           prerender::PrerenderManager::CLEAR_PRERENDER_CONTENTS);
     }
-
-    // When clearing cache, wipe accumulated network related data
-    // (TransportSecurityState and HttpServerPropertiesManager data).
-    clear_networking_history_.Start();
-    profile_->ClearNetworkingHistorySince(
-        delete_begin_,
-        clear_networking_history_.GetCompletionCallback());
 
     ntp_snippets::ContentSuggestionsService* content_suggestions_service =
         ContentSuggestionsServiceFactory::GetForProfileIfExists(profile_);
@@ -1025,7 +1017,7 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
               chromeos::attestation::KEY_USER,
               cryptohome::Identification(user->GetAccountId()),
               chromeos::attestation::kContentProtectionKeyPrefix,
-              base::Bind(
+              base::BindOnce(
                   &ChromeBrowsingDataRemoverDelegate::OnClearPlatformKeys,
                   weak_ptr_factory_.GetWeakPtr()));
     }
@@ -1124,11 +1116,10 @@ bool ChromeBrowsingDataRemoverDelegate::AllDone() {
          !clear_form_.is_pending() && !clear_history_.is_pending() &&
          !clear_hostname_resolution_cache_.is_pending() &&
          !clear_keyword_data_.is_pending() &&
-#if !defined(DISABLE_NACL)
+#if BUILDFLAG(ENABLE_NACL)
          !clear_nacl_cache_.is_pending() && !clear_pnacl_cache_.is_pending() &&
 #endif
          !clear_network_predictor_.is_pending() &&
-         !clear_networking_history_.is_pending() &&
          !clear_passwords_.is_pending() &&
          !clear_passwords_stats_.is_pending() &&
          !clear_http_auth_cache_.is_pending() &&
@@ -1179,9 +1170,8 @@ void ChromeBrowsingDataRemoverDelegate::OnClearedCookies() {
 
 #if defined(OS_CHROMEOS)
 void ChromeBrowsingDataRemoverDelegate::OnClearPlatformKeys(
-    chromeos::DBusMethodCallStatus call_status,
-    bool result) {
-  LOG_IF(ERROR, call_status != chromeos::DBUS_METHOD_CALL_SUCCESS || !result)
+    base::Optional<bool> result) {
+  LOG_IF(ERROR, !result.has_value() || !result.value())
       << "Failed to clear platform keys.";
   clear_platform_keys_.GetCompletionCallback().Run();
 }

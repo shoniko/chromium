@@ -65,7 +65,6 @@ class SharedPersistentMemoryAllocator;
 }
 
 namespace content {
-class AudioInputRendererHost;
 class ChildConnection;
 class GpuClient;
 class IndexedDBDispatcherHost;
@@ -446,6 +445,10 @@ class CONTENT_EXPORT RenderProcessHostImpl
 
   // mojom::RendererHost
   void GetBlobURLLoaderFactory(mojom::URLLoaderFactoryRequest request) override;
+  using BrowserHistogramCallback =
+      mojom::RendererHost::GetBrowserHistogramCallback;
+  void GetBrowserHistogram(const std::string& name,
+                           BrowserHistogramCallback callback) override;
 
   void BindRouteProvider(mojom::RouteProviderAssociatedRequest request);
 
@@ -508,7 +511,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
 
 #if BUILDFLAG(ENABLE_WEBRTC)
   void CreateMediaStreamDispatcherHost(
-      const std::string& salt,
       MediaStreamManager* media_stream_manager,
       mojom::MediaStreamDispatcherHostRequest request);
   void OnRegisterAecDumpConsumer(int id);
@@ -694,8 +696,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
   std::unique_ptr<RendererAudioOutputStreamFactoryContextImpl,
                   BrowserThread::DeleteOnIOThread>
       audio_output_stream_factory_context_;
-
-  scoped_refptr<AudioInputRendererHost> audio_input_renderer_host_;
 
 #if BUILDFLAG(ENABLE_WEBRTC)
   scoped_refptr<P2PSocketDispatcherHost> p2p_socket_dispatcher_host_;

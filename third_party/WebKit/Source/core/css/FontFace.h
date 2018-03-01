@@ -54,10 +54,8 @@ class FontFaceDescriptors;
 class StringOrArrayBufferOrArrayBufferView;
 class StylePropertySet;
 class StyleRuleFontFace;
-class WebTaskRunner;
 
-class CORE_EXPORT FontFace : public GarbageCollectedFinalized<FontFace>,
-                             public ScriptWrappable,
+class CORE_EXPORT FontFace : public ScriptWrappable,
                              public ActiveScriptWrappable<FontFace>,
                              public ContextClient {
   DEFINE_WRAPPERTYPEINFO();
@@ -111,7 +109,7 @@ class CORE_EXPORT FontFace : public GarbageCollectedFinalized<FontFace>,
   CSSFontFace* CssFontFace() { return css_font_face_.Get(); }
   size_t ApproximateBlankCharacterCount() const;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   bool HadBlankText() const;
 
@@ -120,7 +118,7 @@ class CORE_EXPORT FontFace : public GarbageCollectedFinalized<FontFace>,
     virtual ~LoadFontCallback() {}
     virtual void NotifyLoaded(FontFace*) = 0;
     virtual void NotifyError(FontFace*) = 0;
-    DEFINE_INLINE_VIRTUAL_TRACE() {}
+    virtual void Trace(blink::Visitor* visitor) {}
   };
   void LoadWithCallback(LoadFontCallback*);
   void AddCallback(LoadFontCallback*);
@@ -147,17 +145,16 @@ class CORE_EXPORT FontFace : public GarbageCollectedFinalized<FontFace>,
            const AtomicString& family,
            const FontFaceDescriptors&);
 
-  void InitCSSFontFace(Document*, const CSSValue* src);
+  void InitCSSFontFace(ExecutionContext*, const CSSValue* src);
   void InitCSSFontFace(const unsigned char* data, size_t);
-  void SetPropertyFromString(const Document*,
+  void SetPropertyFromString(const ExecutionContext*,
                              const String&,
                              CSSPropertyID,
-                             ExceptionState* = 0);
+                             ExceptionState* = nullptr);
   bool SetPropertyFromStyle(const StylePropertySet&, CSSPropertyID);
   bool SetPropertyValue(const CSSValue*, CSSPropertyID);
   bool SetFamilyValue(const CSSValue&);
   ScriptPromise FontStatusPromise(ScriptState*);
-  WebTaskRunner* GetTaskRunner();
   void RunCallbacks();
 
   using LoadedProperty = ScriptPromiseProperty<Member<FontFace>,

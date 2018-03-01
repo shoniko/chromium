@@ -4,6 +4,8 @@
 
 #include "ui/app_list/views/search_result_answer_card_view.h"
 
+#include "ui/accessibility/ax_node.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/app_list/app_list_constants.h"
 #include "ui/app_list/app_list_features.h"
 #include "ui/app_list/app_list_view_delegate.h"
@@ -16,9 +18,11 @@
 namespace app_list {
 
 namespace {
+
 constexpr int kVerticalPadding = 11;
 constexpr int kHorizontalPadding = 16;
-}
+
+}  // namespace
 
 // Container of the search answer view.
 class SearchResultAnswerCardView::SearchAnswerContainerView
@@ -28,6 +32,8 @@ class SearchResultAnswerCardView::SearchAnswerContainerView
  public:
   explicit SearchAnswerContainerView(AppListViewDelegate* view_delegate)
       : Button(this), view_delegate_(view_delegate) {
+    if (features::IsAppListFocusEnabled())
+      SetFocusBehavior(FocusBehavior::ALWAYS);
     // Center the card horizontally in the container.
     views::BoxLayout* answer_container_layout =
         new views::BoxLayout(views::BoxLayout::kHorizontal,
@@ -85,6 +91,20 @@ class SearchResultAnswerCardView::SearchAnswerContainerView
     return "SearchAnswerContainerView";
   }
 
+  void OnBlur() override {
+    if (features::IsAppListFocusEnabled())
+      SetSelected(false);
+    Button::OnBlur();
+  }
+
+  void OnFocus() override {
+    if (features::IsAppListFocusEnabled()) {
+      SetSelected(true);
+      NotifyAccessibilityEvent(ui::AX_EVENT_SELECTION, true);
+    }
+    Button::OnFocus();
+  }
+
   bool OnKeyPressed(const ui::KeyEvent& event) override {
     if (event.key_code() == ui::VKEY_SPACE) {
       // Shouldn't eat Space; we want Space to go to the search box.
@@ -92,6 +112,15 @@ class SearchResultAnswerCardView::SearchAnswerContainerView
     }
 
     return Button::OnKeyPressed(event);
+  }
+
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override {
+    if (!features::IsAppListFocusEnabled()) {
+      Button::GetAccessibleNodeData(node_data);
+      return;
+    }
+    node_data->role = ui::AX_ROLE_GENERIC_CONTAINER;
+    node_data->SetName(accessible_name());
   }
 
   // views::ButtonListener overrides:
@@ -107,7 +136,7 @@ class SearchResultAnswerCardView::SearchAnswerContainerView
  private:
   void UpdateBackgroundColor() {
     if (selected_) {
-      SetBackground(views::CreateSolidBackground(kSelectedColor));
+      SetBackground(views::CreateSolidBackground(kAnswerCardSelectedColor));
     } else {
       SetBackground(nullptr);
     }
@@ -193,6 +222,11 @@ views::View* SearchResultAnswerCardView::GetSelectedView() const {
   return search_answer_container_view_->selected()
              ? search_answer_container_view_
              : nullptr;
+}
+
+views::View* SearchResultAnswerCardView::SetFirstResultSelected(bool selected) {
+  search_answer_container_view_->SetSelected(selected);
+  return search_answer_container_view_;
 }
 
 }  // namespace app_list

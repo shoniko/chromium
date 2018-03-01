@@ -23,7 +23,6 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/CSSPropertyNames.h"
 #include "core/CSSValueKeywords.h"
-#include "core/HTMLNames.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/ShadowRoot.h"
 #include "core/dom/TaskRunnerHelper.h"
@@ -35,6 +34,7 @@
 #include "core/html/HTMLSummaryElement.h"
 #include "core/html/shadow/DetailsMarkerControl.h"
 #include "core/html/shadow/ShadowElementNames.h"
+#include "core/html_names.h"
 #include "core/layout/LayoutBlockFlow.h"
 #include "platform/text/PlatformLocale.h"
 
@@ -61,7 +61,9 @@ class FirstSummarySelectFilter final : public HTMLContentSelectFilter {
     return true;
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() { HTMLContentSelectFilter::Trace(visitor); }
+  virtual void Trace(blink::Visitor* visitor) {
+    HTMLContentSelectFilter::Trace(visitor);
+  }
 
  private:
   FirstSummarySelectFilter() {}
@@ -114,9 +116,9 @@ Element* HTMLDetailsElement::FindMainSummary() const {
     return summary;
 
   HTMLContentElement* content =
-      toHTMLContentElementOrDie(UserAgentShadowRoot()->firstChild());
+      ToHTMLContentElementOrDie(UserAgentShadowRoot()->firstChild());
   DCHECK(content->firstChild());
-  CHECK(isHTMLSummaryElement(*content->firstChild()));
+  CHECK(IsHTMLSummaryElement(*content->firstChild()));
   return ToElement(content->firstChild());
 }
 
@@ -149,7 +151,7 @@ void HTMLDetailsElement::ParseAttribute(
     Element* summary = FindMainSummary();
     DCHECK(summary);
 
-    Element* control = toHTMLSummaryElement(summary)->MarkerControl();
+    Element* control = ToHTMLSummaryElement(summary)->MarkerControl();
     if (control && control->GetLayoutObject())
       control->GetLayoutObject()->SetShouldDoFullPaintInvalidation();
 

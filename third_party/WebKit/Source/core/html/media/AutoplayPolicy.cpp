@@ -10,9 +10,9 @@
 #include "core/frame/ContentSettingsClient.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
-#include "core/html/HTMLMediaElement.h"
 #include "core/html/media/AutoplayUmaHelper.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "core/html/media/HTMLMediaElement.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/Assertions.h"
 #include "public/platform/WebMediaPlayer.h"
 #include "public/web/WebSettings.h"
@@ -84,7 +84,7 @@ AutoplayPolicy::Type AutoplayPolicy::GetAutoplayPolicyForDocument(
 bool AutoplayPolicy::IsDocumentAllowedToPlay(const Document& document) {
   if (!document.GetFrame())
     return false;
-  return document.GetFrame()->HasReceivedUserGesture() ||
+  return document.GetFrame()->HasBeenActivated() ||
          document.GetFrame()->HasReceivedUserGestureBeforeNavigation();
 }
 
@@ -334,7 +334,7 @@ bool AutoplayPolicy::ShouldAutoplay() {
   return element_->can_autoplay_ && element_->paused_ && element_->Autoplay();
 }
 
-DEFINE_TRACE(AutoplayPolicy) {
+void AutoplayPolicy::Trace(blink::Visitor* visitor) {
   visitor->Trace(element_);
   visitor->Trace(autoplay_visibility_observer_);
   visitor->Trace(autoplay_uma_helper_);

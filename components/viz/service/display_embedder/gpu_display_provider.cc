@@ -10,12 +10,12 @@
 #include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "cc/base/switches.h"
-#include "cc/output/texture_mailbox_deleter.h"
 #include "components/viz/common/display/renderer_settings.h"
 #include "components/viz/common/frame_sinks/begin_frame_source.h"
 #include "components/viz/common/gpu/in_process_context_provider.h"
 #include "components/viz/service/display/display.h"
 #include "components/viz/service/display/display_scheduler.h"
+#include "components/viz/service/display/texture_mailbox_deleter.h"
 #include "components/viz/service/display_embedder/display_output_surface.h"
 #include "components/viz/service/display_embedder/in_process_gpu_memory_buffer_manager.h"
 #include "components/viz/service/display_embedder/server_shared_bitmap_manager.h"
@@ -69,9 +69,11 @@ std::unique_ptr<Display> GpuDisplayProvider::CreateDisplay(
                                    nullptr /* shared_context */);
 
   // TODO(rjkroege): If there is something better to do than CHECK, add it.
-  CHECK(context_provider->BindToCurrentThread());
+  // TODO(danakj): Should retry if the result is kTransientFailure.
+  auto result = context_provider->BindToCurrentThread();
+  CHECK_EQ(result, gpu::ContextResult::kSuccess);
 
-  std::unique_ptr<cc::OutputSurface> display_output_surface;
+  std::unique_ptr<OutputSurface> display_output_surface;
   if (context_provider->ContextCapabilities().surfaceless) {
 #if defined(USE_OZONE)
     display_output_surface = base::MakeUnique<DisplayOutputSurfaceOzone>(
@@ -101,7 +103,7 @@ std::unique_ptr<Display> GpuDisplayProvider::CreateDisplay(
       ServerSharedBitmapManager::current(), gpu_memory_buffer_manager_.get(),
       renderer_settings, frame_sink_id, std::move(display_output_surface),
       std::move(scheduler),
-      base::MakeUnique<cc::TextureMailboxDeleter>(task_runner_.get()));
+      base::MakeUnique<TextureMailboxDeleter>(task_runner_.get()));
 }
 
 }  // namespace viz

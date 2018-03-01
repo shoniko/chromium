@@ -7,12 +7,12 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/preferences.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/chromeos/system/timezone_util.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/prefs/pref_service.h"
 
 namespace chromeos {
@@ -122,6 +122,9 @@ ServiceConfiguration GetServiceConfigurationForSigninScreen() {
 }  // anonymous namespace.
 
 TimeZoneResolverManager::TimeZoneResolverManager() : weak_factory_(this) {
+  local_state_initialized_ =
+      g_browser_process->local_state()->GetInitializationStatus() ==
+      PrefService::INITIALIZATION_STATUS_SUCCESS;
   g_browser_process->local_state()->AddPrefInitObserver(
       base::Bind(&TimeZoneResolverManager::OnLocalStateInitialized,
                  weak_factory_.GetWeakPtr()));

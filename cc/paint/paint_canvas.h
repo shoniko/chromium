@@ -33,7 +33,7 @@ class CC_PAINT_EXPORT PaintCanvas {
 
   // TODO(enne): It would be nice to get rid of flush() entirely, as it
   // doesn't really make sense for recording.  However, this gets used by
-  // SkCanvasVideoRenderer which takes a PaintCanvas to paint both
+  // PaintCanvasVideoRenderer which takes a PaintCanvas to paint both
   // software and hardware video.  This is super entangled with ImageBuffer
   // and canvas/video painting in Blink where the same paths are used for
   // both recording and gpu work.
@@ -86,8 +86,6 @@ class CC_PAINT_EXPORT PaintCanvas {
     clipPath(path, SkClipOp::kIntersect, do_anti_alias);
   }
 
-  virtual bool quickReject(const SkRect& rect) const = 0;
-  virtual bool quickReject(const SkPath& path) const = 0;
   virtual SkRect getLocalClipBounds() const = 0;
   virtual bool getLocalClipBounds(SkRect* bounds) const = 0;
   virtual SkIRect getDeviceClipBounds() const = 0;

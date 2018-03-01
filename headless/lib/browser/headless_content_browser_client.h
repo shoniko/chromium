@@ -46,7 +46,6 @@ class HeadlessContentBrowserClient : public content::ContentBrowserClient {
       const net::SSLInfo& ssl_info,
       const GURL& request_url,
       content::ResourceType resource_type,
-      bool overridable,
       bool strict_enforcement,
       bool expired_previous_decision,
       const base::Callback<void(content::CertificateRequestResultType)>&
@@ -55,6 +54,21 @@ class HeadlessContentBrowserClient : public content::ContentBrowserClient {
   void ResourceDispatcherHostCreated() override;
 
   net::NetLog* GetNetLog() override;
+
+  bool AllowGetCookie(const GURL& url,
+                      const GURL& first_party,
+                      const net::CookieList& cookie_list,
+                      content::ResourceContext* context,
+                      int render_process_id,
+                      int render_frame_id) override;
+
+  bool AllowSetCookie(const GURL& url,
+                      const GURL& first_party,
+                      const std::string& cookie_line,
+                      content::ResourceContext* context,
+                      int render_process_id,
+                      int render_frame_id,
+                      const net::CookieOptions& options) override;
 
  private:
   std::unique_ptr<base::Value> GetBrowserServiceManifestOverlay();

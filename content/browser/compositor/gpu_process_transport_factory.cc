@@ -12,7 +12,6 @@
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/simple_thread.h"
 #include "base/threading/thread.h"
@@ -20,7 +19,6 @@
 #include "build/build_config.h"
 #include "cc/base/histograms.h"
 #include "cc/base/switches.h"
-#include "cc/output/texture_mailbox_deleter.h"
 #include "cc/raster/single_thread_task_graph_runner.h"
 #include "cc/raster/task_graph_runner.h"
 #include "components/viz/common/frame_sinks/begin_frame_args.h"
@@ -32,6 +30,7 @@
 #include "components/viz/host/renderer_settings_creation.h"
 #include "components/viz/service/display/display.h"
 #include "components/viz/service/display/display_scheduler.h"
+#include "components/viz/service/display/texture_mailbox_deleter.h"
 #include "components/viz/service/display_embedder/compositor_overlay_candidate_validator.h"
 #include "components/viz/service/display_embedder/server_shared_bitmap_manager.h"
 #include "components/viz/service/frame_sinks/direct_layer_tree_frame_sink.h"
@@ -52,6 +51,8 @@
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/client/shared_memory_limits.h"
 #include "gpu/command_buffer/common/mailbox.h"
+#include "gpu/config/gpu_driver_bug_workaround_type.h"
+#include "gpu/config/gpu_feature_info.h"
 #include "gpu/ipc/client/gpu_channel_host.h"
 #include "gpu/ipc/host/gpu_memory_buffer_support.h"
 #include "gpu/vulkan/features.h"
@@ -76,21 +77,21 @@
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
 #include "components/viz/service/display_embedder/compositor_overlay_candidate_validator_win.h"
-#include "content/browser/compositor/software_output_device_win.h"
+#include "components/viz/service/display_embedder/software_output_device_win.h"
 #include "ui/gfx/win/rendering_window_manager.h"
 #elif defined(USE_OZONE)
 #include "components/viz/service/display_embedder/compositor_overlay_candidate_validator_ozone.h"
-#include "content/browser/compositor/software_output_device_ozone.h"
+#include "components/viz/service/display_embedder/software_output_device_ozone.h"
 #include "ui/ozone/public/overlay_candidates_ozone.h"
 #include "ui/ozone/public/overlay_manager_ozone.h"
 #include "ui/ozone/public/ozone_platform.h"
 #include "ui/ozone/public/ozone_switches.h"
 #elif defined(USE_X11)
-#include "content/browser/compositor/software_output_device_x11.h"
+#include "components/viz/service/display_embedder/software_output_device_x11.h"
 #elif defined(OS_MACOSX)
 #include "components/viz/service/display_embedder/compositor_overlay_candidate_validator_mac.h"
+#include "components/viz/service/display_embedder/software_output_device_mac.h"
 #include "content/browser/compositor/gpu_output_surface_mac.h"
-#include "content/browser/compositor/software_output_device_mac.h"
 #include "ui/base/cocoa/remote_layer_api.h"
 #include "ui/base/ui_base_switches.h"
 #elif defined(OS_ANDROID)
@@ -109,7 +110,6 @@ using gpu::gles2::GLES2Interface;
 
 namespace {
 
-const int kNumRetriesBeforeSoftwareFallback = 4;
 // The client_id used here should not conflict with the client_id generated
 // from RenderWidgetHostImpl.
 constexpr uint32_t kDefaultClientId = 0u;
@@ -169,10 +169,10 @@ scoped_refptr<ui::ContextProviderCommandBuffer> CreateContextCommon(
   constexpr bool automatic_flushes = false;
 
   GURL url("chrome://gpu/GpuProcessTransportFactory::CreateContextCommon");
-  return make_scoped_refptr(new ui::ContextProviderCommandBuffer(
+  return base::MakeRefCounted<ui::ContextProviderCommandBuffer>(
       std::move(gpu_channel_host), stream_id, stream_priority, surface_handle,
       url, automatic_flushes, support_locking, gpu::SharedMemoryLimits(),
-      attributes, shared_context_provider, type));
+      attributes, shared_context_provider, type);
 }
 
 #if defined(OS_MACOSX)
@@ -230,13 +230,16 @@ struct GpuProcessTransportFactory::PerCompositorData {
 };
 
 GpuProcessTransportFactory::GpuProcessTransportFactory(
+    gpu::GpuChannelEstablishFactory* gpu_channel_factory,
     scoped_refptr<base::SingleThreadTaskRunner> resize_task_runner)
     : frame_sink_id_allocator_(kDefaultClientId),
       renderer_settings_(
           viz::CreateRendererSettings(CreateBufferToTextureTargetMap())),
       resize_task_runner_(std::move(resize_task_runner)),
       task_graph_runner_(new cc::SingleThreadTaskGraphRunner),
+      gpu_channel_factory_(gpu_channel_factory),
       callback_factory_(this) {
+  DCHECK(gpu_channel_factory_);
   cc::SetClientNameForMetrics("Browser");
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
@@ -257,7 +260,7 @@ GpuProcessTransportFactory::GpuProcessTransportFactory(
   task_graph_runner_->Start("CompositorTileWorker1",
                             base::SimpleThread::Options());
 #if defined(OS_WIN)
-  software_backing_.reset(new OutputDeviceBacking);
+  software_backing_ = std::make_unique<viz::OutputDeviceBacking>();
 #endif
 }
 
@@ -270,12 +273,12 @@ GpuProcessTransportFactory::~GpuProcessTransportFactory() {
   task_graph_runner_->Shutdown();
 }
 
-std::unique_ptr<cc::SoftwareOutputDevice>
+std::unique_ptr<viz::SoftwareOutputDevice>
 GpuProcessTransportFactory::CreateSoftwareOutputDevice(
-    ui::Compositor* compositor) {
+    gfx::AcceleratedWidget widget) {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kHeadless))
-    return base::WrapUnique(new cc::SoftwareOutputDevice);
+    return base::WrapUnique(new viz::SoftwareOutputDevice);
 
 #if defined(USE_AURA)
   if (aura::Env::GetInstance()->mode() == aura::Env::Mode::MUS) {
@@ -284,20 +287,19 @@ GpuProcessTransportFactory::CreateSoftwareOutputDevice(
   }
 #endif
 
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 #if defined(OS_WIN)
-  return std::unique_ptr<cc::SoftwareOutputDevice>(
-      new SoftwareOutputDeviceWin(software_backing_.get(), compositor));
+  return std::make_unique<viz::SoftwareOutputDeviceWin>(software_backing_.get(),
+                                                        widget);
 #elif defined(USE_OZONE)
-  return SoftwareOutputDeviceOzone::Create(compositor);
+  return viz::SoftwareOutputDeviceOzone::Create(widget);
 #elif defined(USE_X11)
-  return std::unique_ptr<cc::SoftwareOutputDevice>(
-      new SoftwareOutputDeviceX11(compositor));
+  return std::make_unique<viz::SoftwareOutputDeviceX11>(widget);
 #elif defined(OS_MACOSX)
-  return std::unique_ptr<cc::SoftwareOutputDevice>(
-      new SoftwareOutputDeviceMac(compositor));
+  return std::make_unique<viz::SoftwareOutputDeviceMac>(widget);
 #else
   NOTREACHED();
-  return std::unique_ptr<cc::SoftwareOutputDevice>();
+  return std::unique_ptr<viz::SoftwareOutputDevice>();
 #endif
 }
 
@@ -341,18 +343,6 @@ CreateOverlayCandidateValidator(
   return validator;
 }
 
-static bool ShouldCreateGpuLayerTreeFrameSink(ui::Compositor* compositor) {
-#if defined(OS_CHROMEOS)
-  // Software fallback does not happen on Chrome OS.
-  return true;
-#endif
-
-  if (compositor->force_software_compositor())
-    return false;
-
-  return GpuDataManagerImpl::GetInstance()->CanUseGpuBrowserCompositor();
-}
-
 void GpuProcessTransportFactory::CreateLayerTreeFrameSink(
     base::WeakPtr<ui::Compositor> compositor) {
   DCHECK(!!compositor);
@@ -372,27 +362,28 @@ void GpuProcessTransportFactory::CreateLayerTreeFrameSink(
 #endif
 
   const bool use_vulkan = static_cast<bool>(SharedVulkanContextProvider());
-  const bool create_gpu_output_surface =
-      ShouldCreateGpuLayerTreeFrameSink(compositor.get());
-  if (create_gpu_output_surface && !use_vulkan) {
-    gpu::GpuChannelEstablishedCallback callback(
-        base::Bind(&GpuProcessTransportFactory::EstablishedGpuChannel,
-                   callback_factory_.GetWeakPtr(), compositor,
-                   create_gpu_output_surface, 0));
-    DCHECK(gpu_channel_factory_);
-    gpu_channel_factory_->EstablishGpuChannel(callback);
+  const bool use_gpu_compositing =
+      GpuDataManagerImpl::GetInstance()->CanUseGpuBrowserCompositor() &&
+      !compositor->force_software_compositor();
+  if (use_gpu_compositing && !use_vulkan) {
+    gpu_channel_factory_->EstablishGpuChannel(base::Bind(
+        &GpuProcessTransportFactory::EstablishedGpuChannel,
+        callback_factory_.GetWeakPtr(), compositor, use_gpu_compositing));
   } else {
-    EstablishedGpuChannel(compositor, create_gpu_output_surface, 0, nullptr);
+    EstablishedGpuChannel(compositor, use_gpu_compositing, nullptr);
   }
 }
 
 void GpuProcessTransportFactory::EstablishedGpuChannel(
     base::WeakPtr<ui::Compositor> compositor,
-    bool create_gpu_output_surface,
-    int num_attempts,
-    scoped_refptr<gpu::GpuChannelHost> established_channel_host) {
+    bool use_gpu_compositing,
+    scoped_refptr<gpu::GpuChannelHost> gpu_channel_host) {
   if (!compositor)
     return;
+
+  // CanUseGpuBrowserCompositor can change as a result of EstablishGpuChannel().
+  if (!GpuDataManagerImpl::GetInstance()->CanUseGpuBrowserCompositor())
+    use_gpu_compositing = false;
 
   // The widget might have been released in the meantime.
   PerCompositorDataMap::iterator it =
@@ -402,16 +393,6 @@ void GpuProcessTransportFactory::EstablishedGpuChannel(
 
   PerCompositorData* data = it->second.get();
   DCHECK(data);
-
-  if (num_attempts > kNumRetriesBeforeSoftwareFallback) {
-    bool fatal = false;
-#if defined(OS_CHROMEOS)
-    fatal = true;
-#endif
-    LOG_IF(FATAL, fatal) << "Unable to create a UI graphics context, and "
-                         << "cannot use software compositing on ChromeOS.";
-    create_gpu_output_surface = false;
-  }
 
   bool support_stencil = false;
 #if defined(OS_CHROMEOS)
@@ -431,91 +412,95 @@ void GpuProcessTransportFactory::EstablishedGpuChannel(
   scoped_refptr<viz::VulkanInProcessContextProvider> vulkan_context_provider =
       SharedVulkanContextProvider();
   scoped_refptr<ui::ContextProviderCommandBuffer> context_provider;
-  if (create_gpu_output_surface && !vulkan_context_provider) {
+
+  if (!use_gpu_compositing || vulkan_context_provider) {
+    // If not using GL compositing, don't keep the old shared worker context.
+    shared_worker_context_provider_ = nullptr;
+  } else if (!gpu_channel_host) {
+    // Failed to establish a channel, which is a fatal error, so stop trying to
+    // use gpu compositing.
+    use_gpu_compositing = false;
+    shared_worker_context_provider_ = nullptr;
+  } else {
     // Try to reuse existing worker context provider.
     if (shared_worker_context_provider_) {
       bool lost;
       {
         // Note: If context is lost, we delete reference after releasing the
         // lock.
-        base::AutoLock lock(*shared_worker_context_provider_->GetLock());
-        lost = shared_worker_context_provider_->ContextGL()
-                   ->GetGraphicsResetStatusKHR() != GL_NO_ERROR;
+        viz::ContextProvider::ScopedContextLock lock(
+            shared_worker_context_provider_.get());
+        lost = lock.ContextGL()->GetGraphicsResetStatusKHR() != GL_NO_ERROR;
       }
       if (lost)
         shared_worker_context_provider_ = nullptr;
     }
 
-    scoped_refptr<gpu::GpuChannelHost> gpu_channel_host;
-    if (GpuDataManagerImpl::GetInstance()->CanUseGpuBrowserCompositor())
-      gpu_channel_host = std::move(established_channel_host);
-
-    if (!gpu_channel_host) {
-      shared_worker_context_provider_ = nullptr;
-    } else {
-      if (!shared_worker_context_provider_) {
-        bool need_alpha_channel = false;
-        const bool support_locking = true;
-        shared_worker_context_provider_ = CreateContextCommon(
-            gpu_channel_host, gpu::kNullSurfaceHandle, need_alpha_channel,
-            false /* support_stencil */, support_locking, nullptr,
-            ui::command_buffer_metrics::BROWSER_WORKER_CONTEXT);
-        // TODO(vadimt): Remove ScopedTracker below once crbug.com/125248 is
-        // fixed. Tracking time in BindToCurrentThread.
-        tracked_objects::ScopedTracker tracking_profile(
-            FROM_HERE_WITH_EXPLICIT_FUNCTION(
-                "125248"
-                " GpuProcessTransportFactory::EstablishedGpuChannel"
-                "::Worker"));
-        if (!shared_worker_context_provider_->BindToCurrentThread())
-          shared_worker_context_provider_ = nullptr;
-      }
-
-      // The |context_provider| is used for both the browser compositor and the
-      // display compositor. It shares resources with the worker context, so if
-      // we failed to make a worker context, just start over and try again.
-      if (shared_worker_context_provider_) {
-        // For mus, we create an offscreen context for a mus window, and we will
-        // use CommandBufferProxyImpl::TakeFrontBuffer() to take the context's
-        // front buffer into a mailbox, insert a sync token, and send the
-        // mailbox+sync to the ui service process.
-        gpu::SurfaceHandle surface_handle = data->surface_handle;
-        bool need_alpha_channel = false;
-        bool support_locking = false;
-        context_provider = CreateContextCommon(
-            std::move(gpu_channel_host), surface_handle, need_alpha_channel,
-            support_stencil, support_locking,
-            shared_worker_context_provider_.get(),
-            ui::command_buffer_metrics::DISPLAY_COMPOSITOR_ONSCREEN_CONTEXT);
-        // TODO(vadimt): Remove ScopedTracker below once crbug.com/125248 is
-        // fixed. Tracking time in BindToCurrentThread.
-        tracked_objects::ScopedTracker tracking_profile(
-            FROM_HERE_WITH_EXPLICIT_FUNCTION(
-                "125248"
-                " GpuProcessTransportFactory::EstablishedGpuChannel"
-                "::Compositor"));
-        // On Mac, GpuCommandBufferMsg_SwapBuffersCompleted must be handled in
-        // a nested run loop during resize.
-        context_provider->SetDefaultTaskRunner(resize_task_runner_);
-        if (!context_provider->BindToCurrentThread())
-          context_provider = nullptr;
+    if (!shared_worker_context_provider_) {
+      bool need_alpha_channel = false;
+      const bool support_locking = true;
+      shared_worker_context_provider_ = CreateContextCommon(
+          gpu_channel_host, gpu::kNullSurfaceHandle, need_alpha_channel,
+          false /* support_stencil */, support_locking, nullptr,
+          ui::command_buffer_metrics::BROWSER_WORKER_CONTEXT);
+      auto result = shared_worker_context_provider_->BindToCurrentThread();
+      if (result != gpu::ContextResult::kSuccess) {
+        shared_worker_context_provider_ = nullptr;
+        if (result == gpu::ContextResult::kFatalFailure)
+          use_gpu_compositing = false;
       }
     }
 
-    bool created_gpu_browser_compositor =
-        !!context_provider && !!shared_worker_context_provider_;
+    // The |context_provider| is used for both the browser compositor and the
+    // display compositor. It shares resources with the worker context, so if
+    // we failed to make a worker context, just start over and try again.
+    if (shared_worker_context_provider_) {
+      // For mus, we create an offscreen context for a mus window, and we will
+      // use CommandBufferProxyImpl::TakeFrontBuffer() to take the context's
+      // front buffer into a mailbox, insert a sync token, and send the
+      // mailbox+sync to the ui service process.
+      gpu::SurfaceHandle surface_handle = data->surface_handle;
+      bool need_alpha_channel = false;
+      bool support_locking = false;
+      context_provider = CreateContextCommon(
+          std::move(gpu_channel_host), surface_handle, need_alpha_channel,
+          support_stencil, support_locking,
+          shared_worker_context_provider_.get(),
+          ui::command_buffer_metrics::DISPLAY_COMPOSITOR_ONSCREEN_CONTEXT);
+      // On Mac, GpuCommandBufferMsg_SwapBuffersCompleted must be handled in
+      // a nested run loop during resize.
+      context_provider->SetDefaultTaskRunner(resize_task_runner_);
+      auto result = context_provider->BindToCurrentThread();
+      if (result != gpu::ContextResult::kSuccess) {
+        context_provider = nullptr;
+        if (result == gpu::ContextResult::kFatalFailure)
+          use_gpu_compositing = false;
+      }
+    }
+  }
 
-    UMA_HISTOGRAM_BOOLEAN("Aura.CreatedGpuBrowserCompositor",
-                          created_gpu_browser_compositor);
+  bool gpu_compositing_ready =
+      vulkan_context_provider ||
+      (context_provider && shared_worker_context_provider_);
+  UMA_HISTOGRAM_BOOLEAN("Aura.CreatedGpuBrowserCompositor",
+                        gpu_compositing_ready);
+  if (!gpu_compositing_ready) {
+#if defined(OS_CHROMEOS)
+    // A fatal context error occured, and we can not fall back to software
+    // compositing on ChromeOS. These can be unrecoverable hardware errors,
+    // or bugs that should not happen: either from the client's context request,
+    // in the service, or a transient error was miscategorized as fatal.
+    CHECK(use_gpu_compositing);
+#endif
 
-    if (!created_gpu_browser_compositor) {
-      // Try again.
-      gpu::GpuChannelEstablishedCallback callback(
-          base::Bind(&GpuProcessTransportFactory::EstablishedGpuChannel,
-                     callback_factory_.GetWeakPtr(), compositor,
-                     create_gpu_output_surface, num_attempts + 1));
-      DCHECK(gpu_channel_factory_);
-      gpu_channel_factory_->EstablishGpuChannel(callback);
+    // Try again if we didn't give up on gpu. Otherwise, drop the shared context
+    // if it exists and won't be used.
+    if (!use_gpu_compositing) {
+      shared_worker_context_provider_ = nullptr;
+    } else {
+      gpu_channel_factory_->EstablishGpuChannel(base::Bind(
+          &GpuProcessTransportFactory::EstablishedGpuChannel,
+          callback_factory_.GetWeakPtr(), compositor, use_gpu_compositing));
       return;
     }
   }
@@ -540,10 +525,10 @@ void GpuProcessTransportFactory::EstablishedGpuChannel(
 #endif
 
   if (!display_output_surface) {
-    if (!create_gpu_output_surface) {
+    if (!use_gpu_compositing) {
       display_output_surface =
           base::MakeUnique<SoftwareBrowserCompositorOutputSurface>(
-              CreateSoftwareOutputDevice(compositor.get()), vsync_callback,
+              CreateSoftwareOutputDevice(compositor->widget()), vsync_callback,
               compositor->task_runner());
     } else {
       DCHECK(context_provider);
@@ -555,11 +540,14 @@ void GpuProcessTransportFactory::EstablishedGpuChannel(
                 std::unique_ptr<viz::CompositorOverlayCandidateValidator>());
       } else if (capabilities.surfaceless) {
 #if defined(OS_MACOSX)
+        const auto& gpu_feature_info = context_provider->GetGpuFeatureInfo();
+        bool disable_overlay_ca_layers = gpu_feature_info.IsWorkaroundEnabled(
+            gpu::DISABLE_OVERLAY_CA_LAYERS);
         display_output_surface = base::MakeUnique<GpuOutputSurfaceMac>(
             compositor->widget(), context_provider, data->surface_handle,
             vsync_callback,
-            CreateOverlayCandidateValidator(
-                compositor->widget(), capabilities.disable_overlay_ca_layers),
+            CreateOverlayCandidateValidator(compositor->widget(),
+                                            disable_overlay_ca_layers),
             GetGpuMemoryBufferManager());
 #else
         auto gpu_output_surface =
@@ -649,7 +637,7 @@ void GpuProcessTransportFactory::EstablishedGpuChannel(
       viz::ServerSharedBitmapManager::current(), GetGpuMemoryBufferManager(),
       renderer_settings_, compositor->frame_sink_id(),
       std::move(display_output_surface), std::move(scheduler),
-      base::MakeUnique<cc::TextureMailboxDeleter>(
+      base::MakeUnique<viz::TextureMailboxDeleter>(
           compositor->task_runner().get()));
   GetFrameSinkManager()->RegisterBeginFrameSource(begin_frame_source,
                                                   compositor->frame_sink_id());
@@ -859,8 +847,19 @@ void GpuProcessTransportFactory::IssueExternalBeginFrame(
     return;
   PerCompositorData* data = it->second.get();
   DCHECK(data);
-  if (data->external_begin_frame_controller)
+  if (data->external_begin_frame_controller) {
     data->external_begin_frame_controller->IssueExternalBeginFrame(args);
+    // Ensure that Display will receive the BeginFrame (as a missed one), even
+    // if it doesn't currently need it. This way, we ensure that
+    // OnDisplayDidFinishFrame will be called for this BeginFrame.
+    data->display->SetNeedsOneBeginFrame();
+  } else {
+    DLOG(WARNING) << "IssueExternalBeginFrame called for compositor without "
+                     "ExternalBeginFrameController";
+    // Still send an ack back to unblock the client.
+    compositor->OnDisplayDidFinishFrame(
+        viz::BeginFrameAck(args.source_id, args.sequence_number, false));
+  }
 }
 
 void GpuProcessTransportFactory::SetOutputIsSecure(ui::Compositor* compositor,
@@ -904,12 +903,6 @@ viz::GLHelper* GpuProcessTransportFactory::GetGLHelper() {
   return gl_helper_.get();
 }
 
-void GpuProcessTransportFactory::SetGpuChannelEstablishFactory(
-    gpu::GpuChannelEstablishFactory* factory) {
-  DCHECK(!gpu_channel_factory_ || !factory);
-  gpu_channel_factory_ = factory;
-}
-
 #if defined(OS_MACOSX)
 void GpuProcessTransportFactory::SetCompositorSuspendedForRecycle(
     ui::Compositor* compositor,
@@ -932,7 +925,6 @@ GpuProcessTransportFactory::SharedMainThreadContextProvider() {
   if (!GpuDataManagerImpl::GetInstance()->CanUseGpuBrowserCompositor())
     return nullptr;
 
-  DCHECK(gpu_channel_factory_);
   scoped_refptr<gpu::GpuChannelHost> gpu_channel_host =
       gpu_channel_factory_->EstablishGpuChannelSync();
   if (!gpu_channel_host)
@@ -949,13 +941,8 @@ GpuProcessTransportFactory::SharedMainThreadContextProvider() {
   shared_main_thread_contexts_->SetLostContextCallback(base::Bind(
       &GpuProcessTransportFactory::OnLostMainThreadSharedContextInsideCallback,
       callback_factory_.GetWeakPtr()));
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/125248 is
-  // fixed. Tracking time in BindToCurrentThread.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "125248"
-          " GpuProcessTransportFactory::SharedMainThreadContextProvider"));
-  if (!shared_main_thread_contexts_->BindToCurrentThread())
+  auto result = shared_main_thread_contexts_->BindToCurrentThread();
+  if (result != gpu::ContextResult::kSuccess)
     shared_main_thread_contexts_ = nullptr;
   return shared_main_thread_contexts_;
 }

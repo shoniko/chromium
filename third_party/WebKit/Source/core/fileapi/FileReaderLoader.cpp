@@ -39,12 +39,12 @@
 #include "core/typed_arrays/DOMArrayBuffer.h"
 #include "platform/blob/BlobRegistry.h"
 #include "platform/blob/BlobURL.h"
-#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
 #include "platform/loader/fetch/ResourceError.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
 #include "platform/loader/fetch/ResourceRequest.h"
 #include "platform/loader/fetch/ResourceResponse.h"
 #include "platform/loader/fetch/TextResourceDecoderOptions.h"
+#include "platform/loader/fetch/fetch_initiator_type_names.h"
 #include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
@@ -68,7 +68,7 @@ FileReaderLoader::~FileReaderLoader() {
 }
 
 void FileReaderLoader::Start(ExecutionContext* execution_context,
-                             RefPtr<BlobDataHandle> blob_data) {
+                             scoped_refptr<BlobDataHandle> blob_data) {
   DCHECK(execution_context);
   // The blob is read by routing through the request handling layer given a
   // temporary public url.

@@ -5,7 +5,7 @@
 #include "chromeos/printing/ppd_provider.h"
 
 #include <algorithm>
-#include <deque>
+#include <memory>
 #include <set>
 #include <unordered_map>
 #include <utility>
@@ -13,10 +13,10 @@
 
 #include "base/base64.h"
 #include "base/bind_helpers.h"
+#include "base/containers/circular_deque.h"
 #include "base/files/file.h"
 #include "base/files/file_util.h"
 #include "base/json/json_parser.h"
-#include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -32,6 +32,7 @@
 #include "base/values.h"
 #include "chromeos/printing/ppd_cache.h"
 #include "chromeos/printing/printing_constants.h"
+#include "net/base/filename_util.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/url_fetcher.h"
@@ -165,9 +166,17 @@ void OnPpdStored() {}
 bool FetchFile(const GURL& url, std::string* file_contents) {
   CHECK(url.is_valid());
   CHECK(url.SchemeIs("file"));
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
-  return base::ReadFileToString(base::FilePath(url.path()), file_contents);
+  // Here we are un-escaping the file path represented by the url. If we don't
+  // transform the url into a valid file path then the file may fail to be
+  // opened by the system later.
+  base::FilePath path;
+  if (!net::FileURLToFilePath(url, &path)) {
+    LOG(ERROR) << "Not a valid file URL.";
+    return false;
+  }
+  return base::ReadFileToString(path, file_contents);
 }
 
 struct ManufacturerMetadata {
@@ -504,7 +513,7 @@ class PpdProviderImpl : public PpdProvider, public net::URLFetcherDelegate {
                              net::LOAD_DO_NOT_SEND_AUTH_DATA);
       fetcher_->Start();
     } else if (url.SchemeIs("file")) {
-      auto file_contents = base::MakeUnique<std::string>();
+      auto file_contents = std::make_unique<std::string>();
       std::string* content_ptr = file_contents.get();
       base::PostTaskAndReplyWithResult(
           disk_task_runner_.get(), FROM_HERE,
@@ -617,7 +626,7 @@ class PpdProviderImpl : public PpdProvider, public net::URLFetcherDelegate {
       FailQueuedMetadataResolutions(code);
       return;
     }
-    cached_metadata_ = base::MakeUnique<
+    cached_metadata_ = std::make_unique<
         std::unordered_map<std::string, ManufacturerMetadata>>();
 
     for (const auto& entry : contents) {
@@ -664,7 +673,7 @@ class PpdProviderImpl : public PpdProvider, public net::URLFetcherDelegate {
       auto& manufacturer_metadata = it->second;
       CHECK(manufacturer_metadata.printers.get() == nullptr);
       manufacturer_metadata.printers =
-          base::MakeUnique<std::unordered_map<std::string, std::string>>();
+          std::make_unique<std::unordered_map<std::string, std::string>>();
 
       for (const auto& entry : contents) {
         manufacturer_metadata.printers->insert({entry.first, entry.second});
@@ -689,7 +698,7 @@ class PpdProviderImpl : public PpdProvider, public net::URLFetcherDelegate {
       FailQueuedServerPpdResolutions(code);
     } else {
       cached_ppd_index_ =
-          base::MakeUnique<std::unordered_map<std::string, std::string>>();
+          std::make_unique<std::unordered_map<std::string, std::string>>();
       // This should be a list of lists of 2-element strings, where the first
       // element is the |effective_make_and_model| of the printer and the second
       // element is the filename of the ppd in the ppds/ directory on the
@@ -707,10 +716,12 @@ class PpdProviderImpl : public PpdProvider, public net::URLFetcherDelegate {
     DCHECK(!ppd_resolution_queue_.empty());
     std::string contents;
 
-    if ((ValidateAndGetResponseAsString(&contents) != PpdProvider::SUCCESS) ||
-        contents.size() > kMaxPpdSizeBytes) {
+    if ((ValidateAndGetResponseAsString(&contents) != PpdProvider::SUCCESS)) {
       FinishPpdResolution(ppd_resolution_queue_.front().second,
                           PpdProvider::SERVER_ERROR, std::string());
+    } else if (contents.size() > kMaxPpdSizeBytes) {
+      FinishPpdResolution(ppd_resolution_queue_.front().second,
+                          PpdProvider::PPD_TOO_LARGE, std::string());
     } else {
       ppd_cache_->Store(
           PpdReferenceToCacheKey(ppd_resolution_queue_.front().first), contents,
@@ -794,7 +805,7 @@ class PpdProviderImpl : public PpdProvider, public net::URLFetcherDelegate {
   // any user-based ppd resolutions intact, as they don't depend on the data
   // we're missing.
   void FailQueuedServerPpdResolutions(PpdProvider::CallbackResultCode code) {
-    std::deque<std::pair<Printer::PpdReference, ResolvePpdCallback>>
+    base::circular_deque<std::pair<Printer::PpdReference, ResolvePpdCallback>>
         filtered_queue;
     for (const auto& entry : ppd_resolution_queue_) {
       if (!entry.first.user_supplied_ppd_url.empty()) {
@@ -1090,14 +1101,15 @@ class PpdProviderImpl : public PpdProvider, public net::URLFetcherDelegate {
   std::vector<ResolveManufacturersCallback> manufacturers_resolution_queue_;
 
   // Queued ResolvePrinters() calls.
-  std::deque<PrinterResolutionQueueEntry> printers_resolution_queue_;
+  base::circular_deque<PrinterResolutionQueueEntry> printers_resolution_queue_;
 
   // Queued ResolvePpd() requests.
-  std::deque<std::pair<Printer::PpdReference, ResolvePpdCallback>>
+  base::circular_deque<std::pair<Printer::PpdReference, ResolvePpdCallback>>
       ppd_resolution_queue_;
 
   // Queued ResolvePpdReference() requests.
-  std::deque<std::pair<PrinterSearchData, ResolvePpdReferenceCallback>>
+  base::circular_deque<
+      std::pair<PrinterSearchData, ResolvePpdReferenceCallback>>
       ppd_reference_resolution_queue_;
 
   // Locale we're using for grabbing stuff from the server.  Empty if we haven't

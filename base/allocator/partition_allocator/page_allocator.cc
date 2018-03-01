@@ -11,6 +11,7 @@
 #include "base/allocator/partition_allocator/address_space_randomization.h"
 #include "base/allocator/partition_allocator/spin_lock.h"
 #include "base/base_export.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "build/build_config.h"
 
@@ -88,7 +89,8 @@ int GetAccessFlags(PageAccessibilityConfiguration page_accessibility) {
 #endif  // defined(OS_POSIX)
 
 // We may reserve / release address space on different threads.
-subtle::SpinLock s_reserveLock;
+static LazyInstance<subtle::SpinLock>::Leaky s_reserveLock =
+    LAZY_INSTANCE_INITIALIZER;
 // We only support a single block of reserved address space.
 void* s_reservation_address = nullptr;
 size_t s_reservation_size = 0;
@@ -196,7 +198,8 @@ void* AllocPages(void* address,
   DCHECK(length >= kPageAllocationGranularity);
   DCHECK(!(length & kPageAllocationGranularityOffsetMask));
   DCHECK(align >= kPageAllocationGranularity);
-  DCHECK(!(align & kPageAllocationGranularityOffsetMask));
+  // Alignment must be power of 2 for masking math to work.
+  DCHECK_EQ(align & (align - 1), 0UL);
   DCHECK(!(reinterpret_cast<uintptr_t>(address) &
            kPageAllocationGranularityOffsetMask));
   uintptr_t align_offset_mask = align - 1;
@@ -290,6 +293,25 @@ bool SetSystemPagesAccess(void* address,
 void DecommitSystemPages(void* address, size_t length) {
   DCHECK(!(length & kSystemPageOffsetMask));
 #if defined(OS_POSIX)
+  // In POSIX, there is no decommit concept. Discarding is an effective way of
+  // implementing the Windows semantics where the OS is allows to not swap the
+  // pages in the region.
+  DiscardSystemPages(address, length);
+#endif
+  CHECK(SetSystemPagesAccess(address, length, PageInaccessible));
+}
+
+bool RecommitSystemPages(void* address,
+                         size_t length,
+                         PageAccessibilityConfiguration page_accessibility) {
+  DCHECK(!(length & kSystemPageOffsetMask));
+  DCHECK_NE(PageInaccessible, page_accessibility);
+  return SetSystemPagesAccess(address, length, page_accessibility);
+}
+
+void DiscardSystemPages(void* address, size_t length) {
+  DCHECK_EQ(0UL, length & kSystemPageOffsetMask);
+#if defined(OS_POSIX)
 #if defined(OS_MACOSX)
   // On macOS, MADV_FREE_REUSABLE has comparable behavior to MADV_FREE, but also
   // marks the pages with the reusable bit, which allows both Activity Monitor
@@ -305,34 +327,6 @@ void DecommitSystemPages(void* address, size_t length) {
     ret = madvise(address, length, MADV_DONTNEED);
   }
   CHECK(!ret);
-#else
-  CHECK(SetSystemPagesAccess(address, length, PageInaccessible));
-#endif
-}
-
-bool RecommitSystemPages(void* address,
-                         size_t length,
-                         PageAccessibilityConfiguration page_accessibility) {
-  DCHECK(!(length & kSystemPageOffsetMask));
-  DCHECK_NE(PageInaccessible, page_accessibility);
-#if defined(OS_POSIX)
-  // On POSIX systems, read the memory to recommit. This has the correct
-  // behavior because the API requires the permissions to be the same as before
-  // decommitting and all configurations can read.
-  (void)address;
-  return true;
-#endif
-  return SetSystemPagesAccess(address, length, page_accessibility);
-}
-
-void DiscardSystemPages(void* address, size_t length) {
-  DCHECK(!(length & kSystemPageOffsetMask));
-#if defined(OS_POSIX)
-  // On POSIX, the implementation detail is that discard and decommit are the
-  // same, and lead to pages that are returned to the system immediately and
-  // get replaced with zeroed pages when touched. So we just call
-  // DecommitSystemPages() here to avoid code duplication.
-  DecommitSystemPages(address, length);
 #else
   // On Windows discarded pages are not returned to the system immediately and
   // not guaranteed to be zeroed when returned to the application.
@@ -369,7 +363,7 @@ bool ReserveAddressSpace(size_t size) {
            kPageAllocationGranularityOffsetMask));
   if (mem != nullptr) {
     {
-      subtle::SpinLock::Guard guard(s_reserveLock);
+      subtle::SpinLock::Guard guard(s_reserveLock.Get());
       if (s_reservation_address == nullptr) {
         s_reservation_address = mem;
         s_reservation_size = size;
@@ -383,7 +377,7 @@ bool ReserveAddressSpace(size_t size) {
 }
 
 void ReleaseReservation() {
-  subtle::SpinLock::Guard guard(s_reserveLock);
+  subtle::SpinLock::Guard guard(s_reserveLock.Get());
   if (s_reservation_address != nullptr) {
     FreePages(s_reservation_address, s_reservation_size);
     s_reservation_address = nullptr;

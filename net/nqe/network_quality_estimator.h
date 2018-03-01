@@ -142,6 +142,10 @@ class NET_EXPORT NetworkQualityEstimator
   // been received.
   void NotifyHeadersReceived(const URLRequest& request);
 
+  // Notifies NetworkQualityEstimator that unfiltered bytes have been read for
+  // |request|.
+  void NotifyBytesRead(const URLRequest& request);
+
   // Notifies NetworkQualityEstimator that the headers of |request| are about to
   // be sent.
   void NotifyStartTransaction(const URLRequest& request);
@@ -180,11 +184,6 @@ class NET_EXPORT NetworkQualityEstimator
   // Allows the responses smaller than |kMinTransferSizeInBits| to be used for
   // network quality estimation.
   void SetUseSmallResponsesForTesting(bool use_small_responses);
-
-  // |add_default_platform_observations| should be false only if |this| should
-  // not generate observations based on the platform and/or connection type.
-  void SetAddDefaultPlatformObservationsForTesting(
-      bool add_default_platform_observations);
 
   // If |disable_offline_check| is set to true, then the device offline check is
   // disabled when computing the effective connection type or when writing the
@@ -519,6 +518,10 @@ class NET_EXPORT NetworkQualityEstimator
 
   const char* GetNameForStatistic(int i) const;
 
+  // Gathers metrics for the next connection type. Called when there is a change
+  // in the connection type.
+  void GatherEstimatesForNextConnectionType();
+
   // Params to configure the network quality estimator.
   const std::unique_ptr<NetworkQualityEstimatorParams> params_;
 
@@ -526,19 +529,10 @@ class NET_EXPORT NetworkQualityEstimator
   // network quality. Set to true only for tests.
   bool use_localhost_requests_;
 
-  // Determines if the responses smaller than |kMinTransferSizeInBytes|
-  // or shorter than |kMinTransferSizeInBytes| can be used in estimating the
-  // network quality. Set to true only for tests.
-  bool use_small_responses_;
-
   // When set to true, the device offline check is disabled when computing the
   // effective connection type or when writing the prefs. Set to true only for
   // testing.
   bool disable_offline_check_;
-
-  // If true, default values provided by the platform are used for estimation.
-  // Set to false only for testing.
-  bool add_default_platform_observations_;
 
   // Tick clock used by the network quality estimator.
   std::unique_ptr<base::TickClock> tick_clock_;

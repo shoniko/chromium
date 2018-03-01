@@ -25,13 +25,13 @@
 #include "core/html/HTMLIFrameElement.h"
 
 #include "core/CSSPropertyNames.h"
-#include "core/HTMLNames.h"
 #include "core/frame/UseCounter.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/HTMLDocument.h"
+#include "core/html_names.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/layout/LayoutIFrame.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -46,7 +46,7 @@ inline HTMLIFrameElement::HTMLIFrameElement(Document& document)
 
 DEFINE_NODE_FACTORY(HTMLIFrameElement)
 
-DEFINE_TRACE(HTMLIFrameElement) {
+void HTMLIFrameElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(sandbox_);
   HTMLFrameElementBase::Trace(visitor);
   Supplementable<HTMLIFrameElement>::Trace(visitor);
@@ -186,14 +186,15 @@ void HTMLIFrameElement::ParseAttribute(
               kOtherMessageSource, kWarningMessageLevel, message));
         }
       }
-
-      if (old_syntax) {
-        UseCounter::Count(
-            GetDocument(),
-            WebFeature::kFeaturePolicyAllowAttributeDeprecatedSyntax);
-      } else {
-        UseCounter::Count(GetDocument(),
-                          WebFeature::kFeaturePolicyAllowAttribute);
+      if (!value.IsEmpty()) {
+        if (old_syntax) {
+          UseCounter::Count(
+              GetDocument(),
+              WebFeature::kFeaturePolicyAllowAttributeDeprecatedSyntax);
+        } else {
+          UseCounter::Count(GetDocument(),
+                            WebFeature::kFeaturePolicyAllowAttribute);
+        }
       }
     }
   } else {
@@ -206,8 +207,8 @@ void HTMLIFrameElement::ParseAttribute(
 Vector<WebParsedFeaturePolicyDeclaration>
 HTMLIFrameElement::ConstructContainerPolicy(Vector<String>* messages,
                                             bool* old_syntax) const {
-  RefPtr<SecurityOrigin> src_origin = GetOriginForFeaturePolicy();
-  RefPtr<SecurityOrigin> self_origin = GetDocument().GetSecurityOrigin();
+  scoped_refptr<SecurityOrigin> src_origin = GetOriginForFeaturePolicy();
+  scoped_refptr<SecurityOrigin> self_origin = GetDocument().GetSecurityOrigin();
   Vector<WebParsedFeaturePolicyDeclaration> container_policy =
       ParseFeaturePolicyAttribute(allow_, self_origin, src_origin, messages,
                                   old_syntax);

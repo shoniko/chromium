@@ -49,12 +49,12 @@ bool IsOriginSecure(const GURL& url) {
 
   if (url.SchemeIsFileSystem() || url.SchemeIsBlob()) {
     // Should use inner URL.
-    url::Origin origin(url);
+    url::Origin origin = url::Origin::Create(url);
     if (IsSecureScheme(origin.scheme()))
       return true;
   }
 
-  return IsOriginWhiteListedTrustworthy(url::Origin(url));
+  return IsOriginWhiteListedTrustworthy(url::Origin::Create(url));
 }
 
 // Should return the same value as the resource URL checks assigned to
@@ -62,9 +62,10 @@ bool IsOriginSecure(const GURL& url) {
 bool IsUrlPotentiallySecure(const GURL& url) {
   // blob: and filesystem: URLs never hit the network, and access is restricted
   // to same-origin contexts, so they are not blocked.
-  bool is_secure =
-      url.SchemeIs(url::kBlobScheme) || url.SchemeIs(url::kFileSystemScheme) ||
-      IsOriginSecure(url) || IsPotentiallyTrustworthyOrigin(url::Origin(url));
+  bool is_secure = url.SchemeIs(url::kBlobScheme) ||
+                   url.SchemeIs(url::kFileSystemScheme) ||
+                   IsOriginSecure(url) ||
+                   IsPotentiallyTrustworthyOrigin(url::Origin::Create(url));
 
   // TODO(mkwst): Remove this once the following draft is implemented:
   // https://tools.ietf.org/html/draft-west-let-localhost-be-localhost-03. See:
@@ -127,26 +128,27 @@ MixedContentNavigationThrottle::MixedContentNavigationThrottle(
 
 MixedContentNavigationThrottle::~MixedContentNavigationThrottle() {}
 
-ThrottleCheckResult MixedContentNavigationThrottle::WillStartRequest() {
+NavigationThrottle::ThrottleCheckResult
+MixedContentNavigationThrottle::WillStartRequest() {
   bool should_block = ShouldBlockNavigation(false);
-  return should_block ? ThrottleCheckResult::CANCEL
-                      : ThrottleCheckResult::PROCEED;
+  return should_block ? CANCEL : PROCEED;
 }
 
-ThrottleCheckResult MixedContentNavigationThrottle::WillRedirectRequest() {
+NavigationThrottle::ThrottleCheckResult
+MixedContentNavigationThrottle::WillRedirectRequest() {
   // Upon redirects the same checks are to be executed as for requests.
   bool should_block = ShouldBlockNavigation(true);
-  return should_block ? ThrottleCheckResult::CANCEL
-                      : ThrottleCheckResult::PROCEED;
+  return should_block ? CANCEL : PROCEED;
 }
 
-ThrottleCheckResult MixedContentNavigationThrottle::WillProcessResponse() {
+NavigationThrottle::ThrottleCheckResult
+MixedContentNavigationThrottle::WillProcessResponse() {
   // TODO(carlosk): At this point we are about to process the request response.
   // So if we ever need to, here/now it is a good moment to check for the final
   // attained security level of the connection. For instance, does it use an
   // outdated protocol? The implementation should be based off
   // MixedContentChecker::handleCertificateError. See https://crbug.com/576270.
-  return ThrottleCheckResult::PROCEED;
+  return PROCEED;
 }
 
 const char* MixedContentNavigationThrottle::GetNameForLogging() {
@@ -359,7 +361,7 @@ void MixedContentNavigationThrottle::ReportBasicMixedContentFeatures(
 bool MixedContentNavigationThrottle::IsMixedContentForTesting(
     const GURL& origin_url,
     const GURL& url) {
-  const url::Origin origin(origin_url);
+  const url::Origin origin = url::Origin::Create(origin_url);
   return !IsUrlPotentiallySecure(url) &&
          DoesOriginSchemeRestrictMixedContent(origin);
 }

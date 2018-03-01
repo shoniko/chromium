@@ -29,13 +29,14 @@ namespace blink {
 
 MediaQueryList* MediaQueryList::Create(ExecutionContext* context,
                                        MediaQueryMatcher* matcher,
-                                       RefPtr<MediaQuerySet> media) {
-  return new MediaQueryList(context, matcher, RefPtr<MediaQuerySet>(media));
+                                       scoped_refptr<MediaQuerySet> media) {
+  return new MediaQueryList(context, matcher,
+                            scoped_refptr<MediaQuerySet>(media));
 }
 
 MediaQueryList::MediaQueryList(ExecutionContext* context,
                                MediaQueryMatcher* matcher,
-                               RefPtr<MediaQuerySet> media)
+                               scoped_refptr<MediaQuerySet> media)
     : ContextLifecycleObserver(context),
       matcher_(matcher),
       media_(media),
@@ -102,7 +103,7 @@ bool MediaQueryList::MediaFeaturesChanged(
 
 bool MediaQueryList::UpdateMatches() {
   matches_dirty_ = false;
-  if (matches_ != matcher_->Evaluate(media_.Get())) {
+  if (matches_ != matcher_->Evaluate(media_.get())) {
     matches_ = !matches_;
     return true;
   }
@@ -114,7 +115,7 @@ bool MediaQueryList::matches() {
   return matches_;
 }
 
-DEFINE_TRACE(MediaQueryList) {
+void MediaQueryList::Trace(blink::Visitor* visitor) {
   visitor->Trace(matcher_);
   visitor->Trace(listeners_);
   EventTargetWithInlineData::Trace(visitor);

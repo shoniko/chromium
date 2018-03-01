@@ -15,6 +15,7 @@
 #include "platform/scheduler/base/task_queue.h"
 #include "platform/scheduler/child/web_scheduler.h"
 #include "platform/scheduler/child/web_task_runner_impl.h"
+#include "platform/scheduler/renderer/auto_advancing_virtual_time_domain.h"
 #include "platform/scheduler/renderer/task_queue_throttler.h"
 #include "platform/scheduler/renderer/web_view_scheduler.h"
 
@@ -32,7 +33,9 @@ class RendererSchedulerImpl;
 class CPUTimeBudgetPool;
 class WebFrameSchedulerImpl;
 
-class PLATFORM_EXPORT WebViewSchedulerImpl : public WebViewScheduler {
+class PLATFORM_EXPORT WebViewSchedulerImpl
+    : public WebViewScheduler,
+      public AutoAdvancingVirtualTimeDomain::Observer {
  public:
   WebViewSchedulerImpl(
       WebScheduler::InterventionReporter* intervention_reporter,
@@ -44,25 +47,33 @@ class PLATFORM_EXPORT WebViewSchedulerImpl : public WebViewScheduler {
 
   // WebViewScheduler implementation:
   void SetPageVisible(bool page_visible) override;
+  void SetPageStopped(bool) override;
   std::unique_ptr<WebFrameScheduler> CreateFrameScheduler(
-      BlameContext* blame_context) override;
+      BlameContext* blame_context,
+      WebFrameScheduler::FrameType frame_type) override;
   void EnableVirtualTime() override;
   void DisableVirtualTimeForTesting() override;
   bool VirtualTimeAllowedToAdvance() const override;
   void SetVirtualTimePolicy(VirtualTimePolicy virtual_time_policy) override;
   void GrantVirtualTimeBudget(base::TimeDelta budget,
                               WTF::Closure budget_exhausted_callback) override;
+  void SetMaxVirtualTimeTaskStarvationCount(
+      int max_task_starvation_count) override;
   void AudioStateChanged(bool is_audio_playing) override;
   bool HasActiveConnectionForTest() const override;
   void RequestBeginMainFrameNotExpected(bool new_state) override;
   void AddVirtualTimeObserver(VirtualTimeObserver*) override;
   void RemoveVirtualTimeObserver(VirtualTimeObserver*) override;
 
+  // AutoAdvancingVirtualTimeDomain::Observer implementation:
+  void OnVirtualTimeAdvanced() override;
+
   // Virtual for testing.
   virtual void ReportIntervention(const std::string& message);
 
   std::unique_ptr<WebFrameSchedulerImpl> CreateWebFrameSchedulerImpl(
-      base::trace_event::BlameContext* blame_context);
+      base::trace_event::BlameContext* blame_context,
+      WebFrameScheduler::FrameType frame_type);
 
   void DidStartLoading(unsigned long identifier);
   void DidStopLoading(unsigned long identifier);
@@ -74,9 +85,17 @@ class PLATFORM_EXPORT WebViewSchedulerImpl : public WebViewScheduler {
   void DidBeginProvisionalLoad(WebFrameSchedulerImpl* frame_scheduler);
   void DidEndProvisionalLoad(WebFrameSchedulerImpl* frame_scheduler);
 
+  void OnBeginNestedRunLoop();
+  void OnExitNestedRunLoop();
+
   bool IsAudioPlaying() const;
 
   void OnConnectionUpdated();
+
+  void OnTraceLogEnabled();
+
+  // Return a number of child web frame schedulers for this WebViewScheduler.
+  size_t FrameCount() const;
 
   void AsValueInto(base::trace_event::TracedValue* state) const;
 
@@ -87,8 +106,7 @@ class PLATFORM_EXPORT WebViewSchedulerImpl : public WebViewScheduler {
   void MaybeInitializeBackgroundCPUTimeBudgetPool();
 
   void SetAllowVirtualTimeToAdvance(bool allow_virtual_time_to_advance);
-  void ApplyVirtualTimePolicyForLoading();
-  void ApplyVirtualTimePolicyToTimers();
+  void ApplyVirtualTimePolicy();
 
   void OnThrottlingReported(base::TimeDelta throttling_duration);
 
@@ -113,18 +131,24 @@ class PLATFORM_EXPORT WebViewSchedulerImpl : public WebViewScheduler {
   WebScheduler::InterventionReporter* intervention_reporter_;  // Not owned.
   RendererSchedulerImpl* renderer_scheduler_;
   VirtualTimePolicy virtual_time_policy_;
-  RefPtr<WebTaskRunnerImpl> virtual_time_control_task_queue_;
+  scoped_refptr<WebTaskRunnerImpl> virtual_time_control_task_queue_;
   TaskHandle virtual_time_budget_expired_task_handle_;
   int background_parser_count_;
+
+  // The maximum number amount of delayed task starvation we will allow in
+  // VirtualTimePolicy::ADVANCE or VirtualTimePolicy::DETERMINISTIC_LOADING
+  // unless the run_loop is nested (in which case infinite starvation is
+  // allowed). NB a value of 0 allows infinite starvation.
+  int max_task_starvation_count_;
+
   bool page_visible_;
   bool disable_background_timer_throttling_;
   bool allow_virtual_time_to_advance_;
-  bool virtual_time_paused_;
-  bool have_seen_loading_task_;
   bool virtual_time_;
   bool is_audio_playing_;
   bool reported_background_throttling_since_navigation_;
   bool has_active_connection_;
+  bool nested_runloop_;
   CPUTimeBudgetPool* background_time_budget_pool_;  // Not owned.
   WebViewScheduler::WebViewSchedulerDelegate* delegate_;  // Not owned.
   base::ObserverList<VirtualTimeObserver> virtual_time_observers_;

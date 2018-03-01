@@ -10,7 +10,7 @@
 #include "components/exo/test/exo_test_base.h"
 #include "components/exo/test/exo_test_helper.h"
 #include "components/viz/common/gpu/context_provider.h"
-#include "components/viz/common/quads/single_release_callback.h"
+#include "components/viz/common/resources/single_release_callback.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/khronos/GLES2/gl2.h"
@@ -30,12 +30,16 @@ void Release(int* release_call_count) {
 
 TEST_F(BufferTest, ReleaseCallback) {
   gfx::Size buffer_size(256, 256);
-  auto buffer = base::MakeUnique<Buffer>(
+  auto buffer = std::make_unique<Buffer>(
       exo_test_helper()->CreateGpuMemoryBuffer(buffer_size));
   auto surface_tree_host =
-      base::MakeUnique<SurfaceTreeHost>("BufferTest", nullptr);
+      std::make_unique<SurfaceTreeHost>("BufferTest", nullptr);
   LayerTreeFrameSinkHolder* frame_sink_holder =
       surface_tree_host->layer_tree_frame_sink_holder();
+
+  // This is needed to ensure that RunAllPendingInMessageLoop() call below
+  // is always sufficient for buffer to be released.
+  buffer->set_wait_for_release_delay_for_testing(base::TimeDelta());
 
   // Set the release callback.
   int release_call_count = 0;
@@ -68,10 +72,10 @@ TEST_F(BufferTest, ReleaseCallback) {
 
 TEST_F(BufferTest, IsLost) {
   gfx::Size buffer_size(256, 256);
-  auto buffer = base::MakeUnique<Buffer>(
+  auto buffer = std::make_unique<Buffer>(
       exo_test_helper()->CreateGpuMemoryBuffer(buffer_size));
   auto surface_tree_host =
-      base::MakeUnique<SurfaceTreeHost>("BufferTest", nullptr);
+      std::make_unique<SurfaceTreeHost>("BufferTest", nullptr);
   LayerTreeFrameSinkHolder* frame_sink_holder =
       surface_tree_host->layer_tree_frame_sink_holder();
 
@@ -124,10 +128,10 @@ TEST_F(BufferTest, IsLost) {
 TEST_F(BufferTest, OnLostResources) {
   // Create a Buffer and use it to produce a Texture.
   constexpr gfx::Size buffer_size(256, 256);
-  auto buffer = base::MakeUnique<Buffer>(
+  auto buffer = std::make_unique<Buffer>(
       exo_test_helper()->CreateGpuMemoryBuffer(buffer_size));
   auto surface_tree_host =
-      base::MakeUnique<SurfaceTreeHost>("BufferTest", nullptr);
+      std::make_unique<SurfaceTreeHost>("BufferTest", nullptr);
   LayerTreeFrameSinkHolder* frame_sink_holder =
       surface_tree_host->layer_tree_frame_sink_holder();
 
@@ -141,6 +145,57 @@ TEST_F(BufferTest, OnLostResources) {
   static_cast<ui::InProcessContextFactory*>(
       aura::Env::GetInstance()->context_factory())
       ->SendOnLostResources();
+}
+
+TEST_F(BufferTest, SurfaceTreeHostDestruction) {
+  gfx::Size buffer_size(256, 256);
+  auto buffer = std::make_unique<Buffer>(
+      exo_test_helper()->CreateGpuMemoryBuffer(buffer_size));
+  auto surface_tree_host =
+      std::make_unique<SurfaceTreeHost>("BufferTest", nullptr);
+  LayerTreeFrameSinkHolder* frame_sink_holder =
+      surface_tree_host->layer_tree_frame_sink_holder();
+
+  // This is needed to ensure that RunAllPendingInMessageLoop() call below
+  // is always sufficient for buffer to be released.
+  buffer->set_wait_for_release_delay_for_testing(base::TimeDelta());
+
+  // Set the release callback.
+  int release_call_count = 0;
+  buffer->set_release_callback(
+      base::Bind(&Release, base::Unretained(&release_call_count)));
+
+  buffer->OnAttach();
+  viz::TransferableResource resource;
+  // Produce a transferable resource for the contents of the buffer.
+  bool rv =
+      buffer->ProduceTransferableResource(frame_sink_holder, false, &resource);
+  ASSERT_TRUE(rv);
+
+  buffer->OnDetach();
+  ASSERT_EQ(release_call_count, 0);
+
+  // Get a weak reference to frame sink holder.
+  auto weak_frame_sink_holder = frame_sink_holder->GetWeakPtr();
+
+  // Destroy surface tree host. Weak reference should be valid until all
+  // resources have been reclaimed.
+  surface_tree_host.reset();
+  ASSERT_EQ(release_call_count, 0);
+  ASSERT_TRUE(weak_frame_sink_holder);
+
+  // Release buffer.
+  viz::ReturnedResource returned_resource;
+  returned_resource.id = resource.id;
+  returned_resource.sync_token = resource.mailbox_holder.sync_token;
+  returned_resource.lost = false;
+  std::vector<viz::ReturnedResource> resources = {returned_resource};
+  weak_frame_sink_holder->ReclaimResources(resources);
+
+  RunAllPendingInMessageLoop();
+
+  // Release() should have been called exactly once.
+  ASSERT_EQ(release_call_count, 1);
 }
 
 }  // namespace

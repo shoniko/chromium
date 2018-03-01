@@ -7,6 +7,7 @@ package org.chromium.chrome.browser.webapps;
 import android.net.Uri;
 import android.support.customtabs.CustomTabsIntent;
 
+import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider;
 import org.chromium.chrome.browser.tab.InterceptNavigationDelegateImpl;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.util.UrlUtilities;
@@ -29,8 +30,8 @@ public class WebappInterceptNavigationDelegate extends InterceptNavigationDelega
             return true;
         }
 
-        if (UrlUtilities.isValidForIntentFallbackNavigation(navigationParams.url)
-                && isUrlOutsideWebappScope(mActivity.mWebappInfo, navigationParams.url)) {
+        if (shouldOpenInCustomTab(
+                    navigationParams, mActivity.getWebappInfo(), mActivity.scopePolicy())) {
             CustomTabsIntent.Builder intentBuilder = new CustomTabsIntent.Builder();
             intentBuilder.setShowTitle(true);
             if (mActivity.mWebappInfo.hasValidThemeColor()) {
@@ -39,6 +40,8 @@ public class WebappInterceptNavigationDelegate extends InterceptNavigationDelega
             }
             CustomTabsIntent customTabIntent = intentBuilder.build();
             customTabIntent.intent.setPackage(mActivity.getPackageName());
+            customTabIntent.intent.putExtra(
+                    CustomTabIntentDataProvider.EXTRA_SEND_TO_EXTERNAL_DEFAULT_HANDLER, true);
             customTabIntent.launchUrl(mActivity, Uri.parse(navigationParams.url));
             return true;
         }
@@ -46,8 +49,10 @@ public class WebappInterceptNavigationDelegate extends InterceptNavigationDelega
         return false;
     }
 
-    // Note that WebApks override this with a rule based on web manifest scope.
-    protected boolean isUrlOutsideWebappScope(WebappInfo info, String url) {
-        return !UrlUtilities.sameDomainOrHost(info.uri().toString(), url, true);
+    static boolean shouldOpenInCustomTab(
+            NavigationParams navigationParams, WebappInfo info, WebappScopePolicy scopePolicy) {
+        return UrlUtilities.isValidForIntentFallbackNavigation(navigationParams.url)
+                && !navigationParams.isPost && !scopePolicy.isUrlInScope(info, navigationParams.url)
+                && scopePolicy.openOffScopeNavsInCct();
     }
 }

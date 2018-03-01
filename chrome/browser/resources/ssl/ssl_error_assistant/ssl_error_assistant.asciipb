@@ -6,7 +6,7 @@
 # certificates. See chrome/browser/ssl/ssl_error_assistant.proto for the full
 # format.
 
-version_id: 3
+version_id: 4
 
 # https://captive-portal.badssl.com leaf.
 # This is a test certificate, always keep it at the top.
@@ -151,6 +151,16 @@ captive_portal_cert {
   sha256_hash: "sha256/LKtpdq9q7F7msGK0w1+b/gKoDHaQcZKTHIf9PTz2u+U="
 }
 
+# https://mitm-software.badssl.com leaf.
+# This is a test certificate, keep it at the top of the MITM software list.
+mitm_software {
+  name: "BadSSL Antivirus",
+  issuer_common_name_regex: "BadSSL MITM Software Test"
+}
+
+################################################################################
+# The rest of the MITM software certificates are sorted alphabetically by name.
+
 mitm_software {
   name: "Avast Antivirus",
   issuer_common_name_regex: "avast! Web/Mail Shield Root",
@@ -159,7 +169,7 @@ mitm_software {
 
 mitm_software {
   name: "Bitdefender Antivirus",
-  issuer_common_name_regex: "Bitdefender Personal CA.Net-Defender",
+  issuer_common_name_regex: "Bitdefender Personal CA\.Net-Defender",
   issuer_organization_regex: "Bitdefender"
 }
 
@@ -200,7 +210,7 @@ mitm_software {
 
 mitm_software {
   name: "Fortinet",
-  issuer_organization_regex: "Fortinet( Ltd.)?"
+  issuer_organization_regex: "Fortinet( Ltd\.)?"
 }
 
 mitm_software {
@@ -215,7 +225,7 @@ mitm_software {
 
 mitm_software {
   name: "NetSpark",
-  issuer_common_name_regex: "www.netspark.com",
+  issuer_common_name_regex: "www\.netspark\.com",
   issuer_organization_regex: "NetSpark"
 }
 
@@ -259,10 +269,10 @@ mitm_software {
 
 mitm_software {
   name: "Trend Micro InterScan Web Security Suite (IWSS)",
-  issuer_common_name_regex: "IWSS.TREND"
+  issuer_common_name_regex: "IWSS\.TREND"
 }
 
 mitm_software {
   name: "Zscaler",
-  issuer_organization_regex: "Zscaler Inc."
+  issuer_organization_regex: "Zscaler Inc\."
 }

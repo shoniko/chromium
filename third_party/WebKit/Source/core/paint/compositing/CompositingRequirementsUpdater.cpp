@@ -243,7 +243,7 @@ void CompositingRequirementsUpdater::Update(
   // scrolling and animation bounds is implemented (crbug.com/252472).
   Vector<PaintLayer*> unclipped_descendants;
   IntRect absolute_descendant_bounding_box;
-  UpdateRecursive(0, root, overlap_test_request_map, recursion_data,
+  UpdateRecursive(nullptr, root, overlap_test_request_map, recursion_data,
                   saw3d_transform, unclipped_descendants,
                   absolute_descendant_bounding_box, compositing_reasons_stats);
 }
@@ -355,7 +355,7 @@ void CompositingRequirementsUpdater::UpdateRecursive(
     // Remove irrelevant unclipped descendants in reverse order so our stored
     // indices remain valid.
     for (size_t i = 0; i < unclipped_descendants_to_remove.size(); i++) {
-      unclipped_descendants.erase(unclipped_descendants_to_remove.at(
+      unclipped_descendants.EraseAt(unclipped_descendants_to_remove.at(
           unclipped_descendants_to_remove.size() - i - 1));
     }
 

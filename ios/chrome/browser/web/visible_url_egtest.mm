@@ -10,14 +10,13 @@
 #include "base/strings/utf_string_conversions.h"
 #include "components/version_info/version_info.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
-#import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
-#include "ios/chrome/browser/ui/commands/ios_command_ids.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
+#import "ios/web/public/navigation_manager.h"
 #include "ios/web/public/test/http_server/html_response_provider.h"
 #import "ios/web/public/test/http_server/http_server.h"
 #include "ios/web/public/test/http_server/http_server_util.h"
@@ -48,12 +47,11 @@ const char kPage3Link[] = "page-3";
 // navigation for HTTP pages and may serve version from the cache even if
 // Cache-Control response header says otherwise.
 void PurgeCachedWebViewPages() {
-  chrome_test_util::GetCurrentWebState()->SetWebUsageEnabled(false);
-  chrome_test_util::GetCurrentWebState()->SetWebUsageEnabled(true);
-  // TODO(crbug.com/705819): Reload will not happen after purging web view,
-  // unless WebState::GetView is called.
-  chrome_test_util::GetCurrentWebState()->GetView();
-  [ChromeEarlGrey reload];
+  web::WebState* web_state = chrome_test_util::GetCurrentWebState();
+  web_state->SetWebUsageEnabled(false);
+  web_state->SetWebUsageEnabled(true);
+  web_state->GetNavigationManager()->LoadIfNecessary();
+  [ChromeEarlGrey waitForPageToFinishLoading];
 }
 
 // Response provider which can be paused. When it is paused it buffers all

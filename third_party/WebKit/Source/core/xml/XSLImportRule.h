@@ -24,7 +24,7 @@
 #define XSLImportRule_h
 
 #include "core/xml/XSLStyleSheet.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -37,7 +37,7 @@ class XSLImportRule final : public GarbageCollectedFinalized<XSLImportRule> {
   }
 
   virtual ~XSLImportRule();
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   const String& Href() const { return str_href_; }
   XSLStyleSheet* GetStyleSheet() const { return style_sheet_.Get(); }

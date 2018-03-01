@@ -22,7 +22,6 @@
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/common/three_d_api_types.h"
 #include "gpu/config/gpu_control_list.h"
-#include "gpu/config/gpu_feature_info.h"
 #include "gpu/config/gpu_info.h"
 
 class GURL;
@@ -67,13 +66,12 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager {
   // GpuDataManager implementation.
   void BlacklistWebGLForTesting() override;
   bool IsFeatureBlacklisted(int feature) const override;
-  bool IsFeatureEnabled(int feature) const override;
-  bool IsWebGLEnabled() const override;
+  gpu::GpuFeatureStatus GetFeatureStatus(
+      gpu::GpuFeatureType feature) const override;
   gpu::GPUInfo GetGPUInfo() const override;
   bool GpuAccessAllowed(std::string* reason) const override;
   void RequestCompleteGpuInfoIfNeeded() override;
   bool IsEssentialGpuInfoAvailable() const override;
-  bool IsCompleteGpuInfoAvailable() const override;
   void RequestVideoMemoryUsageStatsUpdate(
       const base::Callback<void(const gpu::VideoMemoryUsageStats& stats)>&
           callback) const override;
@@ -114,6 +112,9 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager {
   // of GPU rasterization. In the future this will be used for more features.
   void UpdateGpuFeatureInfo(const gpu::GpuFeatureInfo& gpu_feature_info);
 
+  gpu::GpuFeatureInfo GetGpuFeatureInfo() const;
+  bool IsGpuFeatureInfoAvailable() const;
+
   // Insert disable-feature switches corresponding to preliminary gpu feature
   // flags into the renderer process command line.
   void AppendRendererCommandLine(base::CommandLine* command_line) const;
@@ -126,9 +127,6 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager {
 
   // Update GpuPreferences based on blacklisting decisions.
   void UpdateGpuPreferences(gpu::GpuPreferences* gpu_preferences) const;
-
-  std::string GetBlacklistVersion() const;
-  std::string GetDriverBugListVersion() const;
 
   // Returns the reasons for the latest run of blacklisting decisions.
   // For the structure of returned value, see documentation for

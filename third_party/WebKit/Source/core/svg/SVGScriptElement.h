@@ -21,10 +21,10 @@
 #ifndef SVGScriptElement_h
 #define SVGScriptElement_h
 
-#include "core/SVGNames.h"
 #include "core/dom/ScriptElementBase.h"
 #include "core/svg/SVGElement.h"
 #include "core/svg/SVGURIReference.h"
+#include "core/svg_names.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -48,8 +48,8 @@ class SVGScriptElement final : public SVGElement,
 
   bool IsScriptElement() const override { return true; }
 
-  DECLARE_VIRTUAL_TRACE();
-  DECLARE_TRACE_WRAPPERS();
+  virtual void Trace(blink::Visitor*);
+  void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  private:
   SVGScriptElement(Document&,

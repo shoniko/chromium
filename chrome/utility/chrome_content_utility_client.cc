@@ -19,9 +19,8 @@
 #include "chrome/common/file_patcher.mojom.h"
 #include "chrome/common/profiling/constants.mojom.h"
 #include "chrome/profiling/profiling_service.h"
+#include "chrome/utility/printing/pdf_to_pwg_raster_converter_impl.h"
 #include "chrome/utility/utility_message_handler.h"
-#include "components/payments/content/utility/payment_manifest_parser.h"
-#include "components/safe_json/utility/safe_json_parser_mojo_impl.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/service_manager_connection.h"
 #include "content/public/common/simple_connection_filter.h"
@@ -40,8 +39,10 @@
 #include "chrome/utility/importer/profile_import_impl.h"
 #include "chrome/utility/importer/profile_import_service.h"
 #include "chrome/utility/media_router/dial_device_description_parser_impl.h"
-#include "net/proxy/mojo_proxy_resolver_factory_impl.h"  // nogncheck
+#include "content/public/network/url_request_context_builder_mojo.h"
 #include "net/proxy/proxy_resolver_v8.h"
+#include "services/proxy_resolver/proxy_resolver_service.h"  // nogncheck
+#include "services/proxy_resolver/public/interfaces/proxy_resolver.mojom.h"  // nogncheck
 #endif  // !defined(OS_ANDROID)
 
 #if defined(OS_CHROMEOS)
@@ -54,6 +55,15 @@
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/utility/extensions/extensions_handler.h"
+#endif
+
+#if BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
+#include "chrome/utility/mash_service_factory.h"
+#endif
+
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
+#include "chrome/common/printing/pdf_to_pwg_raster_converter.mojom.h"
+#include "chrome/utility/printing/pdf_to_pwg_raster_converter_service.h"
 #endif
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW) || \
@@ -195,12 +205,6 @@ class SafeArchiveAnalyzerImpl : public chrome::mojom::SafeArchiveAnalyzer {
 #endif  // defined(FULL_SAFE_BROWSING)
 
 #if !defined(OS_ANDROID)
-void CreateProxyResolverFactory(
-    net::interfaces::ProxyResolverFactoryRequest request) {
-  mojo::MakeStrongBinding(base::MakeUnique<net::MojoProxyResolverFactoryImpl>(),
-                          std::move(request));
-}
-
 class ResourceUsageReporterImpl : public chrome::mojom::ResourceUsageReporter {
  public:
   ResourceUsageReporterImpl() {}
@@ -237,7 +241,7 @@ base::LazyInstance<ChromeContentUtilityClient::NetworkBinderCreationCallback>::
 ChromeContentUtilityClient::ChromeContentUtilityClient()
     : utility_process_running_elevated_(false) {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-  handlers_.push_back(base::MakeUnique<extensions::ExtensionsHandler>());
+  extensions::InitExtensionsClient();
 #endif
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW) || \
@@ -267,8 +271,8 @@ void ChromeContentUtilityClient::UtilityThreadStarted() {
 
   auto registry = base::MakeUnique<service_manager::BinderRegistry>();
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-  extensions::ExtensionsHandler::ExposeInterfacesToBrowser(
-      registry.get(), utility_process_running_elevated_);
+  extensions::ExposeInterfacesToBrowser(registry.get(),
+                                        utility_process_running_elevated_);
   extensions::utility_handler::ExposeInterfacesToBrowser(
       registry.get(), utility_process_running_elevated_);
 #endif
@@ -278,20 +282,12 @@ void ChromeContentUtilityClient::UtilityThreadStarted() {
     registry->AddInterface(base::Bind(&FilePatcherImpl::Create),
                            base::ThreadTaskRunnerHandle::Get());
 #if !defined(OS_ANDROID)
-    registry->AddInterface<net::interfaces::ProxyResolverFactory>(
-        base::Bind(CreateProxyResolverFactory),
-        base::ThreadTaskRunnerHandle::Get());
     registry->AddInterface(base::Bind(CreateResourceUsageReporter),
                            base::ThreadTaskRunnerHandle::Get());
     registry->AddInterface(
         base::Bind(&media_router::DialDeviceDescriptionParserImpl::Create),
         base::ThreadTaskRunnerHandle::Get());
 #endif  // !defined(OS_ANDROID)
-    registry->AddInterface(base::Bind(&payments::PaymentManifestParser::Create),
-                           base::ThreadTaskRunnerHandle::Get());
-    registry->AddInterface(
-        base::Bind(&safe_json::SafeJsonParserMojoImpl::Create),
-        base::ThreadTaskRunnerHandle::Get());
 #if defined(OS_WIN)
     registry->AddInterface(base::Bind(&ShellHandlerImpl::Create),
                            base::ThreadTaskRunnerHandle::Get());
@@ -332,6 +328,14 @@ void ChromeContentUtilityClient::RegisterServices(
   services->emplace(printing::mojom::kServiceName, pdf_compositor_info);
 #endif
 
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
+  service_manager::EmbeddedServiceInfo pdf_to_pwg_converter_info;
+  pdf_to_pwg_converter_info.factory =
+      base::Bind(&printing::PDFToPWGRasterConverterService::CreateService);
+  services->emplace(printing::mojom::kPdfToPwgRasterConverterServiceName,
+                    pdf_to_pwg_converter_info);
+#endif
+
   service_manager::EmbeddedServiceInfo profiling_info;
   profiling_info.task_runner = content::ChildThread::Get()->GetIOTaskRunner();
   profiling_info.factory =
@@ -339,11 +343,23 @@ void ChromeContentUtilityClient::RegisterServices(
   services->emplace(profiling::mojom::kServiceName, profiling_info);
 
 #if !defined(OS_ANDROID)
+  service_manager::EmbeddedServiceInfo proxy_resolver_info;
+  proxy_resolver_info.task_runner =
+      content::ChildThread::Get()->GetIOTaskRunner();
+  proxy_resolver_info.factory =
+      base::Bind(&proxy_resolver::ProxyResolverService::CreateService);
+  services->emplace(proxy_resolver::mojom::kProxyResolverServiceName,
+                    proxy_resolver_info);
+
   service_manager::EmbeddedServiceInfo profile_import_info;
   profile_import_info.factory =
       base::Bind(&ProfileImportService::CreateService);
   services->emplace(chrome::mojom::kProfileImportServiceName,
                     profile_import_info);
+#endif
+
+#if BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
+  RegisterMashServices(services);
 #endif
 }
 
@@ -356,7 +372,7 @@ void ChromeContentUtilityClient::RegisterNetworkBinders(
 // static
 void ChromeContentUtilityClient::PreSandboxStartup() {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-  extensions::ExtensionsHandler::PreSandboxStartup();
+  extensions::PreSandboxStartup();
 #endif
 }
 

@@ -11,6 +11,7 @@
 
 namespace blink {
 
+class AudioWorkletMessagingProxy;
 class BaseAudioContext;
 class LocalFrame;
 
@@ -24,7 +25,9 @@ class MODULES_EXPORT AudioWorklet final : public Worklet {
   void RegisterContext(BaseAudioContext*);
   void UnregisterContext(BaseAudioContext*);
 
-  DECLARE_VIRTUAL_TRACE();
+  AudioWorkletMessagingProxy* FindAvailableMessagingProxy();
+
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit AudioWorklet(LocalFrame*);
@@ -32,6 +35,8 @@ class MODULES_EXPORT AudioWorklet final : public Worklet {
   // Implements Worklet.
   bool NeedsToCreateGlobalScope() final;
   WorkletGlobalScopeProxy* CreateGlobalScope() final;
+
+  bool IsWorkletMessagingProxyCreated() const;
 
   // AudioWorklet keeps the reference of all active BaseAudioContexts, so it
   // can notify the contexts when a script is loaded in AudioWorkletGlobalScope.

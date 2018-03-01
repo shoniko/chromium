@@ -9,7 +9,7 @@
 #include "modules/ModulesExport.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
-#include "platform/wtf/PassRefPtr.h"
+#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Time.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/AtomicString.h"
@@ -116,7 +116,7 @@ class MODULES_EXPORT FetchResponseData final
   void PopulateWebServiceWorkerResponse(
       WebServiceWorkerResponse& /* response */);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   FetchResponseData(Type, unsigned short, AtomicString);

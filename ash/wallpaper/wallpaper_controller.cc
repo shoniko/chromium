@@ -4,13 +4,14 @@
 
 #include "ash/wallpaper/wallpaper_controller.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 
-#include "ash/ash_switches.h"
 #include "ash/display/window_tree_host_manager.h"
 #include "ash/login/ui/login_constants.h"
 #include "ash/public/cpp/ash_pref_names.h"
+#include "ash/public/cpp/ash_switches.h"
 #include "ash/public/cpp/config.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
@@ -30,7 +31,6 @@
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/wallpaper/wallpaper_color_calculator.h"
 #include "components/wallpaper/wallpaper_color_profile.h"
-#include "components/wallpaper/wallpaper_manager_base.h"
 #include "components/wallpaper/wallpaper_resizer.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/display/manager/managed_display_info.h"
@@ -63,7 +63,7 @@ void CacheProminentColors(const std::vector<SkColor>& colors,
   }
   DictionaryPrefUpdate wallpaper_colors_update(
       Shell::Get()->GetLocalStatePrefService(), prefs::kWallpaperColors);
-  auto wallpaper_colors = base::MakeUnique<base::ListValue>();
+  auto wallpaper_colors = std::make_unique<base::ListValue>();
   for (SkColor color : colors)
     wallpaper_colors->AppendDouble(static_cast<double>(color));
   wallpaper_colors_update->SetWithoutPathExpansion(current_location,
@@ -519,7 +519,7 @@ void WallpaperController::CalculateWallpaperColors() {
     return;
   }
 
-  color_calculator_ = base::MakeUnique<wallpaper::WallpaperColorCalculator>(
+  color_calculator_ = std::make_unique<wallpaper::WallpaperColorCalculator>(
       GetWallpaper(), color_profiles_, sequenced_task_runner_);
   color_calculator_->AddObserver(this);
   if (!color_calculator_->StartCalculation()) {

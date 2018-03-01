@@ -8,6 +8,10 @@
 #import "ios/chrome/browser/ui/bookmarks/bookmark_home_view_controller_protected.h"
 #include "ios/chrome/browser/ui/bookmarks/bookmark_ios_unittest.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace {
 
 using BookmarkHomeViewControllerTest = BookmarkIOSUnitTest;
@@ -16,7 +20,8 @@ TEST_F(BookmarkHomeViewControllerTest, LoadBookmarks) {
   @autoreleasepool {
     BookmarkHomeViewController* controller = [[BookmarkHomeViewController alloc]
         initWithLoader:nil
-          browserState:chrome_browser_state_.get()];
+          browserState:chrome_browser_state_.get()
+            dispatcher:nil];
 
     EXPECT_EQ(nil, controller.menuView);
     EXPECT_EQ(nil, controller.panelView);
@@ -37,7 +42,8 @@ TEST_F(BookmarkHomeViewControllerTest, LoadWaitingView) {
   @autoreleasepool {
     BookmarkHomeViewController* controller = [[BookmarkHomeViewController alloc]
         initWithLoader:nil
-          browserState:chrome_browser_state_.get()];
+          browserState:chrome_browser_state_.get()
+            dispatcher:nil];
 
     EXPECT_TRUE(controller.waitForModelView == nil);
 

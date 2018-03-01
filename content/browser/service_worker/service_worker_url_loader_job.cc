@@ -4,6 +4,8 @@
 
 #include "content/browser/service_worker/service_worker_url_loader_job.h"
 
+#include "base/guid.h"
+#include "base/optional.h"
 #include "content/browser/blob_storage/blob_url_loader_factory.h"
 #include "content/browser/service_worker/service_worker_fetch_dispatcher.h"
 #include "content/browser/service_worker/service_worker_version.h"
@@ -12,11 +14,52 @@
 #include "content/common/service_worker/service_worker_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_request_info.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
+#include "storage/browser/blob/blob_data_builder.h"
+#include "storage/browser/blob/blob_data_handle.h"
+#include "storage/browser/blob/blob_impl.h"
 #include "storage/browser/blob/blob_reader.h"
 #include "storage/browser/blob/blob_storage_context.h"
 
 namespace content {
+
+// This class waits for completion of a stream response from the service worker.
+// It calls ServiceWorkerURLLoader::CommitComplete() upon completion of the
+// response.
+class ServiceWorkerURLLoaderJob::StreamWaiter
+    : public blink::mojom::ServiceWorkerStreamCallback {
+ public:
+  StreamWaiter(
+      ServiceWorkerURLLoaderJob* owner,
+      scoped_refptr<ServiceWorkerVersion> streaming_version,
+      blink::mojom::ServiceWorkerStreamCallbackRequest callback_request)
+      : owner_(owner),
+        streaming_version_(streaming_version),
+        binding_(this, std::move(callback_request)) {
+    streaming_version_->OnStreamResponseStarted();
+    binding_.set_connection_error_handler(
+        base::BindOnce(&StreamWaiter::OnAborted, base::Unretained(this)));
+  }
+  ~StreamWaiter() override { streaming_version_->OnStreamResponseFinished(); }
+
+  // Implements mojom::ServiceWorkerStreamCallback.
+  void OnCompleted() override {
+    // Destroys |this|.
+    owner_->CommitCompleted(net::OK);
+  }
+  void OnAborted() override {
+    // Destroys |this|.
+    owner_->CommitCompleted(net::ERR_ABORTED);
+  }
+
+ private:
+  ServiceWorkerURLLoaderJob* owner_;
+  scoped_refptr<ServiceWorkerVersion> streaming_version_;
+  mojo::Binding<blink::mojom::ServiceWorkerStreamCallback> binding_;
+
+  DISALLOW_COPY_AND_ASSIGN(StreamWaiter);
+};
 
 ServiceWorkerURLLoaderJob::ServiceWorkerURLLoaderJob(
     LoaderCallback callback,
@@ -31,12 +74,20 @@ ServiceWorkerURLLoaderJob::ServiceWorkerURLLoaderJob(
       blob_storage_context_(blob_storage_context),
       blob_client_binding_(this),
       binding_(this),
-      weak_factory_(this) {}
+      weak_factory_(this) {
+  DCHECK_EQ(FETCH_REQUEST_MODE_NAVIGATE, resource_request_.fetch_request_mode);
+  DCHECK_EQ(FETCH_CREDENTIALS_MODE_INCLUDE,
+            resource_request_.fetch_credentials_mode);
+  DCHECK_EQ(FetchRedirectMode::MANUAL_MODE,
+            resource_request_.fetch_redirect_mode);
+  response_head_.load_timing.request_start = base::TimeTicks::Now();
+  response_head_.load_timing.request_start_time = base::Time::Now();
+}
 
 ServiceWorkerURLLoaderJob::~ServiceWorkerURLLoaderJob() {}
 
 void ServiceWorkerURLLoaderJob::FallbackToNetwork() {
-  response_type_ = FALLBACK_TO_NETWORK;
+  response_type_ = ResponseType::FALLBACK_TO_NETWORK;
   // This could be called multiple times in some cases because we simply
   // call this synchronously here and don't wait for a separate async
   // StartRequest cue like what URLRequestJob case does.
@@ -51,12 +102,12 @@ void ServiceWorkerURLLoaderJob::FallbackToNetworkOrRenderer() {
 }
 
 void ServiceWorkerURLLoaderJob::ForwardToServiceWorker() {
-  response_type_ = FORWARD_TO_SERVICE_WORKER;
+  response_type_ = ResponseType::FORWARD_TO_SERVICE_WORKER;
   StartRequest();
 }
 
 bool ServiceWorkerURLLoaderJob::ShouldFallbackToNetwork() {
-  return response_type_ == FALLBACK_TO_NETWORK;
+  return response_type_ == ResponseType::FALLBACK_TO_NETWORK;
 }
 
 ui::PageTransition ServiceWorkerURLLoaderJob::GetPageTransition() {
@@ -74,11 +125,15 @@ void ServiceWorkerURLLoaderJob::FailDueToLostController() {
 }
 
 void ServiceWorkerURLLoaderJob::Cancel() {
-  url_loader_client_.reset();
   status_ = Status::kCancelled;
   weak_factory_.InvalidateWeakPtrs();
   blob_storage_context_.reset();
   fetch_dispatcher_.reset();
+  stream_waiter_.reset();
+
+  url_loader_client_->OnComplete(
+      ResourceRequestCompletionStatus(net::ERR_ABORTED));
+  url_loader_client_.reset();
 }
 
 bool ServiceWorkerURLLoaderJob::WasCanceled() const {
@@ -86,7 +141,7 @@ bool ServiceWorkerURLLoaderJob::WasCanceled() const {
 }
 
 void ServiceWorkerURLLoaderJob::StartRequest() {
-  DCHECK_EQ(FORWARD_TO_SERVICE_WORKER, response_type_);
+  DCHECK_EQ(ResponseType::FORWARD_TO_SERVICE_WORKER, response_type_);
   DCHECK_EQ(Status::kNotStarted, status_);
   status_ = Status::kStarted;
 
@@ -95,26 +150,60 @@ void ServiceWorkerURLLoaderJob::StartRequest() {
   ServiceWorkerVersion* active_worker =
       delegate_->GetServiceWorkerVersion(&result);
   if (!active_worker) {
-    DeliverErrorResponse();
+    ReturnNetworkError();
     return;
   }
 
-  fetch_dispatcher_.reset(new ServiceWorkerFetchDispatcher(
-      ServiceWorkerLoaderHelpers::CreateFetchRequest(resource_request_),
-      active_worker, resource_request_.resource_type, base::nullopt,
-      net::NetLogWithSource() /* TODO(scottmg): net log? */,
+  // Create the URL request to pass to the fetch event.
+  std::unique_ptr<ServiceWorkerFetchRequest> fetch_request =
+      ServiceWorkerLoaderHelpers::CreateFetchRequest(resource_request_);
+  // TODO(emim): We should create an error when no blob_storage_context_, but
+  // for consistency with StartResponse(), just ignore for now.
+  if (resource_request_.request_body.get() && blob_storage_context_) {
+    DCHECK(features::IsMojoBlobsEnabled());
+    fetch_request->blob = CreateRequestBodyBlob();
+  }
+
+  // Dispatch the fetch event.
+  fetch_dispatcher_ = std::make_unique<ServiceWorkerFetchDispatcher>(
+      std::move(fetch_request), active_worker, resource_request_.resource_type,
+      base::nullopt, net::NetLogWithSource() /* TODO(scottmg): net log? */,
       base::Bind(&ServiceWorkerURLLoaderJob::DidPrepareFetchEvent,
-                 weak_factory_.GetWeakPtr(), make_scoped_refptr(active_worker)),
+                 weak_factory_.GetWeakPtr(),
+                 base::WrapRefCounted(active_worker)),
       base::Bind(&ServiceWorkerURLLoaderJob::DidDispatchFetchEvent,
-                 weak_factory_.GetWeakPtr())));
-  fetch_dispatcher_->MaybeStartNavigationPreloadWithURLLoader(
-      resource_request_, url_loader_factory_getter_.get(),
-      base::BindOnce(&base::DoNothing /* TODO(crbug/762357): metrics? */));
+                 weak_factory_.GetWeakPtr()));
+  did_navigation_preload_ =
+      fetch_dispatcher_->MaybeStartNavigationPreloadWithURLLoader(
+          resource_request_, url_loader_factory_getter_.get(),
+          base::BindOnce(&base::DoNothing /* TODO(crbug/762357): metrics? */));
+  response_head_.service_worker_start_time = base::TimeTicks::Now();
+  response_head_.load_timing.send_start = base::TimeTicks::Now();
+  response_head_.load_timing.send_end = base::TimeTicks::Now();
   fetch_dispatcher_->Run();
+}
+
+scoped_refptr<storage::BlobHandle>
+ServiceWorkerURLLoaderJob::CreateRequestBodyBlob() {
+  storage::BlobDataBuilder blob_builder(base::GenerateGUID());
+  // TODO(emim): Resolve file sizes before calling AppendIPCDataElement().
+  for (const auto& element : (*resource_request_.request_body->elements())) {
+    blob_builder.AppendIPCDataElement(element);
+  }
+
+  std::unique_ptr<storage::BlobDataHandle> request_body_blob_data_handle =
+      blob_storage_context_->AddFinishedBlob(&blob_builder);
+  // TODO(emim): Return a network error when the blob is broken.
+  CHECK(!request_body_blob_data_handle->IsBroken());
+  blink::mojom::BlobPtr blob_ptr;
+  storage::BlobImpl::Create(std::move(request_body_blob_data_handle),
+                            MakeRequest(&blob_ptr));
+  return base::MakeRefCounted<storage::BlobHandle>(std::move(blob_ptr));
 }
 
 void ServiceWorkerURLLoaderJob::CommitResponseHeaders() {
   DCHECK_EQ(Status::kStarted, status_);
+  DCHECK(url_loader_client_.is_bound());
   status_ = Status::kSentHeader;
   url_loader_client_->OnReceiveResponse(response_head_, ssl_info_,
                                         nullptr /* downloaded_file */);
@@ -122,42 +211,39 @@ void ServiceWorkerURLLoaderJob::CommitResponseHeaders() {
 
 void ServiceWorkerURLLoaderJob::CommitCompleted(int error_code) {
   DCHECK_LT(status_, Status::kCompleted);
+  DCHECK(url_loader_client_.is_bound());
   status_ = Status::kCompleted;
-  ResourceRequestCompletionStatus completion_status;
-  completion_status.error_code = error_code;
-  completion_status.completion_time = base::TimeTicks::Now();
-  url_loader_client_->OnComplete(completion_status);
+
+  // |stream_waiter_| calls this when done.
+  stream_waiter_.reset();
+
+  url_loader_client_->OnComplete(ResourceRequestCompletionStatus(error_code));
 }
 
-void ServiceWorkerURLLoaderJob::DeliverErrorResponse() {
-  DCHECK_GT(status_, Status::kNotStarted);
-  DCHECK_LT(status_, Status::kCompleted);
-  if (status_ < Status::kSentHeader) {
-    ServiceWorkerLoaderHelpers::SaveResponseHeaders(
-        500, "Service Worker Response Error", ServiceWorkerHeaderMap(),
-        &response_head_);
-    CommitResponseHeaders();
-  }
-  CommitCompleted(net::ERR_FAILED);
+void ServiceWorkerURLLoaderJob::ReturnNetworkError() {
+  DCHECK(!url_loader_client_.is_bound());
+  DCHECK(loader_callback_);
+  std::move(loader_callback_)
+      .Run(base::BindOnce(&ServiceWorkerURLLoaderJob::StartErrorResponse,
+                          weak_factory_.GetWeakPtr()));
 }
 
 void ServiceWorkerURLLoaderJob::DidPrepareFetchEvent(
-    scoped_refptr<ServiceWorkerVersion> version) {}
+    scoped_refptr<ServiceWorkerVersion> version) {
+  response_head_.service_worker_ready_time = base::TimeTicks::Now();
+}
 
 void ServiceWorkerURLLoaderJob::DidDispatchFetchEvent(
     ServiceWorkerStatusCode status,
     ServiceWorkerFetchEventResult fetch_result,
     const ServiceWorkerResponse& response,
     blink::mojom::ServiceWorkerStreamHandlePtr body_as_stream,
-    storage::mojom::BlobPtr body_as_blob,
+    blink::mojom::BlobPtr body_as_blob,
     const scoped_refptr<ServiceWorkerVersion>& version) {
-  if (!did_navigation_preload_)
-    fetch_dispatcher_.reset();
-
   ServiceWorkerMetrics::URLRequestJobResult result =
       ServiceWorkerMetrics::REQUEST_JOB_ERROR_BAD_DELEGATE;
   if (!delegate_->RequestStillValid(&result)) {
-    DeliverErrorResponse();
+    ReturnNetworkError();
     return;
   }
 
@@ -178,7 +264,7 @@ void ServiceWorkerURLLoaderJob::DidDispatchFetchEvent(
   // A response with status code 0 is Blink telling us to respond with
   // network error.
   if (response.status_code == 0) {
-    DeliverErrorResponse();
+    ReturnNetworkError();
     return;
   }
 
@@ -195,17 +281,19 @@ void ServiceWorkerURLLoaderJob::DidDispatchFetchEvent(
 
   std::move(loader_callback_)
       .Run(base::BindOnce(&ServiceWorkerURLLoaderJob::StartResponse,
-                          weak_factory_.GetWeakPtr(), response,
+                          weak_factory_.GetWeakPtr(), response, version,
                           std::move(body_as_stream), std::move(body_as_blob)));
 }
 
 void ServiceWorkerURLLoaderJob::StartResponse(
     const ServiceWorkerResponse& response,
+    scoped_refptr<ServiceWorkerVersion> version,
     blink::mojom::ServiceWorkerStreamHandlePtr body_as_stream,
-    storage::mojom::BlobPtr body_as_blob,
+    blink::mojom::BlobPtr body_as_blob,
     mojom::URLLoaderRequest request,
     mojom::URLLoaderClientPtr client) {
   DCHECK(!binding_.is_bound());
+  DCHECK(!url_loader_client_.is_bound());
   binding_.Bind(std::move(request));
   binding_.set_connection_error_handler(base::BindOnce(
       &ServiceWorkerURLLoaderJob::Cancel, base::Unretained(this)));
@@ -216,14 +304,31 @@ void ServiceWorkerURLLoaderJob::StartResponse(
       response.status_code, response.status_text, response.headers,
       &response_head_);
 
+  response_head_.did_service_worker_navigation_preload =
+      did_navigation_preload_;
+  response_head_.load_timing.receive_headers_end = base::TimeTicks::Now();
+
+  // Handle a redirect response. ComputeRedirectInfo returns non-null redirect
+  // info if the given response is a redirect.
+  base::Optional<net::RedirectInfo> redirect_info =
+      ServiceWorkerLoaderHelpers::ComputeRedirectInfo(
+          resource_request_, response_head_,
+          ssl_info_ && ssl_info_->token_binding_negotiated);
+  if (redirect_info) {
+    response_head_.encoded_data_length = 0;
+    url_loader_client_->OnReceiveRedirect(*redirect_info, response_head_);
+    status_ = Status::kCompleted;
+    return;
+  }
+
   // Handle a stream response body.
   if (!body_as_stream.is_null() && body_as_stream->stream.is_valid()) {
+    stream_waiter_ = std::make_unique<StreamWaiter>(
+        this, std::move(version), std::move(body_as_stream->callback_request));
     CommitResponseHeaders();
     url_loader_client_->OnStartLoadingResponseBody(
         std::move(body_as_stream->stream));
-    // TODO(falken): Call CommitCompleted() when stream finished.
-    // See https://crbug.com/758455
-    CommitCompleted(net::OK);
+    // StreamWaiter will call CommitCompleted() when done.
     return;
   }
 
@@ -249,6 +354,15 @@ void ServiceWorkerURLLoaderJob::StartResponse(
   CommitCompleted(net::OK);
 }
 
+void ServiceWorkerURLLoaderJob::StartErrorResponse(
+    mojom::URLLoaderRequest request,
+    mojom::URLLoaderClientPtr client) {
+  DCHECK_EQ(Status::kStarted, status_);
+  DCHECK(!url_loader_client_.is_bound());
+  url_loader_client_ = std::move(client);
+  CommitCompleted(net::ERR_FAILED);
+}
+
 // URLLoader implementation----------------------------------------
 
 void ServiceWorkerURLLoaderJob::FollowRedirect() {
@@ -260,6 +374,10 @@ void ServiceWorkerURLLoaderJob::SetPriority(net::RequestPriority priority,
   NOTIMPLEMENTED();
 }
 
+void ServiceWorkerURLLoaderJob::PauseReadingBodyFromNet() {}
+
+void ServiceWorkerURLLoaderJob::ResumeReadingBodyFromNet() {}
+
 // Blob URLLoaderClient implementation for blob reading ------------
 
 void ServiceWorkerURLLoaderJob::OnReceiveResponse(
@@ -267,6 +385,7 @@ void ServiceWorkerURLLoaderJob::OnReceiveResponse(
     const base::Optional<net::SSLInfo>& ssl_info,
     mojom::DownloadedTempFilePtr downloaded_file) {
   DCHECK_EQ(Status::kStarted, status_);
+  DCHECK(url_loader_client_.is_bound());
   status_ = Status::kSentHeader;
   if (response_head.headers->response_code() >= 400) {
     DVLOG(1) << "Blob::OnReceiveResponse got error: "
@@ -307,12 +426,14 @@ void ServiceWorkerURLLoaderJob::OnTransferSizeUpdated(
 
 void ServiceWorkerURLLoaderJob::OnStartLoadingResponseBody(
     mojo::ScopedDataPipeConsumerHandle body) {
+  DCHECK(url_loader_client_.is_bound());
   url_loader_client_->OnStartLoadingResponseBody(std::move(body));
 }
 
 void ServiceWorkerURLLoaderJob::OnComplete(
     const ResourceRequestCompletionStatus& status) {
   DCHECK_EQ(Status::kSentHeader, status_);
+  DCHECK(url_loader_client_.is_bound());
   status_ = Status::kCompleted;
   url_loader_client_->OnComplete(status);
 }

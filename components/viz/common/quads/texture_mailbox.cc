@@ -12,19 +12,18 @@
 
 namespace viz {
 
-TextureMailbox::TextureMailbox() : shared_bitmap_(NULL) {}
+TextureMailbox::TextureMailbox() : shared_bitmap_(nullptr) {}
 
 TextureMailbox::TextureMailbox(const TextureMailbox& other) = default;
 
 TextureMailbox::TextureMailbox(const gpu::MailboxHolder& mailbox_holder)
     : mailbox_holder_(mailbox_holder),
-      shared_bitmap_(NULL),
+      shared_bitmap_(nullptr),
       is_overlay_candidate_(false),
 #if defined(OS_ANDROID)
       is_backed_by_surface_texture_(false),
       wants_promotion_hint_(false),
 #endif
-      secure_output_only_(false),
       nearest_neighbor_(false) {
 }
 
@@ -32,13 +31,12 @@ TextureMailbox::TextureMailbox(const gpu::Mailbox& mailbox,
                                const gpu::SyncToken& sync_token,
                                uint32_t target)
     : mailbox_holder_(mailbox, sync_token, target),
-      shared_bitmap_(NULL),
+      shared_bitmap_(nullptr),
       is_overlay_candidate_(false),
 #if defined(OS_ANDROID)
       is_backed_by_surface_texture_(false),
       wants_promotion_hint_(false),
 #endif
-      secure_output_only_(false),
       nearest_neighbor_(false) {
 }
 
@@ -46,8 +44,7 @@ TextureMailbox::TextureMailbox(const gpu::Mailbox& mailbox,
                                const gpu::SyncToken& sync_token,
                                uint32_t target,
                                const gfx::Size& size_in_pixels,
-                               bool is_overlay_candidate,
-                               bool secure_output_only)
+                               bool is_overlay_candidate)
     : mailbox_holder_(mailbox, sync_token, target),
       shared_bitmap_(nullptr),
       size_in_pixels_(size_in_pixels),
@@ -56,7 +53,6 @@ TextureMailbox::TextureMailbox(const gpu::Mailbox& mailbox,
       is_backed_by_surface_texture_(false),
       wants_promotion_hint_(false),
 #endif
-      secure_output_only_(secure_output_only),
       nearest_neighbor_(false) {
   DCHECK(!is_overlay_candidate || !size_in_pixels.IsEmpty());
 }
@@ -70,7 +66,6 @@ TextureMailbox::TextureMailbox(SharedBitmap* shared_bitmap,
       is_backed_by_surface_texture_(false),
       wants_promotion_hint_(false),
 #endif
-      secure_output_only_(false),
       nearest_neighbor_(false) {
   // If an embedder of cc gives an invalid TextureMailbox, we should crash
   // here to identify the offender.

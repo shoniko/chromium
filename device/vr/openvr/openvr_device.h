@@ -9,7 +9,7 @@
 
 #include "base/macros.h"
 #include "base/threading/simple_thread.h"
-#include "device/vr/vr_device.h"
+#include "device/vr/vr_device_base.h"
 #include "device/vr/vr_service.mojom.h"
 #include "mojo/public/cpp/bindings/binding.h"
 
@@ -21,21 +21,13 @@ namespace device {
 
 class OpenVRRenderLoop;
 
-class OpenVRDevice : public VRDevice {
+class OpenVRDevice : public VRDeviceBase {
  public:
   OpenVRDevice(vr::IVRSystem* vr);
   ~OpenVRDevice() override;
 
-  // VRDevice
-  void CreateVRDisplayInfo(
-      const base::Callback<void(mojom::VRDisplayInfoPtr)>& on_created) override;
-
-  void RequestPresent(mojom::VRSubmitFrameClientPtr submit_client,
-                      mojom::VRPresentationProviderRequest request,
-                      const base::Callback<void(bool)>& callback) override;
-  void ExitPresent() override;
-  void GetNextMagicWindowPose(
-      mojom::VRDisplay::GetNextMagicWindowPoseCallback callback) override;
+  // VRDeviceBase
+  mojom::VRDisplayInfoPtr GetVRDisplayInfo() override;
 
   void OnPollingEvents();
 
@@ -46,6 +38,7 @@ class OpenVRDevice : public VRDevice {
   std::unique_ptr<OpenVRRenderLoop> render_loop_;
 
   mojom::VRSubmitFrameClientPtr submit_client_;
+  mojom::VRDisplayInfoPtr display_info_;
 
   vr::IVRSystem* vr_system_;
 

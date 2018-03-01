@@ -158,8 +158,7 @@ int PepperMediaDeviceManager::OpenDevice(PP_DeviceType_Dev type,
 #if BUILDFLAG(ENABLE_WEBRTC)
   GetMediaStreamDispatcher()->OpenDevice(
       request_id, AsWeakPtr(), device_id,
-      PepperMediaDeviceManager::FromPepperDeviceType(type),
-      url::Origin(host->GetDocumentURL(pp_instance).GetOrigin()));
+      PepperMediaDeviceManager::FromPepperDeviceType(type));
 #else
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(&PepperMediaDeviceManager::OnDeviceOpenFailed,
@@ -203,21 +202,20 @@ int PepperMediaDeviceManager::GetSessionID(PP_DeviceType_Dev type,
 void PepperMediaDeviceManager::OnStreamGenerated(
     int request_id,
     const std::string& label,
-    const StreamDeviceInfoArray& audio_device_array,
-    const StreamDeviceInfoArray& video_device_array) {}
+    const MediaStreamDevices& audio_devices,
+    const MediaStreamDevices& video_devices) {}
 
 void PepperMediaDeviceManager::OnStreamGenerationFailed(
     int request_id,
-    content::MediaStreamRequestResult result) {}
+    MediaStreamRequestResult result) {}
 
 void PepperMediaDeviceManager::OnDeviceStopped(
     const std::string& label,
-    const StreamDeviceInfo& device_info) {}
+    const MediaStreamDevice& device) {}
 
-void PepperMediaDeviceManager::OnDeviceOpened(
-    int request_id,
-    const std::string& label,
-    const StreamDeviceInfo& device_info) {
+void PepperMediaDeviceManager::OnDeviceOpened(int request_id,
+                                              const std::string& label,
+                                              const MediaStreamDevice& device) {
   NotifyDeviceOpened(request_id, true, label);
 }
 

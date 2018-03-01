@@ -7,7 +7,6 @@
 #include <memory>
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
-#include "core/dom/Document.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/fileapi/Blob.h"
 #include "core/frame/Frame.h"
@@ -28,7 +27,6 @@
 #include "modules/fetch/FormDataBytesConsumer.h"
 #include "modules/fetch/Response.h"
 #include "modules/fetch/ResponseInit.h"
-#include "platform/HTTPNames.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/bindings/V8ThrowException.h"
 #include "platform/exported/WrappedResourceResponse.h"
@@ -39,6 +37,7 @@
 #include "platform/loader/fetch/ResourceRequest.h"
 #include "platform/loader/fetch/ResourceResponse.h"
 #include "platform/network/NetworkUtils.h"
+#include "platform/network/http_names.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SchemeRegistry.h"
 #include "platform/weborigin/SecurityOrigin.h"
@@ -69,11 +68,11 @@ class SRIBytesConsumer final : public BytesConsumer {
     DCHECK(underlying_);
     return underlying_->EndRead(read_size);
   }
-  PassRefPtr<BlobDataHandle> DrainAsBlobDataHandle(
+  scoped_refptr<BlobDataHandle> DrainAsBlobDataHandle(
       BlobSizePolicy policy) override {
     return underlying_ ? underlying_->DrainAsBlobDataHandle(policy) : nullptr;
   }
-  PassRefPtr<EncodedFormData> DrainAsFormData() override {
+  scoped_refptr<EncodedFormData> DrainAsFormData() override {
     return underlying_ ? underlying_->DrainAsFormData() : nullptr;
   }
   void SetClient(BytesConsumer::Client* client) override {
@@ -128,7 +127,7 @@ class SRIBytesConsumer final : public BytesConsumer {
     }
   }
 
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(underlying_);
     visitor->Trace(client_);
     BytesConsumer::Trace(visitor);
@@ -158,7 +157,7 @@ class FetchManager::Loader final
   }
 
   ~Loader() override;
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   void DidReceiveRedirectTo(const KURL&) override;
   void DidReceiveResponse(unsigned long,
@@ -193,6 +192,11 @@ class FetchManager::Loader final
           url_(url),
           finished_(false) {
       reader_ = handle_->ObtainReader(this);
+    }
+
+    void Cancel() {
+      reader_ = nullptr;
+      handle_ = nullptr;
     }
 
     void DidGetReadable() override {
@@ -246,7 +250,7 @@ class FetchManager::Loader final
 
     bool IsFinished() const { return finished_; }
 
-    DEFINE_INLINE_TRACE() {
+    void Trace(blink::Visitor* visitor) {
       visitor->Trace(updater_);
       visitor->Trace(response_);
       visitor->Trace(loader_);
@@ -319,7 +323,7 @@ FetchManager::Loader::~Loader() {
   DCHECK(!loader_);
 }
 
-DEFINE_TRACE(FetchManager::Loader) {
+void FetchManager::Loader::Trace(blink::Visitor* visitor) {
   visitor->Trace(fetch_manager_);
   visitor->Trace(resolver_);
   visitor->Trace(request_);
@@ -384,7 +388,7 @@ void FetchManager::Loader::DidReceiveResponse(
       }
     }
   } else if (!SecurityOrigin::Create(response.Url())
-                  ->IsSameSchemeHostPort(request_->Origin().Get())) {
+                  ->IsSameSchemeHostPort(request_->Origin().get())) {
     // Recompute the tainting if the request was redirected to a different
     // origin.
     switch (request_->Mode()) {
@@ -592,7 +596,7 @@ void FetchManager::Loader::Start() {
   // Note we don't support to call this method with |CORS flag|
   // "- |request|'s mode is |navigate|".
   if ((SecurityOrigin::Create(request_->Url())
-           ->IsSameSchemeHostPortAndSuborigin(request_->Origin().Get())) ||
+           ->IsSameSchemeHostPortAndSuborigin(request_->Origin().get())) ||
       (request_->Url().ProtocolIsData() && request_->SameOriginDataURLFlag()) ||
       (request_->Url().ProtocolIsAbout()) ||
       (request_->Mode() == WebURLRequest::kFetchRequestModeNavigate)) {
@@ -648,6 +652,8 @@ void FetchManager::Loader::Dispose() {
     loader_->Cancel();
     loader_ = nullptr;
   }
+  if (integrity_verifier_)
+    integrity_verifier_->Cancel();
   execution_context_ = nullptr;
 }
 
@@ -759,7 +765,7 @@ void FetchManager::Loader::PerformHTTPFetch() {
 
   ResourceLoaderOptions resource_loader_options;
   resource_loader_options.data_buffering_policy = kDoNotBufferData;
-  resource_loader_options.security_origin = request_->Origin().Get();
+  resource_loader_options.security_origin = request_->Origin().get();
 
   ThreadableLoaderOptions threadable_loader_options;
 
@@ -788,7 +794,7 @@ void FetchManager::Loader::PerformDataFetch() {
 
   ResourceLoaderOptions resource_loader_options;
   resource_loader_options.data_buffering_policy = kDoNotBufferData;
-  resource_loader_options.security_origin = request_->Origin().Get();
+  resource_loader_options.security_origin = request_->Origin().get();
 
   ThreadableLoaderOptions threadable_loader_options;
 
@@ -855,7 +861,7 @@ void FetchManager::OnLoaderFinished(Loader* loader) {
   loader->Dispose();
 }
 
-DEFINE_TRACE(FetchManager) {
+void FetchManager::Trace(blink::Visitor* visitor) {
   visitor->Trace(loaders_);
   ContextLifecycleObserver::Trace(visitor);
 }

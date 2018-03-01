@@ -42,8 +42,13 @@ namespace safe_browsing {
 
 const char kSRTPromptTrial[] = "SRTPromptFieldTrial";
 
+// TODO(crbug.com/774623): Delete the code from the old prompt and remove this
+//                         feature.
 const base::Feature kInBrowserCleanerUIFeature{
-    "InBrowserCleanerUI", base::FEATURE_DISABLED_BY_DEFAULT};
+    "InBrowserCleanerUI", base::FEATURE_ENABLED_BY_DEFAULT};
+
+extern const base::Feature kRebootPromptDialogFeature{
+    "RebootPromptDialog", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kCleanerDownloadFeature{"DownloadCleanupToolByBitness",
                                             base::FEATURE_DISABLED_BY_DEFAULT};
@@ -94,8 +99,8 @@ GURL GetSRTDownloadURL() {
 
   // Ensure URL construction didn't change origin.
   const GURL download_root(kDownloadRootPath);
-  const url::Origin known_good_origin(download_root);
-  url::Origin current_origin(download_url);
+  const url::Origin known_good_origin = url::Origin::Create(download_root);
+  url::Origin current_origin = url::Origin::Create(download_url);
   if (!current_origin.IsSameOriginWith(known_good_origin))
     return GetLegacyDownloadURL();
 
@@ -105,6 +110,18 @@ GURL GetSRTDownloadURL() {
 std::string GetIncomingSRTSeed() {
   return variations::GetVariationParamValue(kSRTPromptTrial,
                                             kSRTPromptSeedParam);
+}
+
+std::string GetSRTFieldTrialGroupName() {
+  return base::FieldTrialList::FindFullName(kSRTPromptTrial);
+}
+
+bool IsRebootPromptModal() {
+  constexpr char kIsModalParam[] = "modal_reboot_prompt";
+  return base::FeatureList::IsEnabled(kRebootPromptDialogFeature) &&
+         base::GetFieldTrialParamByFeatureAsBool(kRebootPromptDialogFeature,
+                                                 kIsModalParam,
+                                                 /*default_value=*/false);
 }
 
 void RecordSRTPromptHistogram(SRTPromptHistogramValue value) {

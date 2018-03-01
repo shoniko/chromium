@@ -30,6 +30,7 @@
 #include "core/dom/Document.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/frame/Deprecation.h"
+#include "core/frame/Frame.h"
 #include "core/frame/FrameConsole.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameClient.h"
@@ -47,7 +48,7 @@ int totalPagesMeasuredCSSSampleId() {
 }
 
 // Make sure update_use_counter_css.py was run which updates histograms.xml.
-constexpr int kMaximumCSSSampleId = 587;
+constexpr int kMaximumCSSSampleId = 588;
 
 }  // namespace
 
@@ -1135,6 +1136,8 @@ int UseCounter::MapCSSPropertyIdToCSSSampleIdForHistogram(
       return 586;
     case CSSPropertyScrollBoundaryBehaviorY:
       return 587;
+    case CSSPropertyFontVariantEastAsian:
+      return 588;
     // 1. Add new features above this line (don't change the assigned numbers of
     // the existing items).
     // 2. Update kMaximumCSSSampleId with the new maximum value.
@@ -1204,7 +1207,37 @@ bool UseCounter::HasRecordedMeasurement(WebFeature feature) const {
   return features_recorded_.QuickGet(static_cast<int>(feature));
 }
 
-DEFINE_TRACE(UseCounter) {
+// Static
+void UseCounter::CountIfFeatureWouldBeBlockedByFeaturePolicy(
+    const LocalFrame& frame,
+    WebFeature blocked_cross_origin,
+    WebFeature blocked_same_origin) {
+  // Get the origin of the top-level document
+  SecurityOrigin* topOrigin =
+      frame.Tree().Top().GetSecurityContext()->GetSecurityOrigin();
+
+  // Check if this frame is same-origin with the top-level
+  if (!frame.GetSecurityContext()->GetSecurityOrigin()->CanAccess(topOrigin)) {
+    // This frame is cross-origin with the top-level frame, and so would be
+    // blocked without a feature policy.
+    UseCounter::Count(&frame, blocked_cross_origin);
+    return;
+  }
+
+  // Walk up the frame tree looking for any cross-origin embeds. Even if this
+  // frame is same-origin with the top-level, if it is embedded by a cross-
+  // origin frame (like A->B->A) it would be blocked without a feature policy.
+  const Frame* f = &frame;
+  while (!f->IsMainFrame()) {
+    if (!f->GetSecurityContext()->GetSecurityOrigin()->CanAccess(topOrigin)) {
+      UseCounter::Count(&frame, blocked_same_origin);
+      return;
+    }
+    f = f->Tree().Parent();
+  }
+}
+
+void UseCounter::Trace(blink::Visitor* visitor) {
   visitor->Trace(observers_);
 }
 

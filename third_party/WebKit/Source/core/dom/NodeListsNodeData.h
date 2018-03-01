@@ -167,8 +167,8 @@ class NodeListsNodeData final : public GarbageCollected<NodeListsNodeData> {
     }
   }
 
-  DECLARE_TRACE();
-  DECLARE_TRACE_WRAPPERS();
+  void Trace(blink::Visitor*);
+  void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  private:
   NodeListsNodeData() : child_node_list_(nullptr) {}
@@ -207,7 +207,7 @@ inline Collection* ContainerNode::EnsureCachedCollection(
 
 template <typename Collection>
 inline Collection* ContainerNode::CachedCollection(CollectionType type) {
-  NodeListsNodeData* node_lists = this->NodeLists();
+  NodeListsNodeData* node_lists = NodeLists();
   return node_lists ? node_lists->Cached<Collection>(type) : nullptr;
 }
 

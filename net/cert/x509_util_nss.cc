@@ -185,6 +185,13 @@ ScopedCERTCertificate CreateCERTCertificateFromX509Certificate(
 
 ScopedCERTCertificateList CreateCERTCertificateListFromX509Certificate(
     const X509Certificate* cert) {
+  return x509_util::CreateCERTCertificateListFromX509Certificate(
+      cert, InvalidIntermediateBehavior::kFail);
+}
+
+ScopedCERTCertificateList CreateCERTCertificateListFromX509Certificate(
+    const X509Certificate* cert,
+    InvalidIntermediateBehavior invalid_intermediate_behavior) {
   ScopedCERTCertificateList nss_chain;
   nss_chain.reserve(1 + cert->GetIntermediateCertificates().size());
 #if BUILDFLAG(USE_BYTE_CERTS)
@@ -197,8 +204,12 @@ ScopedCERTCertificateList CreateCERTCertificateListFromX509Certificate(
        cert->GetIntermediateCertificates()) {
     ScopedCERTCertificate nss_intermediate = CreateCERTCertificateFromBytes(
         CRYPTO_BUFFER_data(intermediate), CRYPTO_BUFFER_len(intermediate));
-    if (!nss_intermediate)
-      return {};
+    if (!nss_intermediate) {
+      if (invalid_intermediate_behavior == InvalidIntermediateBehavior::kFail)
+        return {};
+      LOG(WARNING) << "error parsing intermediate";
+      continue;
+    }
     nss_chain.push_back(std::move(nss_intermediate));
   }
 #else
@@ -244,6 +255,13 @@ ScopedCERTCertificateList DupCERTCertificateList(
 scoped_refptr<X509Certificate> CreateX509CertificateFromCERTCertificate(
     CERTCertificate* nss_cert,
     const std::vector<CERTCertificate*>& nss_chain) {
+  return CreateX509CertificateFromCERTCertificate(nss_cert, nss_chain, {});
+}
+
+scoped_refptr<X509Certificate> CreateX509CertificateFromCERTCertificate(
+    CERTCertificate* nss_cert,
+    const std::vector<CERTCertificate*>& nss_chain,
+    X509Certificate::UnsafeCreateOptions options) {
 #if BUILDFLAG(USE_BYTE_CERTS)
   if (!nss_cert || !nss_cert->derCert.len)
     return nullptr;
@@ -271,10 +289,12 @@ scoped_refptr<X509Certificate> CreateX509CertificateFromCERTCertificate(
     intermediates.push_back(std::move(intermediate_cert_handle));
   }
   scoped_refptr<X509Certificate> result(
-      X509Certificate::CreateFromHandle(cert_handle.get(), intermediates_raw));
+      X509Certificate::CreateFromHandleUnsafeOptions(
+          cert_handle.get(), intermediates_raw, options));
   return result;
 #else
-  return X509Certificate::CreateFromHandle(nss_cert, nss_chain);
+  return X509Certificate::CreateFromHandleUnsafeOptions(nss_cert, nss_chain,
+                                                        options);
 #endif
 }
 
@@ -304,6 +324,14 @@ bool GetDEREncoded(CERTCertificate* cert, std::string* der_encoded) {
   der_encoded->assign(reinterpret_cast<char*>(cert->derCert.data),
                       cert->derCert.len);
   return true;
+}
+
+bool GetPEMEncoded(CERTCertificate* cert, std::string* pem_encoded) {
+  if (!cert || !cert->derCert.len)
+    return false;
+  std::string der(reinterpret_cast<char*>(cert->derCert.data),
+                  cert->derCert.len);
+  return X509Certificate::GetPEMEncodedFromDER(der, pem_encoded);
 }
 
 void GetRFC822SubjectAltNames(CERTCertificate* cert_handle,
@@ -414,8 +442,10 @@ bool GetValidityTimes(CERTCertificate* cert,
                       base::Time* not_after) {
   PRTime pr_not_before, pr_not_after;
   if (CERT_GetCertTimes(cert, &pr_not_before, &pr_not_after) == SECSuccess) {
-    *not_before = crypto::PRTimeToBaseTime(pr_not_before);
-    *not_after = crypto::PRTimeToBaseTime(pr_not_after);
+    if (not_before)
+      *not_before = crypto::PRTimeToBaseTime(pr_not_before);
+    if (not_after)
+      *not_after = crypto::PRTimeToBaseTime(pr_not_after);
     return true;
   }
   return false;

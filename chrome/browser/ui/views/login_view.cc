@@ -50,7 +50,7 @@ LoginView::LoginView(const base::string16& authority,
   constexpr int kMessageWidth = 320;
   ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
   SetBorder(views::CreateEmptyBorder(
-      provider->GetInsetsMetric(views::INSETS_DIALOG_CONTENTS)));
+      provider->GetDialogInsetsForContentType(views::TEXT, views::CONTROL)));
 
   // Initialize the Grid Layout Manager used for this dialog box.
   GridLayout* layout = GridLayout::CreateAndInstall(this);
@@ -58,7 +58,8 @@ LoginView::LoginView(const base::string16& authority,
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, kStretchy,
                         GridLayout::FIXED, kMessageWidth, 0);
   AddHeaderLabel(layout, authority, views::style::STYLE_PRIMARY);
-  AddHeaderLabel(layout, explanation, STYLE_SECONDARY);
+  if (!explanation.empty())
+    AddHeaderLabel(layout, explanation, STYLE_SECONDARY);
   layout->AddPaddingRow(kFixed, provider->GetDistanceMetric(
                                     DISTANCE_UNRELATED_CONTROL_VERTICAL_LARGE));
 

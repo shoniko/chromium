@@ -105,10 +105,6 @@ class PartitionAllocTest : public testing::Test {
   ~PartitionAllocTest() override {}
 
   void SetUp() override {
-    // TODO(crbug.com/722911): These calls to |memset| should perhaps not be
-    // necessary.
-    memset(&allocator, 0, sizeof(allocator));
-    memset(&generic_allocator, 0, sizeof(generic_allocator));
     allocator.init();
     generic_allocator.init();
   }
@@ -139,7 +135,7 @@ class PartitionAllocTest : public testing::Test {
                              bucket->active_pages_head->num_allocated_slots));
     EXPECT_EQ(0, bucket->active_pages_head->freelist_head);
     EXPECT_TRUE(bucket->active_pages_head);
-    EXPECT_TRUE(bucket->active_pages_head != &PartitionRootGeneric::gSeedPage);
+    EXPECT_TRUE(bucket->active_pages_head != GetSentinelPageForTesting());
     return bucket->active_pages_head;
   }
 
@@ -307,23 +303,13 @@ class MockPartitionStatsDumper : public PartitionStatsDumper {
 };
 
 // Any number of bytes that can be allocated with no trouble.
-const size_t kEasyAllocSize = (1024 * 1024) & ~(kPageAllocationGranularity - 1);
+constexpr size_t kEasyAllocSize =
+    (1024 * 1024) & ~(kPageAllocationGranularity - 1);
 
-// Generate many random addresses to get a very large fraction of the platform
-// address space. This gives us an allocation size that is very likely to fail
-// on most platforms without triggering bugs in allocation code for very large
-// requests.
-size_t GetHugeMemoryAmount() {
-  static size_t huge_memory = 0;
-  if (!huge_memory) {
-    for (int i = 0; i < 100; i++) {
-      huge_memory |= bit_cast<size_t>(base::GetRandomPageBase());
-    }
-    // Make it larger than the available address space.
-    huge_memory *= 2;
-  }
-  return huge_memory;
-}
+// A huge amount of memory, greater than or equal to the ASLR space.
+constexpr size_t kHugeMemoryAmount =
+    std::max(base::internal::kASLRMask,
+             std::size_t{2} * base::internal::kASLRMask);
 
 }  // anonymous namespace
 
@@ -331,13 +317,16 @@ size_t GetHugeMemoryAmount() {
 // We detect this by making a reservation and ensuring that after failure, we
 // can make a new reservation.
 TEST(PageAllocatorTest, AllocFailure) {
+  // Release any reservation made by another test.
+  base::ReleaseReservation();
+
   // We can make a reservation.
   EXPECT_TRUE(base::ReserveAddressSpace(kEasyAllocSize));
 
   // We can't make another reservation until we trigger an allocation failure.
   EXPECT_FALSE(base::ReserveAddressSpace(kEasyAllocSize));
 
-  size_t size = GetHugeMemoryAmount();
+  size_t size = kHugeMemoryAmount;
   // Skip the test for sanitizers and platforms with ASLR turned off.
   if (size == 0)
     return;
@@ -355,9 +344,19 @@ TEST(PageAllocatorTest, AllocFailure) {
   EXPECT_FALSE(base::ReserveAddressSpace(kEasyAllocSize));
 }
 
+// TODO(crbug.com/765801): Test failed on chromium.win/Win10 Tests x64.
+#if defined(OS_WIN) && defined(ARCH_CPU_64_BITS)
+#define MAYBE_ReserveAddressSpace DISABLED_ReserveAddressSpace
+#else
+#define MAYBE_ReserveAddressSpace ReserveAddressSpace
+#endif  // defined(OS_WIN) && defined(ARCH_CPU_64_BITS)
+
 // Test that reserving address space can fail.
-TEST(PageAllocatorTest, ReserveAddressSpace) {
-  size_t size = GetHugeMemoryAmount();
+TEST(PageAllocatorTest, MAYBE_ReserveAddressSpace) {
+  // Release any reservation made by another test.
+  base::ReleaseReservation();
+
+  size_t size = kHugeMemoryAmount;
   // Skip the test for sanitizers and platforms with ASLR turned off.
   if (size == 0)
     return;
@@ -374,7 +373,7 @@ TEST(PageAllocatorTest, ReserveAddressSpace) {
 // Check that the most basic of allocate / free pairs work.
 TEST_F(PartitionAllocTest, Basic) {
   PartitionBucket* bucket = &allocator.root()->buckets()[kTestBucketIndex];
-  PartitionPage* seedPage = &PartitionRootGeneric::gSeedPage;
+  PartitionPage* seedPage = GetSentinelPageForTesting();
 
   EXPECT_FALSE(bucket->empty_pages_head);
   EXPECT_FALSE(bucket->decommitted_pages_head);
@@ -439,7 +438,7 @@ TEST_F(PartitionAllocTest, MultiPages) {
   PartitionPage* page = GetFullPage(kTestAllocSize);
   FreeFullPage(page);
   EXPECT_TRUE(bucket->empty_pages_head);
-  EXPECT_EQ(&PartitionRootGeneric::gSeedPage, bucket->active_pages_head);
+  EXPECT_EQ(GetSentinelPageForTesting(), bucket->active_pages_head);
   EXPECT_EQ(0, page->next_page);
   EXPECT_EQ(0, page->num_allocated_slots);
 
@@ -458,7 +457,7 @@ TEST_F(PartitionAllocTest, MultiPages) {
   FreeFullPage(page);
   EXPECT_EQ(0, page->num_allocated_slots);
   EXPECT_TRUE(bucket->empty_pages_head);
-  EXPECT_EQ(&PartitionRootGeneric::gSeedPage, bucket->active_pages_head);
+  EXPECT_EQ(GetSentinelPageForTesting(), bucket->active_pages_head);
 
   // Allocate a new page, it should pull from the freelist.
   page = GetFullPage(kTestAllocSize);
@@ -552,7 +551,7 @@ TEST_F(PartitionAllocTest, FreePageListPageTransitions) {
   EXPECT_EQ(pages[numToFillFreeListPage - 1], bucket->active_pages_head);
   for (i = 0; i < numToFillFreeListPage; ++i)
     FreeFullPage(pages[i]);
-  EXPECT_EQ(&PartitionRootGeneric::gSeedPage, bucket->active_pages_head);
+  EXPECT_EQ(GetSentinelPageForTesting(), bucket->active_pages_head);
   EXPECT_TRUE(bucket->empty_pages_head);
 
   // Allocate / free in a different bucket size so we get control of a
@@ -570,7 +569,7 @@ TEST_F(PartitionAllocTest, FreePageListPageTransitions) {
 
   for (i = 0; i < numToFillFreeListPage; ++i)
     FreeFullPage(pages[i]);
-  EXPECT_EQ(&PartitionRootGeneric::gSeedPage, bucket->active_pages_head);
+  EXPECT_EQ(GetSentinelPageForTesting(), bucket->active_pages_head);
   EXPECT_TRUE(bucket->empty_pages_head);
 }
 
@@ -1313,14 +1312,14 @@ TEST_F(PartitionAllocTest, LostFreePagesBug) {
 
   EXPECT_TRUE(bucket->empty_pages_head);
   EXPECT_TRUE(bucket->empty_pages_head->next_page);
-  EXPECT_EQ(&PartitionRootGeneric::gSeedPage, bucket->active_pages_head);
+  EXPECT_EQ(GetSentinelPageForTesting(), bucket->active_pages_head);
 
   // At this moment, we have two decommitted pages, on the empty list.
   ptr = PartitionAllocGeneric(generic_allocator.root(), size, type_name);
   EXPECT_TRUE(ptr);
   PartitionFreeGeneric(generic_allocator.root(), ptr);
 
-  EXPECT_EQ(&PartitionRootGeneric::gSeedPage, bucket->active_pages_head);
+  EXPECT_EQ(GetSentinelPageForTesting(), bucket->active_pages_head);
   EXPECT_TRUE(bucket->empty_pages_head);
   EXPECT_TRUE(bucket->decommitted_pages_head);
 

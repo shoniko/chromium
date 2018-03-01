@@ -12,7 +12,7 @@ namespace blink {
 
 DeviceSingleWindowEventController::DeviceSingleWindowEventController(
     Document& document)
-    : PlatformEventController(document.GetFrame()),
+    : PlatformEventController(&document),
       needs_checking_null_events_(true),
       document_(document) {
   document.domWindow()->RegisterEventListenerObserver(this);
@@ -89,7 +89,7 @@ bool DeviceSingleWindowEventController::IsSameSecurityOriginAsMainFrame()
   return false;
 }
 
-DEFINE_TRACE(DeviceSingleWindowEventController) {
+void DeviceSingleWindowEventController::Trace(blink::Visitor* visitor) {
   visitor->Trace(document_);
   PlatformEventController::Trace(visitor);
 }

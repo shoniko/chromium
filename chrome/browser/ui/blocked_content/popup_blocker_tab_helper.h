@@ -9,8 +9,8 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 
-#include "base/containers/id_map.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
 #include "base/optional.h"
@@ -28,6 +28,7 @@ struct OpenURLParams;
 }
 
 class GURL;
+class SafeBrowsingTriggeredPopupBlocker;
 
 // Per-tab class to manage blocked popups.
 class PopupBlockerTabHelper
@@ -36,6 +37,35 @@ class PopupBlockerTabHelper
  public:
   // Mapping from popup IDs to blocked popup requests.
   typedef std::map<int32_t, GURL> PopupIdMap;
+
+  // This class backs a histogram. Make sure you update enums.xml if you make
+  // any changes.
+  enum class PopupPosition : int {
+    kOnlyPopup,
+    kFirstPopup,
+    kMiddlePopup,
+    kLastPopup,
+
+    // Any new values should go before this one.
+    kLast,
+  };
+
+  // This enum is backed by a histogram. Make sure enums.xml is updated if this
+  // is updated.
+  enum class Action : int {
+    // A popup was initiated and was sent to the popup blocker for
+    // consideration.
+    kInitiated,
+
+    // A popup was blocked by the popup blocker.
+    kBlocked,
+
+    // A previously blocked popup was clicked through.
+    kClickedThrough,
+
+    // Add new elements before this value.
+    kLast
+  };
 
   class Observer {
    public:
@@ -49,6 +79,11 @@ class PopupBlockerTabHelper
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
+
+  // Whether a new window opened with |disposition| would be considered for
+  // popup blocking. Note that this includes more dispositions than just
+  // NEW_POPUP since the popup blocker targets all new windows and tabs.
+  static bool ConsiderForPopupBlocking(WindowOpenDisposition disposition);
 
   // Returns true if the popup request defined by |params| and the optional
   // |open_url_params| should be blocked. In that case, it is also added to the
@@ -90,9 +125,20 @@ class PopupBlockerTabHelper
   // Called when the blocked popup notification is shown or hidden.
   void PopupNotificationVisibilityChanged(bool visible);
 
-  base::IDMap<std::unique_ptr<BlockedRequest>> blocked_popups_;
+  PopupPosition GetPopupPosition(int32_t id) const;
+
+  static void LogAction(Action action);
+
+  // Note, this container should be sorted based on the position in the popup
+  // list, so it is keyed by an id which is continually increased.
+  std::map<int32_t, std::unique_ptr<BlockedRequest>> blocked_popups_;
 
   base::ObserverList<Observer> observers_;
+
+  int32_t next_id_ = 0;
+
+  std::unique_ptr<SafeBrowsingTriggeredPopupBlocker>
+      safe_browsing_triggered_popup_blocker_;
 
   DISALLOW_COPY_AND_ASSIGN(PopupBlockerTabHelper);
 };

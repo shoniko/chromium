@@ -228,13 +228,13 @@ std::unique_ptr<ui::Renderer> RendererFactory::CreateRenderer(
       if (!surface->SupportsAsyncSwap())
         LOG(FATAL) << "GL surface must support SwapBuffersAsync";
       if (surface->IsSurfaceless())
-        return base::MakeUnique<ui::SurfacelessGlRenderer>(widget, surface,
+        return std::make_unique<ui::SurfacelessGlRenderer>(widget, surface,
                                                            size);
       else
-        return base::MakeUnique<ui::GlRenderer>(widget, surface, size);
+        return std::make_unique<ui::GlRenderer>(widget, surface, size);
     }
     case SOFTWARE:
-      return base::MakeUnique<ui::SoftwareRenderer>(widget, size);
+      return std::make_unique<ui::SoftwareRenderer>(widget, size);
   }
 
   return nullptr;
@@ -352,7 +352,9 @@ int main(int argc, char** argv) {
   base::MessageLoopForUI message_loop;
   base::TaskScheduler::CreateAndStartWithDefaultParams("OzoneDemo");
 
-  ui::OzonePlatform::InitializeForUI();
+  ui::OzonePlatform::InitParams params;
+  params.single_process = true;
+  ui::OzonePlatform::InitializeForUI(params);
   ui::KeyboardLayoutEngineManager::GetKeyboardLayoutEngine()
       ->SetCurrentLayoutByName("us");
 

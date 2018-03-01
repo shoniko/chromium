@@ -98,36 +98,48 @@ void TextIteratorTextNodeHandler::HandleTextNodeWithLayoutNG() {
   }
 
   while (offset_ < end_offset_ && !text_state_.PositionNode()) {
-    // TODO(xiaochengh): Try fetch the next offset mapping unit instead of doing
-    // another binary search.
+    // We may go through multiple inline nodes, which happens when there is
+    // ::first-letter and blockifying style.
     Optional<NGInlineNode> inline_node =
         GetNGInlineNodeFor(*text_node_, offset_);
-    const NGOffsetMappingUnit* unit =
-        inline_node
-            ? inline_node->GetMappingUnitForDOMOffset(*text_node_, offset_)
-            : nullptr;
-
-    // No more text on this node to emit.
-    if (!unit || offset_ == unit->DOMEnd()) {
+    if (!inline_node) {
       offset_ = end_offset_;
       return;
     }
 
-    const unsigned run_end = std::min(end_offset_, unit->DOMEnd());
-    if (unit->TextContentStart() == unit->TextContentEnd()) {
+    const NGOffsetMappingResult& mapping =
+        inline_node->ComputeOffsetMappingIfNeeded();
+    const unsigned initial_offset = offset_;
+    for (const NGOffsetMappingUnit& unit :
+         mapping.GetMappingUnitsForDOMOffsetRange(*text_node_, offset_,
+                                                  end_offset_)) {
+      const unsigned run_start = std::max(offset_, unit.DOMStart());
+      const unsigned run_end = std::min(end_offset_, unit.DOMEnd());
+      if (run_start >= run_end ||
+          unit.ConvertDOMOffsetToTextContent(run_start) ==
+              unit.ConvertDOMOffsetToTextContent(run_end)) {
+        offset_ = run_end;
+        continue;
+      }
+
+      auto string_and_offsets = ComputeTextAndOffsetsForEmission(
+          *inline_node, unit, run_start, run_end, behavior_);
+      const String& string = string_and_offsets.first;
+      const unsigned text_content_start = string_and_offsets.second.first;
+      const unsigned text_content_end = string_and_offsets.second.second;
+      text_state_.EmitText(text_node_, run_start, run_end, string,
+                           text_content_start, text_content_end);
       offset_ = run_end;
-      continue;
+      return;
     }
 
-    auto string_and_offsets = ComputeTextAndOffsetsForEmission(
-        *inline_node, *unit, offset_, run_end, behavior_);
-    const String& string = string_and_offsets.first;
-    const unsigned text_content_start = string_and_offsets.second.first;
-    const unsigned text_content_end = string_and_offsets.second.second;
-    text_state_.EmitText(text_node_, offset_, run_end, string,
-                         text_content_start, text_content_end);
-    offset_ = run_end;
-    return;
+    // Bail if |offset_| isn't advanced; Otherwise we enter a dead loop.
+    // However, this shouldn't happen and should be fixed once reached.
+    if (offset_ == initial_offset) {
+      NOTREACHED();
+      offset_ = end_offset_;
+      return;
+    }
   }
 }
 
@@ -171,7 +183,7 @@ void TextIteratorTextNodeHandler::HandlePreFormattedTextNode() {
       HasVisibleTextNode(layout_object)) {
     if (!behavior_.CollapseTrailingSpace() ||
         (offset_ > 0 && str[offset_ - 1] == ' ')) {
-      SpliceBuffer(kSpaceCharacter, text_node_, 0, offset_, offset_);
+      SpliceBuffer(kSpaceCharacter, text_node_, nullptr, offset_, offset_);
       needs_handle_pre_formatted_text_node_ = true;
       return;
     }
@@ -186,7 +198,7 @@ void TextIteratorTextNodeHandler::HandlePreFormattedTextNode() {
           stops_in_first_letter ? end_offset_ : first_letter.length();
       EmitText(text_node_, first_letter_text_, run_start, run_end);
       first_letter_text_ = nullptr;
-      text_box_ = 0;
+      text_box_ = nullptr;
       offset_ = run_end;
       if (!stops_in_first_letter)
         needs_handle_pre_formatted_text_node_ = true;
@@ -368,7 +380,8 @@ void TextIteratorTextNodeHandler::HandleTextBox() {
           EmitText(text_node_, layout_object, space_run_start,
                    space_run_start + 1);
         } else {
-          SpliceBuffer(kSpaceCharacter, text_node_, 0, run_start, run_start);
+          SpliceBuffer(kSpaceCharacter, text_node_, nullptr, run_start,
+                       run_start);
         }
         return;
       }
@@ -391,7 +404,7 @@ void TextIteratorTextNodeHandler::HandleTextBox() {
       //   split out the punctuation and possibly reorder it.
       if (next_text_box &&
           !(next_text_box->GetLineLayoutItem().IsEqual(layout_object))) {
-        text_box_ = 0;
+        text_box_ = nullptr;
         return;
       }
       DCHECK(!next_text_box ||
@@ -406,9 +419,9 @@ void TextIteratorTextNodeHandler::HandleTextBox() {
           // We need to preserve new lines in case of PreLine.
           // See bug crbug.com/317365.
           if (layout_object->Style()->WhiteSpace() == EWhiteSpace::kPreLine) {
-            SpliceBuffer('\n', text_node_, 0, run_start, run_start);
+            SpliceBuffer('\n', text_node_, nullptr, run_start, run_start);
           } else {
-            SpliceBuffer(kSpaceCharacter, text_node_, 0, run_start,
+            SpliceBuffer(kSpaceCharacter, text_node_, nullptr, run_start,
                          run_start + 1);
           }
           offset_ = text_start_offset + run_start + 1;
@@ -474,7 +487,7 @@ bool TextIteratorTextNodeHandler::ShouldProceedToRemainingText() const {
 
 void TextIteratorTextNodeHandler::ProceedToRemainingText() {
   text_box_ = remaining_text_box_;
-  remaining_text_box_ = 0;
+  remaining_text_box_ = nullptr;
   first_letter_text_ = nullptr;
   offset_ = text_node_->GetLayoutObject()->TextStartOffset();
 }

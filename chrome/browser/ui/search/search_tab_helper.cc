@@ -58,28 +58,14 @@ bool IsCacheableNTP(const content::WebContents* contents) {
          entry->GetURL() != chrome::kChromeSearchLocalNtpUrl;
 }
 
-bool IsNTP(const content::WebContents* contents) {
-  // We can't use WebContents::GetURL() because that uses the active entry,
-  // whereas we want the visible entry.
-  const content::NavigationEntry* entry =
-      contents->GetController().GetVisibleEntry();
-  if (entry && entry->GetVirtualURL() == chrome::kChromeUINewTabURL)
-    return true;
-
-  return search::IsInstantNTP(contents);
-}
-
 // Returns true if |contents| are rendered inside an Instant process.
-bool InInstantProcess(Profile* profile,
+bool InInstantProcess(const InstantService* instant_service,
                       const content::WebContents* contents) {
-  if (!profile || !contents)
+  if (!instant_service || !contents)
     return false;
 
-  InstantService* instant_service =
-      InstantServiceFactory::GetForProfile(profile);
-  return instant_service &&
-      instant_service->IsInstantProcess(
-          contents->GetRenderProcessHost()->GetID());
+  return instant_service->IsInstantProcess(
+      contents->GetMainFrame()->GetProcess()->GetID());
 }
 
 // Called when an NTP finishes loading. If the load start time was noted,
@@ -121,18 +107,15 @@ bool IsHistorySyncEnabled(Profile* profile) {
 
 SearchTabHelper::SearchTabHelper(content::WebContents* web_contents)
     : WebContentsObserver(web_contents),
-      is_search_enabled_(search::IsInstantExtendedAPIEnabled()),
       web_contents_(web_contents),
       ipc_router_(web_contents,
                   this,
                   base::MakeUnique<SearchIPCRouterPolicyImpl>(web_contents)),
       instant_service_(nullptr) {
-  if (!is_search_enabled_)
+  if (!search::IsInstantExtendedAPIEnabled())
     return;
 
-  instant_service_ =
-      InstantServiceFactory::GetForProfile(
-          Profile::FromBrowserContext(web_contents_->GetBrowserContext()));
+  instant_service_ = InstantServiceFactory::GetForProfile(profile());
   if (instant_service_)
     instant_service_->AddObserver(this);
 }
@@ -143,7 +126,7 @@ SearchTabHelper::~SearchTabHelper() {
 }
 
 void SearchTabHelper::OmniboxInputStateChanged() {
-  if (!is_search_enabled_)
+  if (!search::IsInstantExtendedAPIEnabled())
     return;
 
   ipc_router_.SetInputInProgress(IsInputInProgress());
@@ -272,15 +255,16 @@ void SearchTabHelper::DidFinishLoad(content::RenderFrameHost* render_frame_host,
 
 void SearchTabHelper::NavigationEntryCommitted(
     const content::LoadCommittedDetails& load_details) {
-  if (!is_search_enabled_)
+  if (!search::IsInstantExtendedAPIEnabled())
     return;
 
   if (!load_details.is_main_frame)
     return;
 
-  UpdateMode();
+  if (search::IsInstantNTP(web_contents_))
+    ipc_router_.SetInputInProgress(IsInputInProgress());
 
-  if (InInstantProcess(profile(), web_contents_))
+  if (InInstantProcess(instant_service_, web_contents_))
     ipc_router_.OnNavigationEntryCommitted();
 }
 
@@ -361,24 +345,20 @@ void SearchTabHelper::OnLogEvent(NTPLoggingEventType event,
 }
 
 void SearchTabHelper::OnLogMostVisitedImpression(
-    int position,
-    ntp_tiles::TileSource tile_source,
-    ntp_tiles::TileVisualType tile_type) {
+    const ntp_tiles::NTPTileImpression& impression) {
 // TODO(kmadhusu): Move platform specific code from here and get rid of #ifdef.
 #if !defined(OS_ANDROID)
   NTPUserDataLogger::GetOrCreateFromWebContents(web_contents())
-      ->LogMostVisitedImpression(position, tile_source, tile_type);
+      ->LogMostVisitedImpression(impression);
 #endif
 }
 
 void SearchTabHelper::OnLogMostVisitedNavigation(
-    int position,
-    ntp_tiles::TileSource tile_source,
-    ntp_tiles::TileVisualType tile_type) {
+    const ntp_tiles::NTPTileImpression& impression) {
 // TODO(kmadhusu): Move platform specific code from here and get rid of #ifdef.
 #if !defined(OS_ANDROID)
   NTPUserDataLogger::GetOrCreateFromWebContents(web_contents())
-      ->LogMostVisitedNavigation(position, tile_source, tile_type);
+      ->LogMostVisitedNavigation(impression);
 #endif
 }
 
@@ -409,30 +389,15 @@ void SearchTabHelper::PasteIntoOmnibox(const base::string16& text) {
 #endif
 }
 
-void SearchTabHelper::OnChromeIdentityCheck(const base::string16& identity) {
+bool SearchTabHelper::ChromeIdentityCheck(const base::string16& identity) {
   SigninManagerBase* manager = SigninManagerFactory::GetForProfile(profile());
-  if (manager) {
-    ipc_router_.SendChromeIdentityCheckResult(
-        identity,
-        gaia::AreEmailsSame(base::UTF16ToUTF8(identity),
-                            manager->GetAuthenticatedAccountInfo().email));
-  } else {
-    ipc_router_.SendChromeIdentityCheckResult(identity, false);
-  }
+  return manager &&
+         gaia::AreEmailsSame(base::UTF16ToUTF8(identity),
+                             manager->GetAuthenticatedAccountInfo().email);
 }
 
-void SearchTabHelper::OnHistorySyncCheck() {
-  ipc_router_.SendHistorySyncCheckResult(IsHistorySyncEnabled(profile()));
-}
-
-void SearchTabHelper::UpdateMode() {
-  bool is_ntp = IsNTP(web_contents_);
-
-  model_.SetOrigin(is_ntp ? SearchModel::Origin::NTP
-                          : SearchModel::Origin::DEFAULT);
-
-  if (is_ntp)
-    ipc_router_.SetInputInProgress(IsInputInProgress());
+bool SearchTabHelper::HistorySyncCheck() {
+  return IsHistorySyncEnabled(profile());
 }
 
 const OmniboxView* SearchTabHelper::GetOmniboxView() const {

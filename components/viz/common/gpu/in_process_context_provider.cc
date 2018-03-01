@@ -20,6 +20,7 @@
 #include "gpu/command_buffer/service/mailbox_manager.h"
 #include "gpu/command_buffer/service/shader_translator_cache.h"
 #include "gpu/command_buffer/service/sync_point_manager.h"
+#include "gpu/config/gpu_feature_info.h"
 #include "gpu/ipc/common/surface_handle.h"
 #include "gpu/ipc/gl_in_process_context.h"
 #include "gpu/ipc/gpu_in_process_thread_service.h"
@@ -47,21 +48,6 @@ gpu::gles2::ContextCreationAttribHelper CreateAttributes() {
   return attributes;
 }
 
-std::unique_ptr<gpu::GLInProcessContext> CreateInProcessContext(
-    scoped_refptr<gpu::InProcessCommandBuffer::Service> service,
-    const gpu::gles2::ContextCreationAttribHelper& attributes,
-    gpu::SurfaceHandle widget,
-    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
-    gpu::ImageFactory* image_factory,
-    const gpu::SharedMemoryLimits& limits,
-    gpu::GLInProcessContext* shared_context) {
-  const bool is_offscreen = widget == gpu::kNullSurfaceHandle;
-  return base::WrapUnique(gpu::GLInProcessContext::Create(
-      service, nullptr, is_offscreen, widget, shared_context, attributes,
-      limits, gpu_memory_buffer_manager, image_factory,
-      base::ThreadTaskRunnerHandle::Get()));
-}
-
 }  // namespace
 
 InProcessContextProvider::InProcessContextProvider(
@@ -72,22 +58,26 @@ InProcessContextProvider::InProcessContextProvider(
     const gpu::SharedMemoryLimits& limits,
     InProcessContextProvider* shared_context)
     : attributes_(CreateAttributes()),
-      context_(CreateInProcessContext(
-          service,
-          attributes_,
+      context_(gpu::GLInProcessContext::CreateWithoutInit()),
+      context_result_(context_->Initialize(
+          std::move(service),
+          nullptr,
+          (widget == gpu::kNullSurfaceHandle),
           widget,
+          (shared_context ? shared_context->context_.get() : nullptr),
+          attributes_,
+          limits,
           gpu_memory_buffer_manager,
           image_factory,
-          limits,
-          (shared_context ? shared_context->context_.get() : nullptr))) {
-  cache_controller_.reset(new ContextCacheController(
-      context_->GetImplementation(), base::ThreadTaskRunnerHandle::Get()));
-}
+          base::ThreadTaskRunnerHandle::Get())),
+      cache_controller_(std::make_unique<ContextCacheController>(
+          context_->GetImplementation(),
+          base::ThreadTaskRunnerHandle::Get())) {}
 
 InProcessContextProvider::~InProcessContextProvider() = default;
 
-bool InProcessContextProvider::BindToCurrentThread() {
-  return !!context_;
+gpu::ContextResult InProcessContextProvider::BindToCurrentThread() {
+  return context_result_;
 }
 
 gpu::gles2::GLES2Interface* InProcessContextProvider::ContextGL() {
@@ -120,8 +110,12 @@ base::Lock* InProcessContextProvider::GetLock() {
   return &context_lock_;
 }
 
-gpu::Capabilities InProcessContextProvider::ContextCapabilities() {
+const gpu::Capabilities& InProcessContextProvider::ContextCapabilities() const {
   return context_->GetCapabilities();
+}
+
+const gpu::GpuFeatureInfo& InProcessContextProvider::GetGpuFeatureInfo() const {
+  return context_->GetGpuFeatureInfo();
 }
 
 void InProcessContextProvider::SetLostContextCallback(

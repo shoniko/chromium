@@ -66,12 +66,30 @@
   [self showAlert:@"showReportAnIssue"];
 }
 
+- (void)openURL:(OpenUrlCommand*)command {
+  [self showAlert:@"openURL"];
+}
+
+- (void)showSignin:(ShowSigninCommand*)command {
+  [self showAlert:@"showSignin"];
+}
+
+- (void)showAddAccount {
+  [self showAlert:@"showAddAccount"];
+}
+
+#pragma mark - ApplicationSettingsCommands
+
 - (void)showAccountsSettings {
   [self showAlert:@"showAccountsSettings"];
 }
 
-- (void)openURL:(OpenUrlCommand*)command {
-  [self showAlert:@"openURL"];
+- (void)showSyncSettings {
+  [self showAlert:@"showSyncSettings"];
+}
+
+- (void)showSyncPassphraseSettings {
+  [self showAlert:@"showSyncPassphraseSettings"];
 }
 
 #pragma mark - Private

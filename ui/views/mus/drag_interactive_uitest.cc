@@ -84,20 +84,20 @@ class TargetView : public views::View {
 };
 
 std::unique_ptr<ui::PointerEvent> CreateMouseMoveEvent(int x, int y) {
-  return base::MakeUnique<ui::PointerEvent>(ui::MouseEvent(
+  return std::make_unique<ui::PointerEvent>(ui::MouseEvent(
       ui::ET_MOUSE_MOVED, gfx::Point(x, y), gfx::Point(x, y),
       ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON, ui::EF_NONE));
 }
 
 std::unique_ptr<ui::PointerEvent> CreateMouseDownEvent(int x, int y) {
-  return base::MakeUnique<ui::PointerEvent>(
+  return std::make_unique<ui::PointerEvent>(
       ui::MouseEvent(ui::ET_MOUSE_PRESSED, gfx::Point(x, y), gfx::Point(x, y),
                      ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
                      ui::EF_LEFT_MOUSE_BUTTON));
 }
 
 std::unique_ptr<ui::PointerEvent> CreateMouseUpEvent(int x, int y) {
-  return base::MakeUnique<ui::PointerEvent>(
+  return std::make_unique<ui::PointerEvent>(
       ui::MouseEvent(ui::ET_MOUSE_RELEASED, gfx::Point(x, y), gfx::Point(x, y),
                      ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
                      ui::EF_LEFT_MOUSE_BUTTON));
@@ -124,9 +124,9 @@ void DragTest_Part2(int64_t display_id,
   if (!result)
     quit_closure.Run();
 
-  ui::mojom::WindowServerTest* server_test =
-      MusClient::Get()->GetTestingInterface();
-  server_test->DispatchEvent(
+  ui::mojom::RemoteEventDispatcher* dispatcher =
+      MusClient::Get()->GetTestingEventDispater();
+  dispatcher->DispatchEvent(
       display_id, CreateMouseUpEvent(30, 30),
       base::Bind(&DragTest_Part3, display_id, quit_closure));
 }
@@ -138,9 +138,9 @@ void DragTest_Part1(int64_t display_id,
   if (!result)
     quit_closure.Run();
 
-  ui::mojom::WindowServerTest* server_test =
-      MusClient::Get()->GetTestingInterface();
-  server_test->DispatchEvent(
+  ui::mojom::RemoteEventDispatcher* dispatcher =
+      MusClient::Get()->GetTestingEventDispater();
+  dispatcher->DispatchEvent(
       display_id, CreateMouseMoveEvent(30, 30),
       base::Bind(&DragTest_Part2, display_id, quit_closure));
 }
@@ -175,9 +175,9 @@ TEST_F(DragTestInteractive, DragTest) {
 
   {
     base::RunLoop run_loop;
-    ui::mojom::WindowServerTest* server_test =
-        MusClient::Get()->GetTestingInterface();
-    server_test->DispatchEvent(
+    ui::mojom::RemoteEventDispatcher* dispatcher =
+        MusClient::Get()->GetTestingEventDispater();
+    dispatcher->DispatchEvent(
         display_id, CreateMouseDownEvent(10, 10),
         base::Bind(&DragTest_Part1, display_id, run_loop.QuitClosure()));
 

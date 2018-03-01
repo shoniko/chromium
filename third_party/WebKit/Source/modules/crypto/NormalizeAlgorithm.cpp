@@ -281,13 +281,13 @@ bool GetOptionalBufferSource(const Dictionary& raw,
 
   if (v8_value->IsArrayBufferView()) {
     bytes = CopyBytes(
-        V8ArrayBufferView::toImpl(v8::Local<v8::Object>::Cast(v8_value)));
+        V8ArrayBufferView::ToImpl(v8::Local<v8::Object>::Cast(v8_value)));
     return true;
   }
 
   if (v8_value->IsArrayBuffer()) {
     bytes =
-        CopyBytes(V8ArrayBuffer::toImpl(v8::Local<v8::Object>::Cast(v8_value)));
+        CopyBytes(V8ArrayBuffer::ToImpl(v8::Local<v8::Object>::Cast(v8_value)));
     return true;
   }
 
@@ -358,11 +358,15 @@ bool GetOptionalInteger(const Dictionary& raw,
                         double max_value,
                         const ErrorContext& context,
                         AlgorithmError* error) {
-  double number;
-  bool ok = DictionaryHelper::Get(raw, property_name, number, has_property);
-
-  if (!has_property)
+  v8::Local<v8::Value> v8_value;
+  if (!raw.Get(property_name, v8_value)) {
+    has_property = false;
     return true;
+  }
+
+  has_property = true;
+  double number;
+  bool ok = v8_value->NumberValue(raw.V8Context()).To(&number);
 
   if (!ok || std::isnan(number)) {
     SetTypeError(context.ToString(property_name, "Is not a number"), error);
@@ -481,7 +485,7 @@ bool GetAlgorithmIdentifier(const Dictionary& raw,
   Dictionary dictionary;
   if (DictionaryHelper::Get(raw, property_name, dictionary) &&
       !dictionary.IsUndefinedOrNull()) {
-    value.setDictionary(dictionary);
+    value.SetDictionary(dictionary);
     return true;
   }
 
@@ -493,7 +497,7 @@ bool GetAlgorithmIdentifier(const Dictionary& raw,
     return false;
   }
 
-  value.setString(algorithm_name);
+  value.SetString(algorithm_name);
   return true;
 }
 
@@ -843,7 +847,7 @@ bool ParseEcdhKeyDeriveParams(const Dictionary& raw,
   }
 
   CryptoKey* crypto_key =
-      V8CryptoKey::toImplWithTypeCheck(raw.GetIsolate(), v8_value);
+      V8CryptoKey::ToImplWithTypeCheck(raw.GetIsolate(), v8_value);
   if (!crypto_key) {
     SetTypeError(context.ToString("public", "Must be a CryptoKey"), error);
     return false;
@@ -1012,7 +1016,7 @@ const char* OperationToString(WebCryptoOperation op) {
     case kWebCryptoOperationUnwrapKey:
       return "unwrapKey";
   }
-  return 0;
+  return nullptr;
 }
 
 bool ParseAlgorithmDictionary(const String& algorithm_name,
@@ -1063,12 +1067,12 @@ bool ParseAlgorithmIdentifier(const AlgorithmIdentifier& raw,
 
   // If the AlgorithmIdentifier is a String, treat it the same as a Dictionary
   // with a "name" attribute and nothing else.
-  if (raw.isString()) {
-    return ParseAlgorithmDictionary(raw.getAsString(), Dictionary(), op,
+  if (raw.IsString()) {
+    return ParseAlgorithmDictionary(raw.GetAsString(), Dictionary(), op,
                                     algorithm, context, error);
   }
 
-  Dictionary params = raw.getAsDictionary();
+  Dictionary params = raw.GetAsDictionary();
 
   // Get the name of the algorithm from the AlgorithmIdentifier.
   if (!params.IsObject()) {

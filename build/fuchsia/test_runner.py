@@ -59,6 +59,7 @@ def WaitUntil(predicate, timeout_seconds=1):
     time.sleep(sleep_time_sec)
     sleep_time_sec = min(1, sleep_time_sec * 2)  # Don't wait more than 1 sec.
 
+
 # Implementation of chrome_test_server_spawner.PortForwarder that doesn't
 # forward ports. Instead the tests are expected to connect to the host IP
 # address inside the virtual network provided by qemu. qemu will forward
@@ -113,6 +114,8 @@ def main():
                       default=False,
                       help='Runs the tests and the launcher in the same '
                       'process. Useful for debugging.')
+  parser.add_argument('--target-cpu',
+                      help='GN target_cpu setting for the build.')
   parser.add_argument('--test-launcher-batch-limit',
                       type=int,
                       help='Sets the limit of test batch to run in a single '
@@ -124,12 +127,19 @@ def main():
   parser.add_argument('--test-launcher-jobs',
                       type=int,
                       help='Sets the number of parallel test jobs.')
-  parser.add_argument('--test_launcher_summary_output',
-                      help='Currently ignored for 2-sided roll.')
+  parser.add_argument('--test-launcher-summary-output',
+                      '--test_launcher_summary_output',
+                      help='Where the test launcher will output its json.')
   parser.add_argument('child_args', nargs='*',
                       help='Arguments for the test process.')
   parser.add_argument('-d', '--device', action='store_true', default=False,
                       help='Run on hardware device instead of QEMU.')
+  parser.add_argument('--bootdata', type=os.path.realpath,
+                      help='Path to a bootdata to use instead of the default '
+                           'one from the SDK')
+  parser.add_argument('--kernel', type=os.path.realpath,
+                      help='Path to a kernel to use instead of the default '
+                           'one from the SDK')
   args = parser.parse_args()
 
   child_args = ['--test-launcher-retry-limit=0']
@@ -185,13 +195,17 @@ def main():
     child_args.append('--test-launcher-filter-file=/system/test_filter_file')
 
   try:
-    bootfs = BuildBootfs(args.output_directory, runtime_deps, args.exe_name,
-                         child_args, args.dry_run, power_off=not args.device)
+    bootfs = BuildBootfs(
+        args.output_directory, runtime_deps, args.exe_name, child_args,
+        args.dry_run, bootdata=args.bootdata,
+        summary_output=args.test_launcher_summary_output,
+        shutdown_machine=True, target_cpu=args.target_cpu,
+        use_device=args.device, use_autorun=True)
     if not bootfs:
       return 2
 
-    return RunFuchsia(bootfs, args.device, args.dry_run)
-
+    return RunFuchsia(bootfs, args.device, args.kernel, args.dry_run,
+                      args.test_launcher_summary_output)
   finally:
     # Stop the spawner to make sure it doesn't leave testserver running, in
     # case some tests failed.

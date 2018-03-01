@@ -8,8 +8,12 @@
 #include "components/viz/common/surfaces/local_surface_id.h"
 #include "content/browser/renderer_host/event_with_latency_info.h"
 #include "content/common/content_export.h"
-#include "content/common/input/input_event_ack_state.h"
+#include "content/public/common/input_event_ack_state.h"
 #include "ui/gfx/geometry/rect.h"
+
+#if defined(USE_AURA)
+#include "services/ui/public/interfaces/window_tree.mojom.h"
+#endif
 
 namespace blink {
 class WebGestureEvent;
@@ -73,8 +77,8 @@ class CONTENT_EXPORT FrameConnectorDelegate {
   // Given a point in the current view's coordinate space, return the same
   // point transformed into the coordinate space of the top-level view's
   // coordinate space.
-  virtual gfx::Point TransformPointToRootCoordSpace(
-      const gfx::Point& point,
+  virtual gfx::PointF TransformPointToRootCoordSpace(
+      const gfx::PointF& point,
       const viz::SurfaceId& surface_id);
 
   // Given a point in the coordinate space of a different Surface, transform
@@ -86,20 +90,20 @@ class CONTENT_EXPORT FrameConnectorDelegate {
   // be in sibling surfaces, they must first be converted to the root
   // surface's coordinate space.
   virtual bool TransformPointToLocalCoordSpace(
-      const gfx::Point& point,
+      const gfx::PointF& point,
       const viz::SurfaceId& original_surface,
       const viz::SurfaceId& local_surface_id,
-      gfx::Point* transformed_point);
+      gfx::PointF* transformed_point);
 
   // Transform a point into the coordinate space of the root
   // RenderWidgetHostView, for the current view's coordinate space.
   // Returns false if |target_view| and |view_| do not have the same root
   // RenderWidgetHostView.
   virtual bool TransformPointToCoordSpaceForView(
-      const gfx::Point& point,
+      const gfx::PointF& point,
       RenderWidgetHostViewBase* target_view,
       const viz::SurfaceId& local_surface_id,
-      gfx::Point* transformed_point);
+      gfx::PointF* transformed_point);
 
   // Pass acked touch events to the root view for gesture processing.
   virtual void ForwardProcessAckedTouchEvent(
@@ -149,6 +153,13 @@ class CONTENT_EXPORT FrameConnectorDelegate {
   // Called by RenderWidgetHostViewChildFrame to update the visibility of any
   // nested child RWHVCFs inside it.
   virtual void SetVisibilityForChildViews(bool visible) const {}
+
+#if defined(USE_AURA)
+  // Embeds a WindowTreeClient in the parent. This results in the parent
+  // creating a window in the ui server so that this can render to the screen.
+  virtual void EmbedRendererWindowTreeClientInParent(
+      ui::mojom::WindowTreeClientPtr window_tree_client) {}
+#endif
 
  protected:
   virtual ~FrameConnectorDelegate() {}

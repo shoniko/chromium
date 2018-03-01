@@ -8,7 +8,6 @@
 
 #include <utility>
 
-#include "ash/wm/window_util.h"
 #include "base/memory/ptr_util.h"
 #include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
@@ -99,12 +98,12 @@ void AppShortcutLauncherItemController::ItemSelected(
       return;
     }
 
-    // Launching some items replaces this item controller instance, which
-    // destroys its ShelfID string pair; making copies avoid crashes.
-    ChromeLauncherController::instance()->LaunchApp(
-        ash::ShelfID(shelf_id()), source, ui::EF_NONE, display_id);
+    // LaunchApp may replace and destroy this item controller instance. Run the
+    // callback before |binding_| is destroyed and copy the id to avoid crashes.
     std::move(callback).Run(ash::SHELF_ACTION_NEW_WINDOW_CREATED,
                             base::nullopt);
+    ChromeLauncherController::instance()->LaunchApp(
+        ash::ShelfID(shelf_id()), source, ui::EF_NONE, display_id);
     return;
   }
 
@@ -123,7 +122,7 @@ ash::MenuItemList AppShortcutLauncherItemController::GetAppMenuItems(
     ash::mojom::MenuItemPtr item(ash::mojom::MenuItem::New());
     item->command_id = base::checked_cast<uint32_t>(i);
     item->label = controller->GetAppListTitle(tab);
-    item->image = *controller->GetAppListIcon(tab).ToSkBitmap();
+    item->image = controller->GetAppListIcon(tab).AsImageSkia();
     items.push_back(std::move(item));
   }
   return items;
@@ -212,8 +211,8 @@ AppShortcutLauncherItemController::GetRunningApplications() {
     TabStripModel* tab_strip = browser->tab_strip_model();
     for (int index = 0; index < tab_strip->count(); index++) {
       content::WebContents* web_contents = tab_strip->GetWebContentsAt(index);
-      if (WebContentMatchesApp(
-              extension, refocus_pattern, web_contents, browser))
+      if (WebContentMatchesApp(extension, refocus_pattern, web_contents,
+                               browser))
         items.push_back(web_contents);
     }
   }
@@ -250,8 +249,8 @@ content::WebContents* AppShortcutLauncherItemController::GetLRUApplication() {
     for (int index = 0; index < tab_strip->count(); index++) {
       content::WebContents* web_contents = tab_strip->GetWebContentsAt(
           (index + active_index) % tab_strip->count());
-      if (WebContentMatchesApp(
-              extension, refocus_pattern, web_contents, browser))
+      if (WebContentMatchesApp(extension, refocus_pattern, web_contents,
+                               browser))
         return web_contents;
     }
   }
@@ -266,8 +265,8 @@ content::WebContents* AppShortcutLauncherItemController::GetLRUApplication() {
     TabStripModel* tab_strip = browser->tab_strip_model();
     for (int index = 0; index < tab_strip->count(); index++) {
       content::WebContents* web_contents = tab_strip->GetWebContentsAt(index);
-      if (WebContentMatchesApp(
-              extension, refocus_pattern, web_contents, browser))
+      if (WebContentMatchesApp(extension, refocus_pattern, web_contents,
+                               browser))
         return web_contents;
     }
   }
@@ -283,9 +282,10 @@ bool AppShortcutLauncherItemController::WebContentMatchesApp(
   // then the contents match the app.
   if (browser->is_app()) {
     const extensions::Extension* browser_extension =
-        ExtensionRegistry::Get(browser->profile())->GetExtensionById(
-            web_app::GetExtensionIdFromApplicationName(browser->app_name()),
-            ExtensionRegistry::EVERYTHING);
+        ExtensionRegistry::Get(browser->profile())
+            ->GetExtensionById(
+                web_app::GetExtensionIdFromApplicationName(browser->app_name()),
+                ExtensionRegistry::EVERYTHING);
     return browser_extension == extension;
   }
 
@@ -327,12 +327,13 @@ ash::ShelfAction AppShortcutLauncherItemController::ActivateContent(
 bool AppShortcutLauncherItemController::AdvanceToNextApp() {
   std::vector<content::WebContents*> items = GetRunningApplications();
   if (items.size() >= 1) {
-    Browser* browser = chrome::FindBrowserWithWindow(
-        ash::wm::GetActiveWindow());
-    if (browser) {
+    Browser* browser = chrome::FindLastActive();
+    // The last active browser is not necessarily the active window. The window
+    // could be a v2 app or ARC app.
+    if (browser && browser->window()->IsActive()) {
       TabStripModel* tab_strip = browser->tab_strip_model();
-      content::WebContents* active = tab_strip->GetWebContentsAt(
-          tab_strip->active_index());
+      content::WebContents* active =
+          tab_strip->GetWebContentsAt(tab_strip->active_index());
       std::vector<content::WebContents*>::const_iterator i(
           std::find(items.begin(), items.end(), active));
       if (i != items.end()) {
@@ -340,7 +341,7 @@ bool AppShortcutLauncherItemController::AdvanceToNextApp() {
           // If there is only a single item available, we animate it upon key
           // action.
           AnimateWindow(browser->window()->GetNativeWindow(),
-              wm::WINDOW_ANIMATION_TYPE_BOUNCE);
+                        wm::WINDOW_ANIMATION_TYPE_BOUNCE);
         } else {
           int index = (static_cast<int>(i - items.begin()) + 1) % items.size();
           ActivateContent(items[index]);
@@ -360,8 +361,9 @@ bool AppShortcutLauncherItemController::IsV2App() {
 
 bool AppShortcutLauncherItemController::AllowNextLaunchAttempt() {
   if (last_launch_attempt_.is_null() ||
-      last_launch_attempt_ + base::TimeDelta::FromMilliseconds(
-          kClickSuppressionInMS) < base::Time::Now()) {
+      last_launch_attempt_ +
+              base::TimeDelta::FromMilliseconds(kClickSuppressionInMS) <
+          base::Time::Now()) {
     last_launch_attempt_ = base::Time::Now();
     return true;
   }

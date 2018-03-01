@@ -1400,10 +1400,6 @@ void GL_APIENTRY GLES2ProduceTextureDirectCHROMIUM(GLuint texture,
                                                    const GLbyte* mailbox) {
   gles2::GetGLContext()->ProduceTextureDirectCHROMIUM(texture, target, mailbox);
 }
-void GL_APIENTRY GLES2ConsumeTextureCHROMIUM(GLenum target,
-                                             const GLbyte* mailbox) {
-  gles2::GetGLContext()->ConsumeTextureCHROMIUM(target, mailbox);
-}
 GLuint GL_APIENTRY GLES2CreateAndConsumeTextureCHROMIUM(GLenum target,
                                                         const GLbyte* mailbox) {
   return gles2::GetGLContext()->CreateAndConsumeTextureCHROMIUM(target,
@@ -1796,6 +1792,14 @@ void GL_APIENTRY GLES2RasterCHROMIUM(const cc::DisplayItemList* list,
 }
 void GL_APIENTRY GLES2EndRasterCHROMIUM() {
   gles2::GetGLContext()->EndRasterCHROMIUM();
+}
+void GL_APIENTRY GLES2TexStorage2DImageCHROMIUM(GLenum target,
+                                                GLenum internalFormat,
+                                                GLenum bufferUsage,
+                                                GLsizei width,
+                                                GLsizei height) {
+  gles2::GetGLContext()->TexStorage2DImageCHROMIUM(target, internalFormat,
+                                                   bufferUsage, width, height);
 }
 
 namespace gles2 {
@@ -2851,10 +2855,6 @@ extern const NameToFunc g_gles2_function_table[] = {
         reinterpret_cast<GLES2FunctionPointer>(glProduceTextureDirectCHROMIUM),
     },
     {
-        "glConsumeTextureCHROMIUM",
-        reinterpret_cast<GLES2FunctionPointer>(glConsumeTextureCHROMIUM),
-    },
-    {
         "glCreateAndConsumeTextureCHROMIUM",
         reinterpret_cast<GLES2FunctionPointer>(
             glCreateAndConsumeTextureCHROMIUM),
@@ -3152,6 +3152,10 @@ extern const NameToFunc g_gles2_function_table[] = {
     {
         "glEndRasterCHROMIUM",
         reinterpret_cast<GLES2FunctionPointer>(glEndRasterCHROMIUM),
+    },
+    {
+        "glTexStorage2DImageCHROMIUM",
+        reinterpret_cast<GLES2FunctionPointer>(glTexStorage2DImageCHROMIUM),
     },
     {
         NULL, NULL,

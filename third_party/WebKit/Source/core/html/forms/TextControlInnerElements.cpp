@@ -26,7 +26,6 @@
 
 #include "core/html/forms/TextControlInnerElements.h"
 
-#include "core/HTMLNames.h"
 #include "core/css/resolver/StyleAdjuster.h"
 #include "core/dom/Document.h"
 #include "core/dom/NodeComputedStyle.h"
@@ -35,8 +34,9 @@
 #include "core/events/TextEvent.h"
 #include "core/events/TextEventInputType.h"
 #include "core/frame/LocalFrame.h"
-#include "core/html/HTMLInputElement.h"
+#include "core/html/forms/HTMLInputElement.h"
 #include "core/html/shadow/ShadowElementNames.h"
+#include "core/html_names.h"
 #include "core/input/EventHandler.h"
 #include "core/layout/LayoutTextControlSingleLine.h"
 #include "core/layout/api/LayoutTextControlItem.h"
@@ -73,10 +73,11 @@ EditingViewPortElement* EditingViewPortElement::Create(Document& document) {
   return element;
 }
 
-RefPtr<ComputedStyle> EditingViewPortElement::CustomStyleForLayoutObject() {
+scoped_refptr<ComputedStyle>
+EditingViewPortElement::CustomStyleForLayoutObject() {
   // FXIME: Move these styles to html.css.
 
-  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
   style->InheritFrom(OwnerShadowHost()->ComputedStyleRef());
 
   style->SetFlexGrow(1);
@@ -133,14 +134,14 @@ LayoutObject* TextControlInnerEditorElement::CreateLayoutObject(
   return new LayoutTextControlInnerEditor(this);
 }
 
-RefPtr<ComputedStyle>
+scoped_refptr<ComputedStyle>
 TextControlInnerEditorElement::CustomStyleForLayoutObject() {
   LayoutObject* parent_layout_object = OwnerShadowHost()->GetLayoutObject();
   if (!parent_layout_object || !parent_layout_object->IsTextControl())
     return OriginalStyleForLayoutObject();
   LayoutTextControlItem text_control_layout_item =
       LayoutTextControlItem(ToLayoutTextControl(parent_layout_object));
-  RefPtr<ComputedStyle> inner_editor_style =
+  scoped_refptr<ComputedStyle> inner_editor_style =
       text_control_layout_item.CreateInnerEditorStyle(
           text_control_layout_item.StyleRef());
   // Using StyleAdjuster::adjustComputedStyle updates unwanted style. We'd like
@@ -175,7 +176,7 @@ void SearchFieldCancelButtonElement::DetachLayoutTree(
 
 void SearchFieldCancelButtonElement::DefaultEventHandler(Event* event) {
   // If the element is visible, on mouseup, clear the value, and set selection
-  HTMLInputElement* input(toHTMLInputElement(OwnerShadowHost()));
+  HTMLInputElement* input(ToHTMLInputElement(OwnerShadowHost()));
   if (!input || input->IsDisabledOrReadOnly()) {
     if (!event->DefaultHandled())
       HTMLDivElement::DefaultEventHandler(event);
@@ -196,7 +197,7 @@ void SearchFieldCancelButtonElement::DefaultEventHandler(Event* event) {
 }
 
 bool SearchFieldCancelButtonElement::WillRespondToMouseClickEvents() {
-  const HTMLInputElement* input = toHTMLInputElement(OwnerShadowHost());
+  const HTMLInputElement* input = ToHTMLInputElement(OwnerShadowHost());
   if (input && !input->IsDisabledOrReadOnly())
     return true;
 

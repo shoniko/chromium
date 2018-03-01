@@ -19,7 +19,8 @@ namespace blink {
 class Hyphenation;
 class NGInlineBreakToken;
 class NGInlineItem;
-class NGFragmentBuilder;
+class NGLineBoxFragmentBuilder;
+class NGInlineLayoutStateStack;
 
 // Represents a line breaker.
 //
@@ -31,8 +32,8 @@ class CORE_EXPORT NGLineBreaker {
  public:
   NGLineBreaker(NGInlineNode,
                 const NGConstraintSpace&,
-                NGFragmentBuilder*,
-                Vector<RefPtr<NGUnpositionedFloat>>*,
+                NGLineBoxFragmentBuilder*,
+                Vector<scoped_refptr<NGUnpositionedFloat>>*,
                 const NGInlineBreakToken* = nullptr);
   ~NGLineBreaker() {}
 
@@ -43,7 +44,8 @@ class CORE_EXPORT NGLineBreaker {
                 NGLineInfo*);
 
   // Create an NGInlineBreakToken for the last line returned by NextLine().
-  RefPtr<NGInlineBreakToken> CreateBreakToken() const;
+  scoped_refptr<NGInlineBreakToken> CreateBreakToken(
+      std::unique_ptr<const NGInlineLayoutStateStack>) const;
 
   NGExclusionSpace* ExclusionSpace() { return line_.exclusion_space.get(); }
 
@@ -101,13 +103,14 @@ class CORE_EXPORT NGLineBreaker {
     kForcedBreak
   };
 
-  LineBreakState HandleText(const NGInlineItemResults&,
+  LineBreakState HandleText(NGLineInfo*,
                             const NGInlineItem&,
                             NGInlineItemResult*);
   void BreakText(NGInlineItemResult*,
                  const NGInlineItem&,
-                 LayoutUnit available_width);
-  static void AppendHyphen(const ComputedStyle&, ShapeResult*);
+                 LayoutUnit available_width,
+                 NGLineInfo*);
+  static void AppendHyphen(const ComputedStyle&, NGLineInfo*);
 
   LineBreakState HandleControlItem(const NGInlineItem&, NGInlineItemResult*);
   LineBreakState HandleAtomicInline(const NGInlineItem&,
@@ -119,10 +122,15 @@ class CORE_EXPORT NGLineBreaker {
   LineBreakState HandleCloseTag(const NGInlineItem&, NGInlineItemResults*);
 
   void HandleOverflow(NGLineInfo*);
+  void HandleOverflow(NGLineInfo*,
+                      LayoutUnit available_width,
+                      bool force_break_anywhere);
   void Rewind(NGLineInfo*, unsigned new_end);
 
+  void TruncateOverflowingText(NGLineInfo*);
+
   void SetCurrentStyle(const ComputedStyle&);
-  bool IsFirstBreakOpportunity(unsigned, const NGInlineItemResults&) const;
+  bool IsFirstBreakOpportunity(unsigned, const NGLineInfo&) const;
   LineBreakState ComputeIsBreakableAfter(NGInlineItemResult*) const;
 
   void MoveToNextOf(const NGInlineItem&);
@@ -130,14 +138,16 @@ class CORE_EXPORT NGLineBreaker {
   void SkipCollapsibleWhitespaces();
 
   bool IsFirstFormattedLine() const;
+  void ComputeBaseDirection();
 
   LineData line_;
   NGInlineNode node_;
   const NGConstraintSpace& constraint_space_;
-  NGFragmentBuilder* container_builder_;
-  Vector<RefPtr<NGUnpositionedFloat>>* unpositioned_floats_;
+  NGLineBoxFragmentBuilder* container_builder_;
+  Vector<scoped_refptr<NGUnpositionedFloat>>* unpositioned_floats_;
   unsigned item_index_ = 0;
   unsigned offset_ = 0;
+  bool previous_line_had_forced_break_ = false;
   NGLogicalOffset content_offset_;
   LazyLineBreakIterator break_iterator_;
   HarfBuzzShaper shaper_;
@@ -146,6 +156,11 @@ class CORE_EXPORT NGLineBreaker {
 
   // Keep track of handled float items. See HandleFloat().
   unsigned handled_floats_end_item_index_ = 0;
+
+  // The current base direction for the bidi algorithm.
+  // This is copied from NGInlineNode, then updated after each forced line break
+  // if 'unicode-bidi: plaintext'.
+  TextDirection base_direction_;
 
   // True when current box allows line wrapping.
   bool auto_wrap_ = false;

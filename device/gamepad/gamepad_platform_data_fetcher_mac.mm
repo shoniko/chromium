@@ -66,6 +66,9 @@ const uint32_t kGameUsageNumber = 0x05;
 const uint32_t kMultiAxisUsageNumber = 0x08;
 const uint32_t kAxisMinimumUsageNumber = 0x30;
 
+const int kVendorSteelSeries = 0x1038;
+const int kProductNimbus = 0x1420;
+
 }  // namespace
 
 GamepadPlatformDataFetcherMac::GamepadPlatformDataFetcherMac()
@@ -311,16 +314,26 @@ void GamepadPlatformDataFetcherMac::DeviceAdd(IOHIDDeviceRef device) {
       IOHIDDeviceGetProperty(device, CFSTR(kIOHIDVendorIDKey))));
   NSNumber* product_id = CFToNSCast(CFCastStrict<CFNumberRef>(
       IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductIDKey))));
+  NSNumber* version_number = CFToNSCast(CFCastStrict<CFNumberRef>(
+      IOHIDDeviceGetProperty(device, CFSTR(kIOHIDVersionNumberKey))));
   NSString* product = CFToNSCast(CFCastStrict<CFStringRef>(
       IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductKey))));
   int vendor_int = [vendor_id intValue];
   int product_int = [product_id intValue];
+  int version_int = [version_number intValue];
 
-  char vendor_as_str[5], product_as_str[5];
+  // The SteelSeries Nimbus and other Made for iOS gamepads should be handled
+  // through the GameController interface. Blacklist it here so it doesn't
+  // take up an additional gamepad slot.
+  if (vendor_int == kVendorSteelSeries && product_int == kProductNimbus)
+    return;
+
+  char vendor_as_str[5], product_as_str[5], version_as_str[5];
   snprintf(vendor_as_str, sizeof(vendor_as_str), "%04x", vendor_int);
   snprintf(product_as_str, sizeof(product_as_str), "%04x", product_int);
-  state->mapper =
-      GetGamepadStandardMappingFunction(vendor_as_str, product_as_str);
+  snprintf(version_as_str, sizeof(version_as_str), "%04x", version_int);
+  state->mapper = GetGamepadStandardMappingFunction(
+      vendor_as_str, product_as_str, version_as_str);
 
   NSString* ident =
       [NSString stringWithFormat:@"%@ (%sVendor: %04x Product: %04x)", product,

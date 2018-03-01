@@ -11,12 +11,12 @@
 #include "chrome/browser/vr/content_input_delegate.h"
 #include "chrome/browser/vr/elements/ui_element.h"
 #include "chrome/browser/vr/test/animation_utils.h"
+#include "chrome/browser/vr/test/constants.h"
 #include "chrome/browser/vr/test/mock_content_input_delegate.h"
 #include "chrome/browser/vr/test/ui_scene_manager_test.h"
 #include "chrome/browser/vr/ui_scene.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/WebKit/public/platform/WebGestureEvent.h"
-#include "ui/gfx/geometry/vector3d_f.h"
 
 namespace vr {
 
@@ -26,7 +26,7 @@ class UiInputManagerTest : public UiSceneManagerTest {
     UiSceneManagerTest::SetUp();
     MakeManager(kNotInCct, kNotInWebVr);
     input_manager_ = base::MakeUnique<UiInputManager>(scene_.get());
-    scene_->OnBeginFrame(MicrosecondsToTicks(1), gfx::Vector3dF());
+    EXPECT_TRUE(scene_->OnBeginFrame(MicrosecondsToTicks(1), kForwardVector));
   }
 
  protected:
@@ -56,7 +56,7 @@ TEST_F(UiInputManagerTest, NoMouseMovesDuringClick) {
   // Unless we suppress content move events during clicks, this will cause us to
   // call OnContentMove on the delegate. We should do this suppression, so we
   // set the expected number of calls to zero.
-  EXPECT_CALL(content_input_delegate_, OnContentMove(testing::_)).Times(0);
+  EXPECT_CALL(*content_input_delegate_, OnContentMove(testing::_)).Times(0);
 
   input_manager_->HandleInput(content_quad_center - origin, origin,
                               UiInputManager::ButtonState::DOWN, &gesture_list,

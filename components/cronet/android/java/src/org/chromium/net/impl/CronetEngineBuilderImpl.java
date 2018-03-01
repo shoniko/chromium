@@ -83,10 +83,8 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
     private boolean mPublicKeyPinningBypassForLocalTrustAnchorsEnabled;
     private String mUserAgent;
     private String mStoragePath;
-    private VersionSafeCallbacks.LibraryLoader mLibraryLoader;
     private boolean mQuicEnabled;
     private boolean mHttp2Enabled;
-    private boolean mSdchEnabled;
     private boolean mBrotiEnabled;
     private boolean mDisableCache;
     private int mHttpCacheMode;
@@ -105,7 +103,6 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
         mApplicationContext = context.getApplicationContext();
         enableQuic(false);
         enableHttp2(true);
-        enableSdch(false);
         enableBrotli(false);
         enableHttpCache(HTTP_CACHE_DISABLED, 0);
         enableNetworkQualityEstimator(false);
@@ -142,12 +139,20 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
 
     @Override
     public CronetEngineBuilderImpl setLibraryLoader(CronetEngine.Builder.LibraryLoader loader) {
-        mLibraryLoader = new VersionSafeCallbacks.LibraryLoader(loader);
+        // |CronetEngineBuilderImpl| is an abstract class that is used by concrete builder
+        // implementations, including the Java Cronet engine builder; therefore, the implementation
+        // of this method should be "no-op". Subclasses that care about the library loader
+        // should override this method.
         return this;
     }
 
+    /**
+     * Default implementation of the method that returns {@code null}.
+     *
+     * @return {@code null}.
+     */
     VersionSafeCallbacks.LibraryLoader libraryLoader() {
-        return mLibraryLoader;
+        return null;
     }
 
     @Override
@@ -182,12 +187,7 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
 
     @Override
     public CronetEngineBuilderImpl enableSdch(boolean value) {
-        mSdchEnabled = value;
         return this;
-    }
-
-    boolean sdchEnabled() {
-        return mSdchEnabled;
     }
 
     @Override
@@ -402,7 +402,7 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
     }
 
     /**
-     * @returns thread priority provided by user, or {@code defaultThreadPriority} if none provided.
+     * @return thread priority provided by user, or {@code defaultThreadPriority} if none provided.
      */
     int threadPriority(int defaultThreadPriority) {
         return mThreadPriority == INVALID_THREAD_PRIORITY ? defaultThreadPriority : mThreadPriority;

@@ -16,6 +16,7 @@
 #include "build/build_config.h"
 #include "components/metrics/data_use_tracker.h"
 #include "components/metrics/metrics_log_uploader.h"
+#include "third_party/metrics_proto/reporting_info.pb.h"
 
 class PrefService;
 class PrefRegistrySimple;
@@ -131,7 +132,10 @@ class ReportingService {
   // upload has been done yet.
   base::TimeTicks last_upload_finish_time_;
 
-  base::ThreadChecker thread_checker_;
+  // Info on current reporting state to send along with reports.
+  ReportingInfo reporting_info_;
+
+  SEQUENCE_CHECKER(sequence_checker_);
 
   // Weak pointers factory used to post task on different threads. All weak
   // pointers managed by this factory have the same lifetime as

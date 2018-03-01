@@ -26,6 +26,7 @@
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "gpu/command_buffer/common/command_buffer_id.h"
 #include "gpu/command_buffer/common/command_buffer_shared.h"
+#include "gpu/command_buffer/common/context_result.h"
 #include "gpu/command_buffer/common/gpu_memory_allocation.h"
 #include "gpu/command_buffer/common/scheduling_priority.h"
 #include "gpu/gpu_export.h"
@@ -36,7 +37,6 @@
 #include "ui/latency/latency_info.h"
 
 struct GPUCommandBufferConsoleMessage;
-struct GPUCreateCommandBufferConfig;
 struct GpuCommandBufferMsg_SwapBuffersCompleted_Params;
 class GURL;
 
@@ -75,17 +75,19 @@ class GPU_EXPORT CommandBufferProxyImpl : public gpu::CommandBuffer,
   typedef base::Callback<void(const std::string& msg, int id)>
       GpuConsoleMessageCallback;
 
-  // Create and connect to a command buffer in the GPU process.
-  static std::unique_ptr<CommandBufferProxyImpl> Create(
-      scoped_refptr<GpuChannelHost> host,
-      gpu::SurfaceHandle surface_handle,
-      CommandBufferProxyImpl* share_group,
+  CommandBufferProxyImpl(
+      scoped_refptr<GpuChannelHost> channel,
       int32_t stream_id,
-      gpu::SchedulingPriority stream_priority,
-      const gpu::gles2::ContextCreationAttribHelper& attribs,
-      const GURL& active_url,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
   ~CommandBufferProxyImpl() override;
+
+  // Connect to a command buffer in the GPU process.
+  ContextResult Initialize(
+      gpu::SurfaceHandle surface_handle,
+      CommandBufferProxyImpl* share_group,
+      gpu::SchedulingPriority stream_priority,
+      const gpu::gles2::ContextCreationAttribHelper& attribs,
+      const GURL& active_url);
 
   // IPC::Listener implementation:
   bool OnMessageReceived(const IPC::Message& message) override;
@@ -106,7 +108,7 @@ class GPU_EXPORT CommandBufferProxyImpl : public gpu::CommandBuffer,
 
   // gpu::GpuControl implementation:
   void SetGpuControlClient(GpuControlClient* client) override;
-  gpu::Capabilities GetCapabilities() override;
+  const gpu::Capabilities& GetCapabilities() const override;
   int32_t CreateImage(ClientBuffer buffer,
                       size_t width,
                       size_t height,
@@ -167,11 +169,6 @@ class GPU_EXPORT CommandBufferProxyImpl : public gpu::CommandBuffer,
   typedef std::map<int32_t, scoped_refptr<gpu::Buffer>> TransferBufferMap;
   typedef base::hash_map<uint32_t, base::Closure> SignalTaskMap;
 
-  CommandBufferProxyImpl(int channel_id, int32_t route_id, int32_t stream_id);
-  bool Initialize(scoped_refptr<GpuChannelHost> channel,
-                  const GPUCreateCommandBufferConfig& config,
-                  scoped_refptr<base::SingleThreadTaskRunner> task_runner);
-
   void CheckLock() {
     if (lock_) {
       lock_->AssertAcquired();
@@ -191,7 +188,7 @@ class GPU_EXPORT CommandBufferProxyImpl : public gpu::CommandBuffer,
   void OnDestroyed(gpu::error::ContextLostReason reason,
                    gpu::error::Error error);
   void OnConsoleMessage(const GPUCommandBufferConsoleMessage& message);
-  void OnSignalAck(uint32_t id);
+  void OnSignalAck(uint32_t id, const CommandBuffer::State& state);
   void OnSwapBuffersCompleted(
       const GpuCommandBufferMsg_SwapBuffersCompleted_Params& params);
   void OnUpdateVSyncParameters(base::TimeTicks timebase,
@@ -207,7 +204,7 @@ class GPU_EXPORT CommandBufferProxyImpl : public gpu::CommandBuffer,
   // has an error.
   void TryUpdateStateDontReportError();
   // Sets the state, and calls OnGpuStateError() if the new state has an error.
-  void SetStateFromSyncReply(const gpu::CommandBuffer::State& state);
+  void SetStateFromMessageReply(const CommandBuffer::State& state);
 
   // Loses the context after we received an invalid reply from the GPU
   // process.
@@ -255,10 +252,11 @@ class GPU_EXPORT CommandBufferProxyImpl : public gpu::CommandBuffer,
   base::ObserverList<DeletionObserver> deletion_observers_;
 
   scoped_refptr<GpuChannelHost> channel_;
-  const gpu::CommandBufferId command_buffer_id_;
+  bool disconnected_ = false;
   const int channel_id_;
   const int32_t route_id_;
   const int32_t stream_id_;
+  const gpu::CommandBufferId command_buffer_id_;
   uint32_t last_flush_id_ = 0;
   int32_t last_put_offset_ = -1;
   bool has_buffer_ = false;
@@ -288,7 +286,7 @@ class GPU_EXPORT CommandBufferProxyImpl : public gpu::CommandBuffer,
   SwapBuffersCompletionCallback swap_buffers_completion_callback_;
   UpdateVSyncParametersCallback update_vsync_parameters_completion_callback_;
 
-  scoped_refptr<base::SequencedTaskRunner> callback_thread_;
+  scoped_refptr<base::SingleThreadTaskRunner> callback_thread_;
   base::WeakPtrFactory<CommandBufferProxyImpl> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(CommandBufferProxyImpl);

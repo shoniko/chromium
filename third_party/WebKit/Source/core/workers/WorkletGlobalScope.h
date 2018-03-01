@@ -26,12 +26,12 @@ class Modulator;
 class WorkletModuleResponsesMap;
 class WorkletPendingTasks;
 class WorkerReportingProxy;
+struct GlobalScopeCreationParams;
 
 class CORE_EXPORT WorkletGlobalScope
-    : public GarbageCollectedFinalized<WorkletGlobalScope>,
+    : public ScriptWrappable,
       public SecurityContext,
       public WorkerOrWorkletGlobalScope,
-      public ScriptWrappable,
       public ActiveScriptWrappable<WorkletGlobalScope> {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(WorkletGlobalScope);
@@ -46,10 +46,10 @@ class CORE_EXPORT WorkletGlobalScope
     return const_cast<WorkletGlobalScope*>(this);
   }
 
-  void EvaluateClassicScript(const KURL& script_url,
-                             String source_code,
-                             std::unique_ptr<Vector<char>> cached_meta_data,
-                             V8CacheOptions) final;
+  void EvaluateClassicScript(
+      const KURL& script_url,
+      String source_code,
+      std::unique_ptr<Vector<char>> cached_meta_data) final;
 
   // Always returns false here as worklets don't have a #close() method on
   // the global.
@@ -67,6 +67,9 @@ class CORE_EXPORT WorkletGlobalScope
   ExecutionContext* GetExecutionContext() const;
 
   // ExecutionContext
+  const KURL& Url() const final { return url_; }
+  const KURL& BaseURL() const final { return url_; }
+  KURL CompleteURL(const String&) const final;
   String UserAgent() const final { return user_agent_; }
   SecurityContext& GetSecurityContext() final { return *this; }
   EventQueue* GetEventQueue() const final {
@@ -88,39 +91,44 @@ class CORE_EXPORT WorkletGlobalScope
   // When script evaluation is done or any exception happens, it's notified to
   // the given WorkletPendingTasks via |outside_settings_task_runner| (i.e., the
   // parent frame's task runner).
-  void FetchAndInvokeScript(const KURL& module_url_record,
-                            WorkletModuleResponsesMap*,
-                            WebURLRequest::FetchCredentialsMode,
-                            RefPtr<WebTaskRunner> outside_settings_task_runner,
-                            WorkletPendingTasks*);
+  void FetchAndInvokeScript(
+      const KURL& module_url_record,
+      WorkletModuleResponsesMap*,
+      WebURLRequest::FetchCredentialsMode,
+      scoped_refptr<WebTaskRunner> outside_settings_task_runner,
+      WorkletPendingTasks*);
 
   WorkletModuleResponsesMapProxy* ModuleResponsesMapProxy() const;
   void SetModuleResponsesMapProxyForTesting(WorkletModuleResponsesMapProxy*);
 
   void SetModulator(Modulator*);
 
-  DECLARE_VIRTUAL_TRACE();
-  DECLARE_VIRTUAL_TRACE_WRAPPERS();
+  SecurityOrigin* DocumentSecurityOrigin() const {
+    return document_security_origin_.get();
+  }
+
+  void Trace(blink::Visitor*) override;
+  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
  protected:
-  // The url, userAgent and securityOrigin arguments are inherited from the
-  // parent ExecutionContext for Worklets.
-  WorkletGlobalScope(const KURL&,
-                     const String& user_agent,
-                     RefPtr<SecurityOrigin>,
+  // Partial implementation of the "set up a worklet environment settings
+  // object" algorithm:
+  // https://drafts.css-houdini.org/worklets/#script-settings-for-worklets
+  WorkletGlobalScope(std::unique_ptr<GlobalScopeCreationParams>,
                      v8::Isolate*,
-                     WorkerClients*,
                      WorkerReportingProxy&);
 
  private:
-  const KURL& VirtualURL() const final { return url_; }
-  KURL VirtualCompleteURL(const String&) const final;
-
   EventTarget* ErrorEventTarget() final { return nullptr; }
   void DidUpdateSecurityOrigin() final {}
 
+  // The |url_| and |user_agent_| are inherited from the parent Document.
   const KURL url_;
   const String user_agent_;
+
+  // Used for module fetch.
+  const scoped_refptr<SecurityOrigin> document_security_origin_;
+
   Member<WorkletModuleResponsesMapProxy> module_responses_map_proxy_;
   // LocalDOMWindow::modulator_ workaround equivalent.
   // TODO(kouhei): Remove this.

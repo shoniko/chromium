@@ -5,9 +5,13 @@
 #include "ios/chrome/browser/ui/ui_util.h"
 
 #import <UIKit/UIKit.h>
+#include <limits>
 
+#include "base/feature_list.h"
 #include "base/logging.h"
+#import "ios/chrome/browser/ui/toolbar/toolbar_controller_base_feature.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
+#include "ui/base/device_form_factor.h"
 #include "ui/gfx/ios/uikit_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -15,8 +19,7 @@
 #endif
 
 bool IsIPadIdiom() {
-  UIUserInterfaceIdiom idiom = [[UIDevice currentDevice] userInterfaceIdiom];
-  return idiom == UIUserInterfaceIdiomPad;
+  return ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET;
 }
 
 const CGFloat kPortraitWidth[INTERFACE_IDIOM_COUNT] = {
@@ -52,7 +55,28 @@ CGFloat CurrentScreenWidth() {
   return [UIScreen mainScreen].bounds.size.width;
 }
 
+bool IsIPhoneX() {
+  UIUserInterfaceIdiom idiom = [[UIDevice currentDevice] userInterfaceIdiom];
+  return (idiom == UIUserInterfaceIdiomPhone &&
+          CGRectGetHeight([[UIScreen mainScreen] nativeBounds]) == 2436);
+}
+
 CGFloat StatusBarHeight() {
+  // This is a temporary solution until usage of StatusBarHeight has been
+  // replaced with topLayoutGuide.
+
+  if (IsIPhoneX()) {
+    if (base::FeatureList::IsEnabled(kSafeAreaCompatibleToolbar)) {
+      CGRect statusBarFrame = [UIApplication sharedApplication].statusBarFrame;
+      return CGRectGetHeight(statusBarFrame);
+    } else {
+      // Return the height of the portrait status bar even in landscape because
+      // the Toolbar does not properly layout itself if the status bar height
+      // changes.
+      return 44;
+    }
+  }
+
   // Checking [UIApplication sharedApplication].statusBarFrame will return the
   // wrong offset when the application is started while in a phone call, so
   // simply return 20 here.
@@ -86,6 +110,10 @@ CGRect CGRectCopyWithOrigin(CGRect rect, CGFloat x, CGFloat y) {
 CGRect CGRectMakeAlignedAndCenteredAt(CGFloat x, CGFloat y, CGFloat width) {
   return AlignRectOriginAndSizeToPixels(
       CGRectMake(x - width / 2.0, y - width / 2.0, width, width));
+}
+
+bool AreCGFloatsEqual(CGFloat a, CGFloat b) {
+  return std::fabs(a - b) <= std::numeric_limits<CGFloat>::epsilon();
 }
 
 // Based on an original size and a target size applies the transformations.

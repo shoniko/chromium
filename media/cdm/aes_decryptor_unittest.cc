@@ -59,7 +59,7 @@ MATCHER(NotEmpty, "") {
 MATCHER(IsJSONDictionary, "") {
   std::string result(arg.begin(), arg.end());
   std::unique_ptr<base::Value> root(base::JSONReader().ReadToValue(result));
-  return (root.get() && root->GetType() == base::Value::Type::DICTIONARY);
+  return (root.get() && root->type() == base::Value::Type::DICTIONARY);
 }
 MATCHER(IsNullTime, "") {
   return arg.is_null();
@@ -274,12 +274,15 @@ class AesDecryptorTest : public testing::TestWithParam<TestType> {
 
       // Enable use of External Clear Key CDM.
       scoped_feature_list_.InitWithFeatures(
-          {media::kExternalClearKeyForTesting,
-           media::kSupportExperimentalCdmInterface},
-          {});
+          {media::kExternalClearKeyForTesting}, {});
 
       helper_.reset(new ExternalClearKeyTestHelper());
-      CdmModule::GetInstance()->SetCdmPathForTesting(helper_->LibraryPath());
+
+#if BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION)
+      CdmModule::GetInstance()->Initialize(helper_->LibraryPath(), {});
+#else
+      CdmModule::GetInstance()->Initialize(helper_->LibraryPath());
+#endif  // BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION)
 
       std::unique_ptr<CdmAllocator> allocator(new SimpleCdmAllocator());
       std::unique_ptr<CdmAuxiliaryHelper> cdm_helper(

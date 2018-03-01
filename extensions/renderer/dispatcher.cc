@@ -25,13 +25,12 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "content/grit/content_resources.h"
-#include "content/public/child/v8_value_converter.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
+#include "content/public/renderer/v8_value_converter.h"
 #include "extensions/common/api/messaging/message.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_api.h"
@@ -66,7 +65,6 @@
 #include "extensions/renderer/dom_activity_logger.h"
 #include "extensions/renderer/event_bindings.h"
 #include "extensions/renderer/extension_frame_helper.h"
-#include "extensions/renderer/extension_helper.h"
 #include "extensions/renderer/extensions_renderer_client.h"
 #include "extensions/renderer/file_system_natives.h"
 #include "extensions/renderer/guest_view/guest_view_internal_custom_bindings.h"
@@ -80,6 +78,7 @@
 #include "extensions/renderer/process_info_native_handler.h"
 #include "extensions/renderer/render_frame_observer_natives.h"
 #include "extensions/renderer/renderer_extension_registry.h"
+#include "extensions/renderer/renderer_messaging_service.h"
 #include "extensions/renderer/request_sender.h"
 #include "extensions/renderer/runtime_custom_bindings.h"
 #include "extensions/renderer/safe_builtins.h"
@@ -190,10 +189,10 @@ base::LazyInstance<WorkerScriptContextSet>::DestructorAtExit
 
 // Note that we can't use Blink public APIs in the constructor becase Blink
 // is not initialized at the point we create Dispatcher.
-Dispatcher::Dispatcher(DispatcherDelegate* delegate)
-    : delegate_(delegate),
+Dispatcher::Dispatcher(std::unique_ptr<DispatcherDelegate> delegate)
+    : delegate_(std::move(delegate)),
       content_watcher_(new ContentWatcher()),
-      source_map_(&ResourceBundle::GetSharedInstance()),
+      source_map_(&ui::ResourceBundle::GetSharedInstance()),
       v8_schema_registry_(new V8SchemaRegistry),
       user_script_set_manager_observer_(this),
       activity_logging_enabled_(false) {
@@ -278,6 +277,7 @@ Dispatcher::~Dispatcher() {
 
 void Dispatcher::OnRenderFrameCreated(content::RenderFrame* render_frame) {
   script_injection_manager_->OnRenderFrameCreated(render_frame);
+  content_watcher_->OnRenderFrameCreated(render_frame);
 }
 
 bool Dispatcher::IsExtensionActive(const std::string& extension_id) const {
@@ -446,7 +446,7 @@ void Dispatcher::DidInitializeServiceWorkerContextOnWorkerThread(
 
   // Fetch the source code for service_worker_bindings.js.
   base::StringPiece script_resource =
-      ResourceBundle::GetSharedInstance().GetRawDataResource(
+      ui::ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_SERVICE_WORKER_BINDINGS_JS);
   v8::Local<v8::String> script = v8::String::NewExternal(
       isolate, new StaticV8ExternalOneByteStringResource(script_resource));
@@ -543,7 +543,7 @@ void Dispatcher::DidCreateDocumentElement(blink::WebLocalFrame* frame) {
       (extension->is_extension() || extension->is_platform_app())) {
     int resource_id = extension->is_platform_app() ? IDR_PLATFORM_APP_CSS
                                                    : IDR_EXTENSION_FONTS_CSS;
-    std::string stylesheet = ResourceBundle::GetSharedInstance()
+    std::string stylesheet = ui::ResourceBundle::GetSharedInstance()
                                  .GetRawDataResource(resource_id)
                                  .as_string();
     base::ReplaceFirstSubstringAfterOffset(
@@ -563,17 +563,10 @@ void Dispatcher::DidCreateDocumentElement(blink::WebLocalFrame* frame) {
       OptionsPageInfo::ShouldUseChromeStyle(extension) &&
       effective_document_url == OptionsPageInfo::GetOptionsPage(extension)) {
     base::StringPiece extension_css =
-        ResourceBundle::GetSharedInstance().GetRawDataResource(
+        ui::ResourceBundle::GetSharedInstance().GetRawDataResource(
             IDR_EXTENSION_CSS);
     frame->GetDocument().InsertStyleSheet(
         WebString::FromUTF8(extension_css.data(), extension_css.length()));
-  }
-
-  // In testing, the document lifetime events can happen after the render
-  // process shutdown event.
-  // See: http://crbug.com/21508 and http://crbug.com/500851
-  if (content_watcher_) {
-    content_watcher_->DidCreateDocumentElement(frame);
   }
 }
 
@@ -896,8 +889,7 @@ bool Dispatcher::OnControlMessageReceived(const IPC::Message& message) {
 void Dispatcher::IdleNotification() {
   if (set_idle_notifications_ && forced_idle_timer_) {
     // Dampen the forced delay as well if the extension stays idle for long
-    // periods of time. (forced_idle_timer_ can be NULL after
-    // OnRenderProcessShutdown has been called.)
+    // periods of time.
     int64_t forced_delay_ms =
         std::max(RenderThread::Get()->GetIdleNotificationDelayInMs(),
                  kMaxExtensionIdleHandlerDelayMs);
@@ -908,16 +900,6 @@ void Dispatcher::IdleNotification() {
         RenderThread::Get(),
         &RenderThread::IdleHandler);
   }
-}
-
-void Dispatcher::OnRenderProcessShutdown() {
-  v8_schema_registry_.reset();
-  forced_idle_timer_.reset();
-  content_watcher_.reset();
-  script_context_set_->ForEach(
-      std::string(), nullptr,
-      base::Bind(&ScriptContextSet::Remove,
-                 base::Unretained(script_context_set_.get())));
 }
 
 void Dispatcher::OnActivateExtension(const std::string& extension_id) {
@@ -940,6 +922,13 @@ void Dispatcher::OnActivateExtension(const std::string& extension_id) {
                    error.c_str());
     LOG(FATAL) << extension_id << " was never loaded: " << error;
   }
+
+  // It's possible that the same extension might generate multiple activation
+  // messages, for example from an extension background page followed by an
+  // extension subframe on a regular tab.  Ensure that any given extension is
+  // only activated once.
+  if (IsExtensionActive(extension_id))
+    return;
 
   active_extension_ids_.insert(extension_id);
 
@@ -964,9 +953,9 @@ void Dispatcher::OnCancelSuspend(const std::string& extension_id) {
 
 void Dispatcher::OnDeliverMessage(const PortId& target_port_id,
                                   const Message& message) {
-  MessagingBindings::DeliverMessage(*script_context_set_, target_port_id,
-                                    message,
-                                    NULL);  // All render frames.
+  bindings_system_->GetMessagingService()->DeliverMessage(
+      *script_context_set_, target_port_id, message,
+      NULL);  // All render frames.
 }
 
 void Dispatcher::OnDispatchOnConnect(
@@ -977,17 +966,17 @@ void Dispatcher::OnDispatchOnConnect(
     const std::string& tls_channel_id) {
   DCHECK(!target_port_id.is_opener);
 
-  MessagingBindings::DispatchOnConnect(*script_context_set_, target_port_id,
-                                       channel_name, source, info,
-                                       tls_channel_id,
-                                       NULL);  // All render frames.
+  bindings_system_->GetMessagingService()->DispatchOnConnect(
+      *script_context_set_, target_port_id, channel_name, source, info,
+      tls_channel_id,
+      NULL);  // All render frames.
 }
 
 void Dispatcher::OnDispatchOnDisconnect(const PortId& port_id,
                                         const std::string& error_message) {
-  MessagingBindings::DispatchOnDisconnect(*script_context_set_, port_id,
-                                          error_message,
-                                          NULL);  // All render frames.
+  bindings_system_->GetMessagingService()->DispatchOnDisconnect(
+      *script_context_set_, port_id, error_message,
+      NULL);  // All render frames.
 }
 
 void Dispatcher::OnLoaded(

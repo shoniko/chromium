@@ -12,6 +12,8 @@ If this script is given the argument --auto-update, it will also:
 """
 
 import argparse
+import datetime
+import json
 import logging
 
 from webkitpy.common.net.buildbot import current_build_link
@@ -31,7 +33,10 @@ from webkitpy.w3c.wpt_manifest import WPTManifest
 
 # Settings for how often to check try job results and how long to wait.
 POLL_DELAY_SECONDS = 2 * 60
-TIMEOUT_SECONDS = 180 * 60
+TIMEOUT_SECONDS = 210 * 60
+
+# Sheriff calendar URL, used for getting the ecosystem infra sheriff to TBR.
+ROTATIONS_URL = 'http://chromium-build.appspot.com/p/chromium/all_rotations.js'
 
 _log = logging.getLogger(__file__)
 
@@ -117,6 +122,10 @@ class TestImporter(object):
             _log.info('Done: no changes to import.')
             return 0
 
+        if self._only_wpt_manifest_changed():
+            _log.info('Only WPT_BASE_MANIFEST.json was updated; skipping the import.')
+            return 0
+
         self._commit_changes(commit_message)
         _log.info('Changes imported and committed.')
 
@@ -198,6 +207,7 @@ class TestImporter(object):
             _log.info('CQ appears to have passed; trying to commit.')
             self.git_cl.run(['upload', '-f', '--send-mail'])  # Turn off WIP mode.
             self.git_cl.run(['set-commit'])
+            self.git_cl.wait_for_closed_status()
             _log.info('Update completed.')
             return True
 
@@ -295,7 +305,7 @@ class TestImporter(object):
         # irrelevant and ignored here, because it tests patches *individually*
         # while the importer tries to reapply these patches *cumulatively*.
         commits, _ = exportable_commits_over_last_n_commits(
-            self.host, local_wpt, self.wpt_github, require_clean=False)
+            self.host, local_wpt, self.wpt_github, require_clean=False, verify_merged_pr=True)
         return commits
 
     def _generate_manifest(self):
@@ -333,6 +343,13 @@ class TestImporter(object):
     def _has_changes(self):
         return_code, _ = self.run(['git', 'diff', '--quiet', 'HEAD'], exit_on_failure=False)
         return return_code == 1
+
+    def _only_wpt_manifest_changed(self):
+        changed_files = self.host.git().changed_files()
+        wpt_base_manifest = self.fs.relpath(
+            self.fs.join(self.dest_path, '..', 'WPT_BASE_MANIFEST.json'),
+            self.finder.chromium_base())
+        return changed_files == [wpt_base_manifest]
 
     def _commit_message(self, chromium_commit_sha, import_commit_sha,
                         locally_applied_commits=None):
@@ -415,22 +432,17 @@ class TestImporter(object):
         _log.info('Uploading change list.')
         directory_owners = self.get_directory_owners()
         description = self._cl_description(directory_owners)
+        sheriff_email = self.tbr_reviewer()
         self.git_cl.run([
             'upload',
             '-f',
             '--gerrit',
-            '-m',
-            description,
-            '--tbrs',
-            'qyearsley@chromium.org',
-        ] + self._cc_part(directory_owners))
-
-    @staticmethod
-    def _cc_part(directory_owners):
-        cc_part = []
-        for owner_tuple in sorted(directory_owners):
-            cc_part.extend('--cc=' + owner for owner in owner_tuple)
-        return cc_part
+            '-m', description,
+            '--tbrs', sheriff_email,
+            # Note: we used to CC all the directory owners, but have stopped
+            # in search of a better notification mechanism. (crbug.com/765334)
+            '--cc', 'robertma@chromium.org',
+        ])
 
     def get_directory_owners(self):
         """Returns a mapping of email addresses to owners of changed tests."""
@@ -474,6 +486,34 @@ class TestImporter(object):
             message_lines.append(', '.join(owner_tuple) + ':')
             message_lines.extend('  ' + d for d in directories)
         return '\n'.join(message_lines)
+
+    def tbr_reviewer(self):
+        """Returns the email address to use as the reviewer.
+
+        This tries to fetch the current ecosystem infra sheriff,
+        but falls back in case of error.
+        """
+        username = ''
+        try:
+            username = self._fetch_ecosystem_infra_sheriff_username()
+        except (IOError, KeyError, ValueError) as error:
+            _log.error('Exception while fetching current sheriff: %s', error)
+        if not username:
+            username = 'qyearsley'  # Fallback in case of failure.
+        return username + '@chromium.org'
+
+    def _fetch_ecosystem_infra_sheriff_username(self):
+        content = self.host.web.get_binary(ROTATIONS_URL)
+        data = json.loads(content)
+        today = datetime.date.fromtimestamp(self.host.time()).isoformat()
+        index = data['rotations'].index('ecosystem_infra')
+        calendar = data['calendar']
+        for entry in calendar:
+            if entry['date'] == today:
+                if not entry['participants'][index]:
+                    return ''
+                return entry['participants'][index][0]
+        return ''
 
     def fetch_new_expectations_and_baselines(self):
         """Modifies expectation lines and baselines based on try job results.

@@ -9,12 +9,12 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "content/child/resource_dispatcher.h"
-#include "content/child/web_url_request_util.h"
 #include "content/common/possibly_associated_interface_ptr.h"
-#include "content/public/child/child_url_loader_factory_getter.h"
 #include "content/public/common/resource_request_body.h"
+#include "content/public/renderer/child_url_loader_factory_getter.h"
 #include "content/public/renderer/render_frame.h"
+#include "content/renderer/loader/resource_dispatcher.h"
+#include "content/renderer/loader/web_url_request_util.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
@@ -36,8 +36,9 @@ const char kAccessControlAllowOriginHeader[] = "Access-Control-Allow-Origin";
 namespace content {
 
 // static
-ResourceFetcher* ResourceFetcher::Create(const GURL& url) {
-  return new ResourceFetcherImpl(url);
+std::unique_ptr<ResourceFetcher> ResourceFetcher::Create(const GURL& url) {
+  // Can not use std::make_unique<> because the constructor is private.
+  return std::unique_ptr<ResourceFetcher>(new ResourceFetcherImpl(url));
 }
 
 // TODO(toyoshim): Internal implementation might be replaced with
@@ -65,12 +66,12 @@ class ResourceFetcherImpl::ClientImpl : public mojom::URLLoaderClient {
   void Start(const ResourceRequest& request,
              mojom::URLLoaderFactory* url_loader_factory,
              const net::NetworkTrafficAnnotationTag& annotation_tag,
-             base::SingleThreadTaskRunner* task_runner) {
+             scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
     status_ = Status::kStarted;
     response_.SetURL(request.url);
 
     mojom::URLLoaderClientPtr client;
-    client_binding_.Bind(mojo::MakeRequest(&client), task_runner);
+    client_binding_.Bind(mojo::MakeRequest(&client), std::move(task_runner));
 
     url_loader_factory->CreateLoaderAndStart(
         mojo::MakeRequest(&loader_), kRoutingId,
@@ -313,8 +314,10 @@ void ResourceFetcherImpl::Start(
 
   client_ = base::MakeUnique<ClientImpl>(this, std::move(callback),
                                          maximum_download_size);
+  // TODO(kinuko, toyoshim): This task runner should be given by the consumer
+  // of this class.
   client_->Start(request_, url_loader_factory, annotation_tag,
-                 frame->LoadingTaskRunner());
+                 frame->GetTaskRunner(blink::TaskType::kNetworking));
 
   // No need to hold on to the request; reset it now.
   request_ = ResourceRequest();
@@ -323,15 +326,17 @@ void ResourceFetcherImpl::Start(
 void ResourceFetcherImpl::SetTimeout(const base::TimeDelta& timeout) {
   DCHECK(client_);
   DCHECK(client_->IsActive());
+  DCHECK(!timeout_timer_.IsRunning());
 
-  timeout_timer_.Start(FROM_HERE, timeout, this, &ResourceFetcherImpl::Cancel);
+  timeout_timer_.Start(FROM_HERE, timeout, this,
+                       &ResourceFetcherImpl::OnTimeout);
 }
 
 void ResourceFetcherImpl::OnLoadComplete() {
   timeout_timer_.Stop();
 }
 
-void ResourceFetcherImpl::Cancel() {
+void ResourceFetcherImpl::OnTimeout() {
   DCHECK(client_);
   DCHECK(client_->IsActive());
   client_->Cancel();

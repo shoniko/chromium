@@ -28,6 +28,7 @@
 #include <algorithm>
 #include "core/animation/AnimationClock.h"
 #include "core/animation/DocumentTimeline.h"
+#include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
@@ -525,7 +526,7 @@ void SMILTimeContainer::AdvanceFrameForTesting() {
   SetElapsed(Elapsed() + kInitialFrameDelay);
 }
 
-DEFINE_TRACE(SMILTimeContainer) {
+void SMILTimeContainer::Trace(blink::Visitor* visitor) {
   visitor->Trace(scheduled_animations_);
   visitor->Trace(owner_svg_element_);
 }

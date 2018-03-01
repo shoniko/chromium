@@ -54,9 +54,9 @@ namespace chromeos {
 namespace {
 
 int kLargeWallpaperWidth = 256;
-int kLargeWallpaperHeight = wallpaper::kLargeWallpaperMaxHeight;
+int kLargeWallpaperHeight = chromeos::kLargeWallpaperMaxHeight;
 int kSmallWallpaperWidth = 256;
-int kSmallWallpaperHeight = wallpaper::kSmallWallpaperMaxHeight;
+int kSmallWallpaperHeight = chromeos::kSmallWallpaperMaxHeight;
 
 const char kTestUser1[] = "test1@domain.com";
 const char kTestUser1Hash[] = "test1@domain.com-hash";
@@ -67,9 +67,7 @@ const char kTestUser2Hash[] = "test2@domain.com-hash";
 
 class WallpaperManagerBrowserTest : public InProcessBrowserTest {
  public:
-  WallpaperManagerBrowserTest() : controller_(NULL),
-                                  local_state_(NULL) {
-  }
+  WallpaperManagerBrowserTest() : controller_(NULL), local_state_(NULL) {}
 
   ~WallpaperManagerBrowserTest() override {}
 
@@ -94,8 +92,33 @@ class WallpaperManagerBrowserTest : public InProcessBrowserTest {
         .UpdateDisplay(display_specs);
   }
 
-  void WaitAsyncWallpaperLoadStarted() {
-    base::RunLoop().RunUntilIdle();
+  void WaitAsyncWallpaperLoadStarted() { base::RunLoop().RunUntilIdle(); }
+
+  void WaitUntilCustomWallpapersDeleted(const AccountId& account_id) {
+    WallpaperManager* wallpaper_manager = WallpaperManager::Get();
+    wallpaper::WallpaperFilesId wallpaper_file_id =
+        wallpaper_manager->GetFilesId(account_id);
+
+    base::FilePath small_wallpaper_dir =
+        WallpaperManager::GetCustomWallpaperDir(chromeos::kSmallWallpaperSubDir)
+            .Append(wallpaper_file_id.id());
+    base::FilePath large_wallpaper_dir =
+        WallpaperManager::GetCustomWallpaperDir(chromeos::kLargeWallpaperSubDir)
+            .Append(wallpaper_file_id.id());
+    base::FilePath original_wallpaper_dir =
+        WallpaperManager::GetCustomWallpaperDir(
+            chromeos::kOriginalWallpaperSubDir)
+            .Append(wallpaper_file_id.id());
+    base::FilePath thumbnail_wallpaper_dir =
+        WallpaperManager::GetCustomWallpaperDir(
+            chromeos::kThumbnailWallpaperSubDir)
+            .Append(wallpaper_file_id.id());
+
+    while (base::PathExists(small_wallpaper_dir) ||
+           base::PathExists(large_wallpaper_dir) ||
+           base::PathExists(original_wallpaper_dir) ||
+           base::PathExists(thumbnail_wallpaper_dir)) {
+    }
   }
 
  protected:
@@ -104,7 +127,7 @@ class WallpaperManagerBrowserTest : public InProcessBrowserTest {
       const char* sub_dir,
       const wallpaper::WallpaperFilesId& wallpaper_files_id,
       const std::string& id) {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     base::FilePath wallpaper_path =
         WallpaperManager::Get()->GetCustomWallpaperPath(sub_dir,
                                                         wallpaper_files_id, id);
@@ -116,7 +139,7 @@ class WallpaperManagerBrowserTest : public InProcessBrowserTest {
 
   // Logs in |account_id|.
   void LogIn(const AccountId& account_id, const std::string& user_id_hash) {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     SessionManager::Get()->CreateSession(account_id, user_id_hash);
     SessionManager::Get()->SessionStarted();
     // Flush to ensure the created session and ACTIVE state reaches ash.
@@ -156,7 +179,7 @@ class WallpaperManagerBrowserTest : public InProcessBrowserTest {
   // Only needs to be called (once) by tests that want to test loading of
   // default wallpapers.
   void CreateCmdlineWallpapers() {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     wallpaper_dir_.reset(new base::ScopedTempDir);
     ASSERT_TRUE(wallpaper_dir_->CreateUniqueTempDir());
     wallpaper_manager_test_utils::CreateCmdlineWallpapers(
@@ -191,21 +214,17 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
   LogIn(test_account_id1_, kTestUser1Hash);
   std::string id = base::Int64ToString(base::Time::Now().ToInternalValue());
   base::FilePath small_wallpaper_path = GetCustomWallpaperPath(
-      wallpaper::kSmallWallpaperSubDir, test_account1_wallpaper_files_id_, id);
+      chromeos::kSmallWallpaperSubDir, test_account1_wallpaper_files_id_, id);
   base::FilePath large_wallpaper_path = GetCustomWallpaperPath(
-      wallpaper::kLargeWallpaperSubDir, test_account1_wallpaper_files_id_, id);
+      chromeos::kLargeWallpaperSubDir, test_account1_wallpaper_files_id_, id);
 
   // Saves the small/large resolution wallpapers to small/large custom
   // wallpaper paths.
   ASSERT_TRUE(wallpaper_manager_test_utils::WriteJPEGFile(
-      small_wallpaper_path,
-      kSmallWallpaperWidth,
-      kSmallWallpaperHeight,
+      small_wallpaper_path, kSmallWallpaperWidth, kSmallWallpaperHeight,
       wallpaper_manager_test_utils::kSmallDefaultWallpaperColor));
   ASSERT_TRUE(wallpaper_manager_test_utils::WriteJPEGFile(
-      large_wallpaper_path,
-      kLargeWallpaperWidth,
-      kLargeWallpaperHeight,
+      large_wallpaper_path, kLargeWallpaperWidth, kLargeWallpaperHeight,
       wallpaper_manager_test_utils::kLargeDefaultWallpaperColor));
 
   std::string relative_path =
@@ -282,11 +301,9 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
   // Change wallpaper to a custom wallpaper.
   std::string id = base::Int64ToString(base::Time::Now().ToInternalValue());
   base::FilePath small_wallpaper_path = GetCustomWallpaperPath(
-      wallpaper::kSmallWallpaperSubDir, test_account1_wallpaper_files_id_, id);
+      chromeos::kSmallWallpaperSubDir, test_account1_wallpaper_files_id_, id);
   ASSERT_TRUE(wallpaper_manager_test_utils::WriteJPEGFile(
-      small_wallpaper_path,
-      kSmallWallpaperWidth,
-      kSmallWallpaperHeight,
+      small_wallpaper_path, kSmallWallpaperWidth, kSmallWallpaperHeight,
       wallpaper_manager_test_utils::kSmallDefaultWallpaperColor));
 
   std::string relative_path =
@@ -326,15 +343,13 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
   base::FilePath user_data_dir;
   ASSERT_TRUE(PathService::Get(chrome::DIR_USER_DATA, &user_data_dir));
   ASSERT_TRUE(wallpaper_manager_test_utils::WriteJPEGFile(
-      user_data_dir.Append("123"),
-      wallpaper_manager_test_utils::kWallpaperSize,
+      user_data_dir.Append("123"), wallpaper_manager_test_utils::kWallpaperSize,
       wallpaper_manager_test_utils::kWallpaperSize,
       wallpaper_manager_test_utils::kLargeDefaultWallpaperColor));
   WallpaperManager::Get()->SetUserWallpaperInfo(test_account_id1_, info, true);
 }
 
-IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
-                       UseMigratedWallpaperInfo) {
+IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest, UseMigratedWallpaperInfo) {
   LogIn(test_account_id1_, kTestUser1Hash);
   wallpaper_manager_test_utils::WaitAsyncWallpaperLoadFinished();
   // This test should finish normally. If timeout, it is probably because
@@ -403,8 +418,7 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestNoAnimation,
   base::FilePath user_data_dir;
   ASSERT_TRUE(PathService::Get(chrome::DIR_USER_DATA, &user_data_dir));
   ASSERT_TRUE(wallpaper_manager_test_utils::WriteJPEGFile(
-      user_data_dir.Append("123"),
-      wallpaper_manager_test_utils::kWallpaperSize,
+      user_data_dir.Append("123"), wallpaper_manager_test_utils::kWallpaperSize,
       wallpaper_manager_test_utils::kWallpaperSize,
       wallpaper_manager_test_utils::kLargeDefaultWallpaperColor));
   WallpaperManager::Get()->SetUserWallpaperInfo(test_account_id1_, info, true);
@@ -490,21 +504,17 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestCacheUpdate,
   std::string id = base::Int64ToString(base::Time::Now().ToInternalValue());
   WallpaperManager* wallpaper_manager = WallpaperManager::Get();
   base::FilePath small_wallpaper_path = GetCustomWallpaperPath(
-      wallpaper::kSmallWallpaperSubDir, test_account1_wallpaper_files_id_, id);
+      chromeos::kSmallWallpaperSubDir, test_account1_wallpaper_files_id_, id);
   base::FilePath large_wallpaper_path = GetCustomWallpaperPath(
-      wallpaper::kLargeWallpaperSubDir, test_account1_wallpaper_files_id_, id);
+      chromeos::kLargeWallpaperSubDir, test_account1_wallpaper_files_id_, id);
 
   // Saves the small/large resolution wallpapers to small/large custom
   // wallpaper paths.
   ASSERT_TRUE(wallpaper_manager_test_utils::WriteJPEGFile(
-      small_wallpaper_path,
-      kSmallWallpaperWidth,
-      kSmallWallpaperHeight,
+      small_wallpaper_path, kSmallWallpaperWidth, kSmallWallpaperHeight,
       wallpaper_manager_test_utils::kSmallDefaultWallpaperColor));
   ASSERT_TRUE(wallpaper_manager_test_utils::WriteJPEGFile(
-      large_wallpaper_path,
-      kLargeWallpaperWidth,
-      kLargeWallpaperHeight,
+      large_wallpaper_path, kLargeWallpaperWidth, kLargeWallpaperHeight,
       wallpaper_manager_test_utils::kLargeDefaultWallpaperColor));
 
   std::string relative_path =
@@ -873,7 +883,7 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest, CustomWallpaperLostTest) {
       std::abs((base::Time::Now() - base::Time::Now().LocalMidnight())
                    .InMilliseconds()));
   base::FilePath small_wallpaper_path = GetCustomWallpaperPath(
-      wallpaper::kSmallWallpaperSubDir, test_account2_wallpaper_files_id_, id);
+      chromeos::kSmallWallpaperSubDir, test_account2_wallpaper_files_id_, id);
   ASSERT_TRUE(wallpaper_manager_test_utils::WriteJPEGFile(
       small_wallpaper_path, kSmallWallpaperWidth, kSmallWallpaperHeight,
       wallpaper_manager_test_utils::kCustomWallpaperColor));
@@ -907,6 +917,117 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest, CustomWallpaperLostTest) {
   EXPECT_TRUE(wallpaper_manager_test_utils::ImageIsNearColor(
       controller_->GetWallpaper(),
       wallpaper_manager_test_utils::kCustomWallpaperColor));
+}
+
+// Tests that if a user who has a custom wallpaper is removed from the device,
+// only the directory that contains the user's custom wallpapers gets removed.
+// The other user's custom wallpaper is not affected.
+IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
+                       RemoveUserWithCustomWallpaperTest) {
+  UpdateDisplay("640x480");
+  WallpaperManager* wallpaper_manager = WallpaperManager::Get();
+
+  // Set a custom wallpaper for |test_account_id1_| and verify the wallpaper
+  // exists.
+  LogIn(test_account_id1_, kTestUser1Hash);
+  wallpaper::WallpaperFilesId wallpaper_file_id1 =
+      wallpaper_manager->GetFilesId(test_account_id1_);
+  const std::string id = std::to_string(
+      std::abs((base::Time::Now() - base::Time::Now().LocalMidnight())
+                   .InMilliseconds()));
+  base::FilePath small_wallpaper_path = GetCustomWallpaperPath(
+      chromeos::kSmallWallpaperSubDir, wallpaper_file_id1, id);
+  ASSERT_TRUE(wallpaper_manager_test_utils::WriteJPEGFile(
+      small_wallpaper_path, kSmallWallpaperWidth, kSmallWallpaperHeight,
+      wallpaper_manager_test_utils::kSmallDefaultWallpaperColor));
+  std::string relative_path =
+      base::FilePath(wallpaper_file_id1.id()).Append(id).value();
+  // Saves wallpaper info to local state for user |test_account_id1_|.
+  WallpaperInfo info = {relative_path, WALLPAPER_LAYOUT_CENTER_CROPPED,
+                        wallpaper::CUSTOMIZED,
+                        base::Time::Now().LocalMidnight()};
+  wallpaper_manager->SetUserWallpaperInfo(test_account_id1_, info, true);
+  wallpaper_manager->SetUserWallpaperNow(test_account_id1_);
+  wallpaper_manager_test_utils::WaitAsyncWallpaperLoadFinished();
+  EXPECT_TRUE(base::PathExists(small_wallpaper_path));
+
+  // Now login another user and set a custom wallpaper for it.
+  LogIn(test_account_id2_, kTestUser2Hash);
+  wallpaper::WallpaperFilesId wallpaper_file_id2 =
+      wallpaper_manager->GetFilesId(test_account_id2_);
+  base::FilePath small_wallpaper_path2 = GetCustomWallpaperPath(
+      chromeos::kSmallWallpaperSubDir, wallpaper_file_id2, id);
+  ASSERT_TRUE(wallpaper_manager_test_utils::WriteJPEGFile(
+      small_wallpaper_path2, kSmallWallpaperWidth, kSmallWallpaperHeight,
+      wallpaper_manager_test_utils::kSmallDefaultWallpaperColor));
+  std::string relative_path2 =
+      base::FilePath(wallpaper_file_id2.id()).Append(id).value();
+  // Saves wallpaper info to local state for user |test_account_id2_|.
+  WallpaperInfo info2 = {relative_path2, WALLPAPER_LAYOUT_CENTER_CROPPED,
+                         wallpaper::CUSTOMIZED,
+                         base::Time::Now().LocalMidnight()};
+  wallpaper_manager->SetUserWallpaperInfo(test_account_id2_, info2, true);
+  wallpaper_manager->SetUserWallpaperNow(test_account_id2_);
+  wallpaper_manager_test_utils::WaitAsyncWallpaperLoadFinished();
+  EXPECT_TRUE(base::PathExists(small_wallpaper_path2));
+
+  // Simulate the removal of |test_account_id2_|.
+  wallpaper_manager->RemoveUserWallpaperInfo(test_account_id2_);
+  // Wait until all files under the user's custom_wallpapers directory are
+  // removed.
+  WaitUntilCustomWallpapersDeleted(test_account_id2_);
+
+  // Test that the other user's wallpaper is not affected.
+  EXPECT_TRUE(base::PathExists(small_wallpaper_path));
+}
+
+// Tests that if a user who has a default wallpaper is removed from the device,
+// the other user's custom wallpaper is not affected.
+IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
+                       RemoveUserWithDefaultWallpaperTest) {
+  UpdateDisplay("640x480");
+  WallpaperManager* wallpaper_manager = WallpaperManager::Get();
+
+  // Set a custom wallpaper for |test_account_id1_| and verify the custom
+  // wallpaper exists.
+  LogIn(test_account_id1_, kTestUser1Hash);
+  wallpaper::WallpaperFilesId wallpaper_file_id1 =
+      wallpaper_manager->GetFilesId(test_account_id1_);
+  std::string id = std::to_string(
+      std::abs((base::Time::Now() - base::Time::Now().LocalMidnight())
+                   .InMilliseconds()));
+  base::FilePath small_wallpaper_path = GetCustomWallpaperPath(
+      chromeos::kSmallWallpaperSubDir, wallpaper_file_id1, id);
+  ASSERT_TRUE(wallpaper_manager_test_utils::WriteJPEGFile(
+      small_wallpaper_path, kSmallWallpaperWidth, kSmallWallpaperHeight,
+      wallpaper_manager_test_utils::kSmallDefaultWallpaperColor));
+  std::string relative_path =
+      base::FilePath(wallpaper_file_id1.id()).Append(id).value();
+  // Saves wallpaper info to local state for user |test_account_id1_|.
+  WallpaperInfo info = {relative_path, WALLPAPER_LAYOUT_CENTER_CROPPED,
+                        wallpaper::CUSTOMIZED,
+                        base::Time::Now().LocalMidnight()};
+  wallpaper_manager->SetUserWallpaperInfo(test_account_id1_, info, true);
+  wallpaper_manager->SetUserWallpaperNow(test_account_id1_);
+  wallpaper_manager_test_utils::WaitAsyncWallpaperLoadFinished();
+  EXPECT_TRUE(base::PathExists(small_wallpaper_path));
+
+  // Now login another user and set a default wallpaper.
+  LogIn(test_account_id2_, kTestUser2Hash);
+  wallpaper::WallpaperFilesId wallpaper_file_id2 =
+      wallpaper_manager->GetFilesId(test_account_id2_);
+  WallpaperInfo info2 = {"", WALLPAPER_LAYOUT_CENTER_CROPPED,
+                         wallpaper::DEFAULT, base::Time::Now().LocalMidnight()};
+  wallpaper_manager->SetUserWallpaperInfo(test_account_id2_, info2, true);
+  WallpaperManager::Get()->SetDefaultWallpaperNow(test_account_id2_);
+  wallpaper_manager_test_utils::WaitAsyncWallpaperLoadFinished();
+
+  // Simulate the removal of |test_account_id2_|.
+  wallpaper_manager->RemoveUserWallpaperInfo(test_account_id2_);
+  WaitUntilCustomWallpapersDeleted(test_account_id2_);
+
+  // Test that the other user's wallpaper is not affected.
+  EXPECT_TRUE(base::PathExists(small_wallpaper_path));
 }
 
 }  // namespace chromeos

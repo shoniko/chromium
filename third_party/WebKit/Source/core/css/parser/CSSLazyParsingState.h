@@ -14,7 +14,6 @@
 namespace blink {
 
 class CSSLazyPropertyParserImpl;
-class CSSParserTokenStream;
 
 // This class helps lazy parsing by retaining necessary state. It should not
 // outlive the StyleSheetContents that initiated the parse, as it retains a raw
@@ -35,13 +34,10 @@ class CSSLazyParsingState
 
   const CSSParserContext* Context();
   const String& SheetText() const { return sheet_text_; }
-
   void CountRuleParsed();
+  bool ShouldLazilyParseProperties(const CSSSelectorList&) const;
 
-  bool ShouldLazilyParseProperties(const CSSSelectorList&,
-                                   const CSSParserTokenStream& block) const;
-
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   // Exposed for tests. This enum is used to back a histogram, so new values
   // must be appended to the end, before UsageLastValue.

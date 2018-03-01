@@ -29,7 +29,9 @@
  */
 
 #include "platform/image-decoders/FastSharedBufferReader.h"
+#include "platform/image-decoders/ImageDecoderTestHelpers.h"
 #include "platform/image-decoders/SegmentReader.h"
+#include "third_party/skia/include/core/SkData.h"
 #include "third_party/skia/include/core/SkRWBuffer.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
@@ -38,17 +40,9 @@ namespace blink {
 
 namespace {
 
-const unsigned kDefaultTestSize = 4 * SharedBuffer::kSegmentSize;
-
-void PrepareReferenceData(char* buffer, size_t size) {
-  for (size_t i = 0; i < size; ++i)
-    buffer[i] = static_cast<char>(i);
-}
-
-PassRefPtr<SegmentReader> CopyToROBufferSegmentReader(
-    PassRefPtr<SegmentReader> input) {
+RefPtr<SegmentReader> CopyToROBufferSegmentReader(RefPtr<SegmentReader> input) {
   SkRWBuffer rw_buffer;
-  const char* segment = 0;
+  const char* segment = nullptr;
   size_t position = 0;
   while (size_t length = input->GetSomeData(segment, position)) {
     rw_buffer.append(segment, length);
@@ -57,15 +51,14 @@ PassRefPtr<SegmentReader> CopyToROBufferSegmentReader(
   return SegmentReader::CreateFromSkROBuffer(rw_buffer.makeROBufferSnapshot());
 }
 
-PassRefPtr<SegmentReader> CopyToDataSegmentReader(
-    PassRefPtr<SegmentReader> input) {
+RefPtr<SegmentReader> CopyToDataSegmentReader(RefPtr<SegmentReader> input) {
   return SegmentReader::CreateFromSkData(input->GetAsSkData());
 }
 
 struct SegmentReaders {
   RefPtr<SegmentReader> segment_readers[3];
 
-  SegmentReaders(PassRefPtr<SharedBuffer> input) {
+  SegmentReaders(RefPtr<SharedBuffer> input) {
     segment_readers[0] =
         SegmentReader::CreateFromSharedBuffer(std::move(input));
     segment_readers[1] = CopyToROBufferSegmentReader(segment_readers[0]);

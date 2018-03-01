@@ -57,8 +57,8 @@ class CORE_EXPORT DocumentLoadTiming final {
     has_cross_origin_redirect_ = value;
   }
 
-  void MarkUnloadEventStart();
-  void MarkUnloadEventEnd();
+  void MarkUnloadEventStart(double);
+  void MarkUnloadEventEnd(double);
 
   void MarkFetchStart();
   void SetFetchStart(double);
@@ -89,7 +89,7 @@ class CORE_EXPORT DocumentLoadTiming final {
 
   double ReferenceMonotonicTime() const { return reference_monotonic_time_; }
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   void MarkRedirectEnd();

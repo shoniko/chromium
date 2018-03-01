@@ -180,7 +180,9 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
     QuickView,
     FileManagerBrowserTest,
     ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "openQuickView"),
-                      TestParameter(NOT_IN_GUEST_MODE, "closeQuickView")));
+                      TestParameter(NOT_IN_GUEST_MODE, "closeQuickView"),
+                      TestParameter(NOT_IN_GUEST_MODE,
+                                    "openQuickViewForFoldersAfterClose")));
 
 #if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_DirectoryTreeContextMenu DISABLED_DirectoryTreeContextMenu
@@ -624,7 +626,7 @@ class MultiProfileFileManagerBrowserTest : public FileManagerBrowserTestBase {
 
   // Adds a new user for testing to the current session.
   void AddUser(const TestAccountInfo& info, bool log_in) {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     const AccountId account_id(AccountId::FromUserEmail(info.email));
     if (log_in) {
       session_manager::SessionManager::Get()->CreateSession(account_id,

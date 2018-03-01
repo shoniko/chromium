@@ -36,7 +36,6 @@
 #include "bindings/core/v8/V8BindingForCore.h"
 #include "bindings/core/v8/V8Element.h"
 #include "build/build_config.h"
-#include "core/HTMLNames.h"
 #include "core/clipboard/DataObject.h"
 #include "core/clipboard/DataTransfer.h"
 #include "core/dom/ExecutionContext.h"
@@ -59,8 +58,9 @@
 #include "core/frame/WebLocalFrameImpl.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/fullscreen/Fullscreen.h"
-#include "core/html/HTMLFormElement.h"
 #include "core/html/HTMLPlugInElement.h"
+#include "core/html/forms/HTMLFormElement.h"
+#include "core/html_names.h"
 #include "core/input/EventHandler.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutBox.h"
@@ -72,16 +72,16 @@
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
-#include "core/paint/LayoutObjectDrawingRecorder.h"
 #include "core/paint/PaintLayer.h"
 #include "platform/KeyboardCodes.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/exported/WrappedResourceResponse.h"
 #include "platform/geometry/LayoutRect.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/paint/CullRect.h"
+#include "platform/graphics/paint/DrawingRecorder.h"
 #include "platform/graphics/paint/ForeignLayerDisplayItem.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/scroll/ScrollAnimatorBase.h"
 #include "platform/scroll/ScrollbarTheme.h"
 #include "platform/wtf/Assertions.h"
@@ -146,6 +146,7 @@ void WebPluginContainerImpl::SetFrameRect(const IntRect& frame_rect) {
 }
 
 void WebPluginContainerImpl::Paint(GraphicsContext& context,
+                                   const GlobalPaintFlags,
                                    const CullRect& cull_rect) const {
   // Don't paint anything if the plugin doesn't intersect.
   if (!cull_rect.IntersectsCullRect(frame_rect_))
@@ -160,13 +161,12 @@ void WebPluginContainerImpl::Paint(GraphicsContext& context,
     return;
   }
 
-  if (LayoutObjectDrawingRecorder::UseCachedDrawingIfPossible(
-          context, *element_->GetLayoutObject(), DisplayItem::Type::kWebPlugin))
+  if (DrawingRecorder::UseCachedDrawingIfPossible(
+          context, *element_->GetLayoutObject(), DisplayItem::kWebPlugin))
     return;
 
-  LayoutObjectDrawingRecorder drawing_recorder(
-      context, *element_->GetLayoutObject(), DisplayItem::Type::kWebPlugin,
-      cull_rect.rect_);
+  DrawingRecorder recorder(context, *element_->GetLayoutObject(),
+                           DisplayItem::kWebPlugin, cull_rect.rect_);
   context.Save();
 
   // The plugin is positioned in the root frame's coordinates, so it needs to
@@ -203,9 +203,7 @@ void WebPluginContainerImpl::InvalidateRect(const IntRect& rect) {
       (layout_object->BorderLeft() + layout_object->PaddingLeft()).ToInt(),
       (layout_object->BorderTop() + layout_object->PaddingTop()).ToInt());
 
-  pending_invalidation_rect_.Unite(dirty_rect);
-
-  layout_object->SetMayNeedPaintInvalidation();
+  layout_object->InvalidatePaintRectangle(LayoutRect(dirty_rect));
 }
 
 void WebPluginContainerImpl::SetFocused(bool focused, WebFocusType focus_type) {
@@ -358,13 +356,12 @@ int WebPluginContainerImpl::PrintBegin(
 void WebPluginContainerImpl::PrintPage(int page_number,
                                        GraphicsContext& gc,
                                        const IntRect& print_rect) {
-  if (LayoutObjectDrawingRecorder::UseCachedDrawingIfPossible(
-          gc, *element_->GetLayoutObject(), DisplayItem::Type::kWebPlugin))
+  if (DrawingRecorder::UseCachedDrawingIfPossible(
+          gc, *element_->GetLayoutObject(), DisplayItem::kWebPlugin))
     return;
 
-  LayoutObjectDrawingRecorder drawing_recorder(gc, *element_->GetLayoutObject(),
-                                               DisplayItem::Type::kWebPlugin,
-                                               print_rect);
+  DrawingRecorder recorder(gc, *element_->GetLayoutObject(),
+                           DisplayItem::kWebPlugin, print_rect);
   gc.Save();
 
   WebCanvas* canvas = gc.Canvas();
@@ -508,7 +505,7 @@ WebString WebPluginContainerImpl::ExecuteScriptURL(const WebURL& url,
   std::unique_ptr<UserGestureIndicator> gesture_indicator;
   if (popups_allowed) {
     gesture_indicator =
-        LocalFrame::CreateUserGesture(frame, UserGestureToken::kNewGesture);
+        Frame::NotifyUserActivation(frame, UserGestureToken::kNewGesture);
   }
 
   v8::HandleScope handle_scope(ToIsolate(frame));
@@ -546,8 +543,8 @@ bool WebPluginContainerImpl::IsRectTopmost(const WebRect& rect) {
   if (!frame)
     return false;
 
-  IntRect document_rect(frame_rect_.X() + rect.x, frame_rect_.Y() + rect.y,
-                        rect.width, rect.height);
+  LayoutRect document_rect(frame_rect_.X() + rect.x, frame_rect_.Y() + rect.y,
+                           rect.width, rect.height);
   // hitTestResultAtPoint() takes a padding rectangle.
   // FIXME: We'll be off by 1 when the width or height is even.
   LayoutPoint center = document_rect.Center();
@@ -748,7 +745,7 @@ void WebPluginContainerImpl::Dispose() {
   }
 }
 
-DEFINE_TRACE(WebPluginContainerImpl) {
+void WebPluginContainerImpl::Trace(blink::Visitor* visitor) {
   visitor->Trace(element_);
   ContextClient::Trace(visitor);
   PluginView::Trace(visitor);
@@ -821,9 +818,8 @@ void WebPluginContainerImpl::HandleWheelEvent(WheelEvent* event) {
   // Translate the root frame position to content coordinates.
   absolute_location = ParentFrameView().RootFrameToContents(absolute_location);
 
-  IntPoint local_point =
-      RoundedIntPoint(element_->GetLayoutObject()->AbsoluteToLocal(
-          absolute_location, kUseTransforms));
+  FloatPoint local_point = element_->GetLayoutObject()->AbsoluteToLocal(
+      absolute_location, kUseTransforms);
   WebMouseWheelEvent translated_event = event->NativeEvent().FlattenTransform();
   translated_event.SetPositionInWidget(local_point.X(), local_point.Y());
 
@@ -1012,19 +1008,6 @@ void WebPluginContainerImpl::FocusPlugin() {
   LocalFrame* frame = element_->GetDocument().GetFrame();
   DCHECK(is_attached_ && frame && frame->GetPage());
   frame->GetPage()->GetFocusController().SetFocusedElement(element_, frame);
-}
-
-void WebPluginContainerImpl::IssuePaintInvalidations() {
-  if (pending_invalidation_rect_.IsEmpty())
-    return;
-
-  LayoutBox* layout_object = ToLayoutBox(element_->GetLayoutObject());
-  if (!layout_object)
-    return;
-
-  layout_object->InvalidatePaintRectangle(
-      LayoutRect(pending_invalidation_rect_));
-  pending_invalidation_rect_ = IntRect();
 }
 
 void WebPluginContainerImpl::ComputeClipRectsForPlugin(

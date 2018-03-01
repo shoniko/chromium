@@ -38,15 +38,19 @@
 #include "core/plugins/PluginView.h"
 #include "platform/heap/HeapAllocator.h"
 #include "platform/weborigin/SecurityOrigin.h"
-#include "public/platform/WebCachePolicy.h"
+#include "public/platform/modules/fetch/fetch_api_request.mojom-shared.h"
 
 namespace blink {
 
-using PluginSet = HeapHashSet<Member<PluginView>>;
-static PluginSet& PluginsPendingDispose() {
-  DEFINE_STATIC_LOCAL(PluginSet, set, (new PluginSet));
+namespace {
+
+using PluginSet = PersistentHeapHashSet<Member<PluginView>>;
+PluginSet& PluginsPendingDispose() {
+  DEFINE_STATIC_LOCAL(PluginSet, set, ());
   return set;
 }
+
+}  // namespace
 
 SubframeLoadingDisabler::SubtreeRootSet&
 SubframeLoadingDisabler::DisabledSubtreeRoots() {
@@ -54,26 +58,19 @@ SubframeLoadingDisabler::DisabledSubtreeRoots() {
   return nodes;
 }
 
-static unsigned g_plugin_dispose_suspend_count = 0;
-
-HTMLFrameOwnerElement::PluginDisposeSuspendScope::PluginDisposeSuspendScope() {
-  ++g_plugin_dispose_suspend_count;
-}
+// static
+int HTMLFrameOwnerElement::PluginDisposeSuspendScope::suspend_count_ = 0;
 
 void HTMLFrameOwnerElement::PluginDisposeSuspendScope::
     PerformDeferredPluginDispose() {
+  DCHECK_EQ(suspend_count_, 1);
+  suspend_count_ = 0;
+
   PluginSet dispose_set;
   PluginsPendingDispose().swap(dispose_set);
   for (const auto& plugin : dispose_set) {
     plugin->Dispose();
   }
-}
-
-HTMLFrameOwnerElement::PluginDisposeSuspendScope::~PluginDisposeSuspendScope() {
-  DCHECK_GT(g_plugin_dispose_suspend_count, 0u);
-  if (g_plugin_dispose_suspend_count == 1)
-    PerformDeferredPluginDispose();
-  --g_plugin_dispose_suspend_count;
 }
 
 HTMLFrameOwnerElement::HTMLFrameOwnerElement(const QualifiedName& tag_name,
@@ -133,11 +130,11 @@ HTMLFrameOwnerElement::~HTMLFrameOwnerElement() {
 Document* HTMLFrameOwnerElement::contentDocument() const {
   return (content_frame_ && content_frame_->IsLocalFrame())
              ? ToLocalFrame(content_frame_)->GetDocument()
-             : 0;
+             : nullptr;
 }
 
 DOMWindow* HTMLFrameOwnerElement::contentWindow() const {
-  return content_frame_ ? content_frame_->DomWindow() : 0;
+  return content_frame_ ? content_frame_->DomWindow() : nullptr;
 }
 
 void HTMLFrameOwnerElement::SetSandboxFlags(SandboxFlags flags) {
@@ -159,9 +156,10 @@ bool HTMLFrameOwnerElement::IsKeyboardFocusable() const {
 }
 
 void HTMLFrameOwnerElement::DisposePluginSoon(PluginView* plugin) {
-  if (g_plugin_dispose_suspend_count)
+  if (PluginDisposeSuspendScope::suspend_count_) {
     PluginsPendingDispose().insert(plugin);
-  else
+    PluginDisposeSuspendScope::suspend_count_ |= 1;
+  } else
     plugin->Dispose();
 }
 
@@ -304,7 +302,7 @@ bool HTMLFrameOwnerElement::LoadOrRedirectSubframe(
       GetDocument().Loader()->LoadType() ==
           kFrameLoadTypeReloadBypassingCache) {
     child_load_type = kFrameLoadTypeReloadBypassingCache;
-    request.SetCachePolicy(WebCachePolicy::kBypassingCache);
+    request.SetCacheMode(mojom::FetchCacheMode::kBypassCache);
   }
 
   child_frame->Loader().Load(FrameLoadRequest(&GetDocument(), request),
@@ -312,7 +310,7 @@ bool HTMLFrameOwnerElement::LoadOrRedirectSubframe(
   return true;
 }
 
-DEFINE_TRACE(HTMLFrameOwnerElement) {
+void HTMLFrameOwnerElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(content_frame_);
   visitor->Trace(embedded_content_view_);
   HTMLElement::Trace(visitor);

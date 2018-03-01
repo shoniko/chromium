@@ -95,6 +95,7 @@ Document* XSLTProcessor::CreateDocumentFromSource(
       DocumentXSLT::From(*result).SetTransformSourceDocument(old_document);
       result->UpdateSecurityOrigin(old_document->GetSecurityOrigin());
       result->SetCookieURL(old_document->CookieURL());
+      result->EnforceSandboxFlags(old_document->GetSandboxFlags());
 
       ContentSecurityPolicy* csp = ContentSecurityPolicy::Create();
       csp->CopyStateFrom(old_document->GetContentSecurityPolicy());
@@ -170,10 +171,11 @@ void XSLTProcessor::reset() {
   parameters_.clear();
 }
 
-DEFINE_TRACE(XSLTProcessor) {
+void XSLTProcessor::Trace(blink::Visitor* visitor) {
   visitor->Trace(stylesheet_);
   visitor->Trace(stylesheet_root_node_);
   visitor->Trace(document_);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

@@ -200,7 +200,7 @@ class SessionManagerClientImpl : public SessionManagerClient {
     writer.AppendArrayOfStrings(argv);
     session_manager_proxy_->CallMethod(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
-        base::BindOnce(&SessionManagerClientImpl::OnRestartJob,
+        base::BindOnce(&SessionManagerClientImpl::OnVoidMethod,
                        weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
   }
 
@@ -265,7 +265,7 @@ class SessionManagerClientImpl : public SessionManagerClient {
         login_manager::kSessionManagerHandleSupervisedUserCreationFinished);
   }
 
-  void RetrieveActiveSessions(const ActiveSessionsCallback& callback) override {
+  void RetrieveActiveSessions(ActiveSessionsCallback callback) override {
     dbus::MethodCall method_call(
         login_manager::kSessionManagerInterface,
         login_manager::kSessionManagerRetrieveActiveSessions);
@@ -275,7 +275,7 @@ class SessionManagerClientImpl : public SessionManagerClient {
         base::BindOnce(&SessionManagerClientImpl::OnRetrieveActiveSessions,
                        weak_ptr_factory_.GetWeakPtr(),
                        login_manager::kSessionManagerRetrieveActiveSessions,
-                       callback));
+                       std::move(callback)));
   }
 
   void RetrieveDevicePolicy(const RetrievePolicyCallback& callback) override {
@@ -362,7 +362,7 @@ class SessionManagerClientImpl : public SessionManagerClient {
   }
 
   void StoreDevicePolicy(const std::string& policy_blob,
-                         const StorePolicyCallback& callback) override {
+                         VoidDBusMethodCallback callback) override {
     dbus::MethodCall method_call(login_manager::kSessionManagerInterface,
                                  login_manager::kSessionManagerStorePolicy);
     dbus::MessageWriter writer(&method_call);
@@ -372,26 +372,24 @@ class SessionManagerClientImpl : public SessionManagerClient {
         policy_blob.size());
     session_manager_proxy_->CallMethod(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
-        base::BindOnce(&SessionManagerClientImpl::OnNoOutputParamResponse,
-                       weak_ptr_factory_.GetWeakPtr(), callback));
+        base::BindOnce(&SessionManagerClientImpl::OnVoidMethod,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
   }
 
   void StorePolicyForUser(const cryptohome::Identification& cryptohome_id,
                           const std::string& policy_blob,
-                          const StorePolicyCallback& callback) override {
+                          VoidDBusMethodCallback callback) override {
     CallStorePolicyByUsername(login_manager::kSessionManagerStorePolicyForUser,
-                              cryptohome_id.id(), policy_blob, callback);
+                              cryptohome_id.id(), policy_blob,
+                              std::move(callback));
   }
 
-  void StoreDeviceLocalAccountPolicy(
-      const std::string& account_name,
-      const std::string& policy_blob,
-      const StorePolicyCallback& callback) override {
+  void StoreDeviceLocalAccountPolicy(const std::string& account_name,
+                                     const std::string& policy_blob,
+                                     VoidDBusMethodCallback callback) override {
     CallStorePolicyByUsername(
         login_manager::kSessionManagerStoreDeviceLocalAccountPolicy,
-        account_name,
-        policy_blob,
-        callback);
+        account_name, policy_blob, std::move(callback));
   }
 
   bool SupportsRestartToApplyUserFlags() const override { return true; }
@@ -426,23 +424,14 @@ class SessionManagerClientImpl : public SessionManagerClient {
                        weak_ptr_factory_.GetWeakPtr(), callback));
   }
 
-  void CheckArcAvailability(const ArcCallback& callback) override {
-    dbus::MethodCall method_call(
-        login_manager::kSessionManagerInterface,
-        login_manager::kSessionManagerCheckArcAvailability);
-
-    session_manager_proxy_->CallMethod(
-        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
-        base::BindOnce(&SessionManagerClientImpl::OnCheckArcAvailability,
-                       weak_ptr_factory_.GetWeakPtr(), callback));
-  }
-
   void StartArcInstance(ArcStartupMode startup_mode,
                         const cryptohome::Identification& cryptohome_id,
                         bool skip_boot_completed_broadcast,
                         bool scan_vendor_priv_app,
                         bool native_bridge_experiment,
-                        const StartArcInstanceCallback& callback) override {
+                        StartArcInstanceCallback callback) override {
+    DCHECK(!callback.is_null());
+
     dbus::MethodCall method_call(
         login_manager::kSessionManagerInterface,
         login_manager::kSessionManagerStartArcInstance);
@@ -463,26 +452,24 @@ class SessionManagerClientImpl : public SessionManagerClient {
     }
     writer.AppendProtoAsArrayOfBytes(request);
 
-    session_manager_proxy_->CallMethodWithErrorCallback(
+    session_manager_proxy_->CallMethodWithErrorResponse(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
-        base::BindOnce(&SessionManagerClientImpl::OnStartArcInstanceSucceeded,
-                       weak_ptr_factory_.GetWeakPtr(), callback),
-        base::BindOnce(&SessionManagerClientImpl::OnStartArcInstanceFailed,
-                       weak_ptr_factory_.GetWeakPtr(), callback));
+        base::BindOnce(&SessionManagerClientImpl::OnStartArcInstance,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
   }
 
-  void StopArcInstance(const ArcCallback& callback) override {
+  void StopArcInstance(VoidDBusMethodCallback callback) override {
     dbus::MethodCall method_call(login_manager::kSessionManagerInterface,
                                  login_manager::kSessionManagerStopArcInstance);
     session_manager_proxy_->CallMethod(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
-        base::BindOnce(&SessionManagerClientImpl::OnNoOutputParamResponse,
-                       weak_ptr_factory_.GetWeakPtr(), callback));
+        base::BindOnce(&SessionManagerClientImpl::OnVoidMethod,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
   }
 
   void SetArcCpuRestriction(
       login_manager::ContainerCpuRestrictionState restriction_state,
-      const ArcCallback& callback) override {
+      VoidDBusMethodCallback callback) override {
     dbus::MethodCall method_call(
         login_manager::kSessionManagerInterface,
         login_manager::kSessionManagerSetArcCpuRestriction);
@@ -490,23 +477,23 @@ class SessionManagerClientImpl : public SessionManagerClient {
     writer.AppendUint32(restriction_state);
     session_manager_proxy_->CallMethod(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
-        base::BindOnce(&SessionManagerClientImpl::OnNoOutputParamResponse,
-                       weak_ptr_factory_.GetWeakPtr(), callback));
+        base::BindOnce(&SessionManagerClientImpl::OnVoidMethod,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
   }
 
   void EmitArcBooted(const cryptohome::Identification& cryptohome_id,
-                     const ArcCallback& callback) override {
+                     VoidDBusMethodCallback callback) override {
     dbus::MethodCall method_call(login_manager::kSessionManagerInterface,
                                  login_manager::kSessionManagerEmitArcBooted);
     dbus::MessageWriter writer(&method_call);
     writer.AppendString(cryptohome_id.id());
     session_manager_proxy_->CallMethod(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
-        base::BindOnce(&SessionManagerClientImpl::OnNoOutputParamResponse,
-                       weak_ptr_factory_.GetWeakPtr(), callback));
+        base::BindOnce(&SessionManagerClientImpl::OnVoidMethod,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
   }
 
-  void GetArcStartTime(const GetArcStartTimeCallback& callback) override {
+  void GetArcStartTime(DBusMethodCallback<base::TimeTicks> callback) override {
     dbus::MethodCall method_call(
         login_manager::kSessionManagerInterface,
         login_manager::kSessionManagerGetArcStartTimeTicks);
@@ -514,19 +501,19 @@ class SessionManagerClientImpl : public SessionManagerClient {
     session_manager_proxy_->CallMethod(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
         base::BindOnce(&SessionManagerClientImpl::OnGetArcStartTime,
-                       weak_ptr_factory_.GetWeakPtr(), callback));
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
   }
 
   void RemoveArcData(const cryptohome::Identification& cryptohome_id,
-                     const ArcCallback& callback) override {
+                     VoidDBusMethodCallback callback) override {
     dbus::MethodCall method_call(login_manager::kSessionManagerInterface,
                                  login_manager::kSessionManagerRemoveArcData);
     dbus::MessageWriter writer(&method_call);
     writer.AppendString(cryptohome_id.id());
     session_manager_proxy_->CallMethod(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
-        base::BindOnce(&SessionManagerClientImpl::OnNoOutputParamResponse,
-                       weak_ptr_factory_.GetWeakPtr(), callback));
+        base::BindOnce(&SessionManagerClientImpl::OnVoidMethod,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
   }
 
  protected:
@@ -587,13 +574,9 @@ class SessionManagerClientImpl : public SessionManagerClient {
         dbus::ObjectProxy::EmptyResponseCallback());
   }
 
-  // Calls given callback (if non-null), with the |success| boolean
-  // representing the dbus call was successful or not.
-  void OnNoOutputParamResponse(
-      const base::Callback<void(bool success)>& callback,
-      dbus::Response* response) {
-    if (!callback.is_null())
-      callback.Run(response != nullptr);
+  // Called when the method call without result is completed.
+  void OnVoidMethod(VoidDBusMethodCallback callback, dbus::Response* response) {
+    std::move(callback).Run(response);
   }
 
   // Helper for RetrieveDeviceLocalAccountPolicy and RetrievePolicyForUser.
@@ -642,7 +625,7 @@ class SessionManagerClientImpl : public SessionManagerClient {
   void CallStorePolicyByUsername(const std::string& method_name,
                                  const std::string& account_id,
                                  const std::string& policy_blob,
-                                 const StorePolicyCallback& callback) {
+                                 VoidDBusMethodCallback callback) {
     dbus::MethodCall method_call(login_manager::kSessionManagerInterface,
                                  method_name);
     dbus::MessageWriter writer(&method_call);
@@ -653,53 +636,43 @@ class SessionManagerClientImpl : public SessionManagerClient {
         policy_blob.size());
     session_manager_proxy_->CallMethod(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
-        base::BindOnce(&SessionManagerClientImpl::OnNoOutputParamResponse,
-                       weak_ptr_factory_.GetWeakPtr(), callback));
-  }
-
-  // Called when kSessionManagerRestartJob method is complete.
-  void OnRestartJob(VoidDBusMethodCallback callback, dbus::Response* response) {
-    LOG_IF(ERROR, !response)
-        << "Failed to call "
-        << login_manager::kSessionManagerRestartJob;
-    std::move(callback).Run(response ? DBUS_METHOD_CALL_SUCCESS
-                                     : DBUS_METHOD_CALL_FAILURE);
+        base::BindOnce(&SessionManagerClientImpl::OnVoidMethod,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
   }
 
   // Called when kSessionManagerRetrieveActiveSessions method is complete.
   void OnRetrieveActiveSessions(const std::string& method_name,
-                                const ActiveSessionsCallback& callback,
+                                ActiveSessionsCallback callback,
                                 dbus::Response* response) {
-    ActiveSessionsMap sessions;
-    bool success = false;
     if (!response) {
-      callback.Run(sessions, success);
+      std::move(callback).Run(base::nullopt);
       return;
     }
 
     dbus::MessageReader reader(response);
     dbus::MessageReader array_reader(nullptr);
-
     if (!reader.PopArray(&array_reader)) {
       LOG(ERROR) << method_name << " response is incorrect: "
                  << response->ToString();
-    } else {
-      while (array_reader.HasMoreData()) {
-        dbus::MessageReader dict_entry_reader(nullptr);
-        std::string key;
-        std::string value;
-        if (!array_reader.PopDictEntry(&dict_entry_reader) ||
-            !dict_entry_reader.PopString(&key) ||
-            !dict_entry_reader.PopString(&value)) {
-          LOG(ERROR) << method_name << " response is incorrect: "
-                     << response->ToString();
-        } else {
-          sessions[cryptohome::Identification::FromString(key)] = value;
-        }
-      }
-      success = true;
+      std::move(callback).Run(base::nullopt);
+      return;
     }
-    callback.Run(sessions, success);
+
+    ActiveSessionsMap sessions;
+    while (array_reader.HasMoreData()) {
+      dbus::MessageReader dict_entry_reader(nullptr);
+      std::string key;
+      std::string value;
+      if (!array_reader.PopDictEntry(&dict_entry_reader) ||
+          !dict_entry_reader.PopString(&key) ||
+          !dict_entry_reader.PopString(&value)) {
+        LOG(ERROR) << method_name
+                   << " response is incorrect: " << response->ToString();
+      } else {
+        sessions[cryptohome::Identification::FromString(key)] = value;
+      }
+    }
+    std::move(callback).Run(std::move(sessions));
   }
 
   void ExtractString(const std::string& method_name,
@@ -831,70 +804,52 @@ class SessionManagerClientImpl : public SessionManagerClient {
       callback.Run(state_keys);
   }
 
-  // Called when kSessionManagerCheckArcAvailability method is complete.
-  void OnCheckArcAvailability(const ArcCallback& callback,
-                              dbus::Response* response) {
-    bool available = false;
-    if (response) {
-      dbus::MessageReader reader(response);
-      if (!reader.PopBool(&available))
-        LOG(ERROR) << "Invalid response: " << response->ToString();
-    }
-    if (!callback.is_null())
-      callback.Run(available);
-  }
-
-  void OnGetArcStartTime(const GetArcStartTimeCallback& callback,
+  void OnGetArcStartTime(DBusMethodCallback<base::TimeTicks> callback,
                          dbus::Response* response) {
-    bool success = false;
-    base::TimeTicks arc_start_time;
-    if (response) {
-      dbus::MessageReader reader(response);
-      int64_t ticks = 0;
-      if (reader.PopInt64(&ticks)) {
-        success = true;
-        arc_start_time = base::TimeTicks::FromInternalValue(ticks);
-      } else {
-        LOG(ERROR) << "Invalid response: " << response->ToString();
-      }
-    }
-    callback.Run(success, arc_start_time);
-  }
-
-  void OnStartArcInstanceSucceeded(const StartArcInstanceCallback& callback,
-                                   dbus::Response* response) {
-    DCHECK(response);
-    dbus::MessageReader reader(response);
-    std::string container_instance_id;
-    base::ScopedFD server_socket;
-
-    if (!reader.PopString(&container_instance_id) ||
-        !reader.PopFileDescriptor(&server_socket)) {
-      LOG(ERROR) << "Invalid response: " << response->ToString();
-      if (!callback.is_null()) {
-        callback.Run(StartArcInstanceResult::UNKNOWN_ERROR, std::string(),
-                     base::ScopedFD());
-      }
+    if (!response) {
+      std::move(callback).Run(base::nullopt);
       return;
     }
 
-    if (!callback.is_null()) {
-      callback.Run(StartArcInstanceResult::SUCCESS, container_instance_id,
-                   std::move(server_socket));
+    dbus::MessageReader reader(response);
+    int64_t ticks = 0;
+    if (!reader.PopInt64(&ticks)) {
+      LOG(ERROR) << "Invalid response: " << response->ToString();
+      std::move(callback).Run(base::nullopt);
+      return;
     }
+
+    std::move(callback).Run(base::TimeTicks::FromInternalValue(ticks));
   }
 
-  void OnStartArcInstanceFailed(const StartArcInstanceCallback& callback,
-                                dbus::ErrorResponse* response) {
-    LOG(ERROR) << "Failed to call StartArcInstance: "
-               << (response ? response->ToString() : "(null)");
-    if (!callback.is_null()) {
-      callback.Run(response && response->GetErrorName() ==
-                                   login_manager::dbus_error::kLowFreeDisk
-                       ? StartArcInstanceResult::LOW_FREE_DISK_SPACE
-                       : StartArcInstanceResult::UNKNOWN_ERROR,
-                   std::string(), base::ScopedFD());
+  void OnStartArcInstance(StartArcInstanceCallback callback,
+                          dbus::Response* response,
+                          dbus::ErrorResponse* error) {
+    if (!response) {
+      LOG(ERROR) << "Failed to call StartArcInstance: "
+                 << (error ? error->ToString() : "(null)");
+      std::move(callback).Run(
+          error && error->GetErrorName() ==
+                       login_manager::dbus_error::kLowFreeDisk
+              ? StartArcInstanceResult::LOW_FREE_DISK_SPACE
+              : StartArcInstanceResult::UNKNOWN_ERROR,
+          std::string(), base::ScopedFD());
+      return;
     }
+
+    dbus::MessageReader reader(response);
+    std::string container_instance_id;
+    base::ScopedFD server_socket;
+    if (!reader.PopString(&container_instance_id) ||
+        !reader.PopFileDescriptor(&server_socket)) {
+      LOG(ERROR) << "Invalid response: " << response->ToString();
+      std::move(callback).Run(StartArcInstanceResult::UNKNOWN_ERROR,
+                              std::string(), base::ScopedFD());
+      return;
+    }
+
+    std::move(callback).Run(StartArcInstanceResult::SUCCESS,
+                            container_instance_id, std::move(server_socket));
   }
 
   dbus::ObjectProxy* session_manager_proxy_ = nullptr;
@@ -957,8 +912,7 @@ class SessionManagerClientStubImpl : public SessionManagerClient {
     for (auto& observer : observers_)
       observer.ScreenIsUnlocked();
   }
-  void RetrieveActiveSessions(const ActiveSessionsCallback& callback) override {
-  }
+  void RetrieveActiveSessions(ActiveSessionsCallback callback) override {}
   void RetrieveDevicePolicy(const RetrievePolicyCallback& callback) override {
     base::FilePath owner_key_path;
     if (!PathService::Get(chromeos::FILE_OWNER_KEY, &owner_key_path)) {
@@ -1019,12 +973,12 @@ class SessionManagerClientStubImpl : public SessionManagerClient {
         cryptohome::Identification::FromString(account_id), policy_out);
   }
   void StoreDevicePolicy(const std::string& policy_blob,
-                         const StorePolicyCallback& callback) override {
+                         VoidDBusMethodCallback callback) override {
     enterprise_management::PolicyFetchResponse response;
     base::FilePath owner_key_path;
     if (!response.ParseFromString(policy_blob) ||
         !PathService::Get(chromeos::FILE_OWNER_KEY, &owner_key_path)) {
-      callback.Run(false);
+      std::move(callback).Run(false);
       return;
     }
 
@@ -1032,7 +986,8 @@ class SessionManagerClientStubImpl : public SessionManagerClient {
       base::PostTaskWithTraits(
           FROM_HERE,
           {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
-          base::Bind(&StoreFile, owner_key_path, response.new_public_key()));
+          base::BindOnce(&StoreFile, owner_key_path,
+                         response.new_public_key()));
     }
 
     // Chrome will attempt to retrieve the device policy right after storing
@@ -1045,18 +1000,18 @@ class SessionManagerClientStubImpl : public SessionManagerClient {
     base::PostTaskWithTraitsAndReply(
         FROM_HERE,
         {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
-        base::Bind(&StoreFile, device_policy_path, policy_blob),
-        base::Bind(callback, true));
+        base::BindOnce(&StoreFile, device_policy_path, policy_blob),
+        base::BindOnce(std::move(callback), true));
   }
   void StorePolicyForUser(const cryptohome::Identification& cryptohome_id,
                           const std::string& policy_blob,
-                          const StorePolicyCallback& callback) override {
+                          VoidDBusMethodCallback callback) override {
     // The session manager writes the user policy key to a well-known
     // location. Do the same with the stub impl, so that user policy works and
     // can be tested on desktop builds.
     enterprise_management::PolicyFetchResponse response;
     if (!response.ParseFromString(policy_blob)) {
-      callback.Run(false);
+      std::move(callback).Run(false);
       return;
     }
 
@@ -1065,7 +1020,7 @@ class SessionManagerClientStubImpl : public SessionManagerClient {
       base::PostTaskWithTraits(
           FROM_HERE,
           {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
-          base::Bind(&StoreFile, key_path, response.new_public_key()));
+          base::BindOnce(&StoreFile, key_path, response.new_public_key()));
     }
 
     // This file isn't read directly by Chrome, but is used by this class to
@@ -1075,15 +1030,14 @@ class SessionManagerClientStubImpl : public SessionManagerClient {
     base::PostTaskWithTraitsAndReply(
         FROM_HERE,
         {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
-        base::Bind(&StoreFile, stub_policy_path, policy_blob),
-        base::Bind(callback, true));
+        base::BindOnce(&StoreFile, stub_policy_path, policy_blob),
+        base::BindOnce(std::move(callback), true));
   }
-  void StoreDeviceLocalAccountPolicy(
-      const std::string& account_id,
-      const std::string& policy_blob,
-      const StorePolicyCallback& callback) override {
+  void StoreDeviceLocalAccountPolicy(const std::string& account_id,
+                                     const std::string& policy_blob,
+                                     VoidDBusMethodCallback callback) override {
     StorePolicyForUser(cryptohome::Identification::FromString(account_id),
-                       policy_blob, callback);
+                       policy_blob, std::move(callback));
   }
 
   bool SupportsRestartToApplyUserFlags() const override { return false; }
@@ -1103,45 +1057,39 @@ class SessionManagerClientStubImpl : public SessionManagerClient {
         base::Bind(&RunStateKeysCallbackStub, callback));
   }
 
-  void CheckArcAvailability(const ArcCallback& callback) override {
-    callback.Run(false);
-  }
-
   void StartArcInstance(ArcStartupMode startup_mode,
                         const cryptohome::Identification& cryptohome_id,
                         bool disable_boot_completed_broadcast,
                         bool enable_vendor_privileged,
                         bool native_bridge_experiment,
-                        const StartArcInstanceCallback& callback) override {
-    callback.Run(StartArcInstanceResult::UNKNOWN_ERROR, std::string(),
-                 base::ScopedFD());
+                        StartArcInstanceCallback callback) override {
+    std::move(callback).Run(StartArcInstanceResult::UNKNOWN_ERROR,
+                            std::string(), base::ScopedFD());
   }
 
   void SetArcCpuRestriction(
       login_manager::ContainerCpuRestrictionState restriction_state,
-      const ArcCallback& callback) override {
-    callback.Run(false);
+      VoidDBusMethodCallback callback) override {
+    std::move(callback).Run(false);
   }
 
   void EmitArcBooted(const cryptohome::Identification& cryptohome_id,
-                     const ArcCallback& callback) override {
-    callback.Run(false);
+                     VoidDBusMethodCallback callback) override {
+    std::move(callback).Run(false);
   }
 
-  void StopArcInstance(const ArcCallback& callback) override {
-    callback.Run(false);
+  void StopArcInstance(VoidDBusMethodCallback callback) override {
+    std::move(callback).Run(false);
   }
 
-  void GetArcStartTime(const GetArcStartTimeCallback& callback) override {
-    callback.Run(false, base::TimeTicks::Now());
+  void GetArcStartTime(DBusMethodCallback<base::TimeTicks> callback) override {
+    std::move(callback).Run(base::nullopt);
   }
 
   void RemoveArcData(const cryptohome::Identification& cryptohome_id,
-                     const ArcCallback& callback) override {
-    if (callback.is_null())
-      return;
-    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                  base::Bind(callback, false));
+                     VoidDBusMethodCallback callback) override {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(std::move(callback), false));
   }
 
  private:

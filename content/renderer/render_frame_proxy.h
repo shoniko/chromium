@@ -18,8 +18,13 @@
 #include "third_party/WebKit/public/web/WebRemoteFrameClient.h"
 #include "url/origin.h"
 
+#if defined(USE_AURA)
+#include "content/renderer/mus/mus_embedded_frame_delegate.h"
+#endif
+
 namespace blink {
 struct WebRect;
+struct WebRemoteScrollProperties;
 }
 
 namespace viz {
@@ -35,7 +40,12 @@ class RenderViewImpl;
 class RenderWidget;
 struct ContentSecurityPolicyHeader;
 struct FrameOwnerProperties;
+struct FramePolicy;
 struct FrameReplicationState;
+
+#if defined(USE_AURA)
+class MusEmbeddedFrame;
+#endif
 
 // When a page's frames are rendered by multiple processes, each renderer has a
 // full copy of the frame tree. It has full RenderFrames for the frames it is
@@ -59,6 +69,9 @@ struct FrameReplicationState;
 // RenderFrame is created for it.
 class CONTENT_EXPORT RenderFrameProxy : public IPC::Listener,
                                         public IPC::Sender,
+#if defined(USE_AURA)
+                                        public MusEmbeddedFrameDelegate,
+#endif
                                         public blink::WebRemoteFrameClient {
  public:
   // This method should be used to create a RenderFrameProxy, which will replace
@@ -129,6 +142,11 @@ class CONTENT_EXPORT RenderFrameProxy : public IPC::Listener,
   // Returns the widget used for the local frame root.
   RenderWidget* render_widget() { return render_widget_; }
 
+#if defined(USE_AURA)
+  void SetMusEmbeddedFrame(
+      std::unique_ptr<MusEmbeddedFrame> mus_embedded_frame);
+#endif
+
   // blink::WebRemoteFrameClient implementation:
   void FrameDetached(DetachType type) override;
   void ForwardPostMessage(blink::WebLocalFrame* sourceFrame,
@@ -159,6 +177,11 @@ class CONTENT_EXPORT RenderFrameProxy : public IPC::Listener,
 
   void ResendFrameRects();
 
+  void MaybeUpdateCompositingHelper();
+
+  void SetChildFrameSurface(const viz::SurfaceInfo& surface_info,
+                            const viz::SurfaceSequence& sequence);
+
   // IPC::Listener
   bool OnMessageReceived(const IPC::Message& msg) override;
 
@@ -171,9 +194,7 @@ class CONTENT_EXPORT RenderFrameProxy : public IPC::Listener,
   void OnUpdateOpener(int opener_routing_id);
   void OnViewChanged(const viz::FrameSinkId& frame_sink_id);
   void OnDidStopLoading();
-  void OnDidUpdateFramePolicy(
-      blink::WebSandboxFlags flags,
-      const ParsedFeaturePolicyHeader& container_policy);
+  void OnDidUpdateFramePolicy(const FramePolicy& frame_policy);
   void OnDispatchLoad();
   void OnCollapse(bool collapsed);
   void OnDidUpdateName(const std::string& name, const std::string& unique_name);
@@ -188,6 +209,17 @@ class CONTENT_EXPORT RenderFrameProxy : public IPC::Listener,
   void OnSetFocusedFrame();
   void OnWillEnterFullscreen();
   void OnSetHasReceivedUserGesture();
+  void OnScrollRectToVisible(
+      const gfx::Rect& rect_to_scroll,
+      const blink::WebRemoteScrollProperties& properties);
+
+#if defined(USE_AURA)
+  // MusEmbeddedFrameDelegate
+  void OnMusEmbeddedFrameSurfaceChanged(
+      const viz::SurfaceInfo& surface_info) override;
+  void OnMusEmbeddedFrameSinkIdAllocated(
+      const viz::FrameSinkId& frame_sink_id) override;
+#endif
 
   // The routing ID by which this RenderFrameProxy is known.
   const int routing_id_;
@@ -210,6 +242,10 @@ class CONTENT_EXPORT RenderFrameProxy : public IPC::Listener,
   viz::LocalSurfaceIdAllocator local_surface_id_allocator_;
 
   bool enable_surface_synchronization_ = false;
+
+#if defined(USE_AURA)
+  std::unique_ptr<MusEmbeddedFrame> mus_embedded_frame_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(RenderFrameProxy);
 };

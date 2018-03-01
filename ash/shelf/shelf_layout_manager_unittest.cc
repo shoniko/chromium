@@ -4,6 +4,8 @@
 
 #include "ash/shelf/shelf_layout_manager.h"
 
+#include <memory>
+
 #include "ash/accelerators/accelerator_controller.h"
 #include "ash/accelerators/accelerator_table.h"
 #include "ash/app_list/test_app_list_presenter_impl.h"
@@ -29,7 +31,6 @@
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
@@ -794,10 +795,6 @@ TEST_F(ShelfLayoutManagerTest, ShelfUpdatedWhenStatusAreaChangesSize) {
 
 // Various assertions around auto-hide.
 TEST_F(ShelfLayoutManagerTest, AutoHide) {
-  // TODO: investigate failure in mash, http://crbug.com/695686.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   ui::test::EventGenerator& generator(GetEventGenerator());
 
   Shelf* shelf = GetPrimaryShelf();
@@ -829,8 +826,16 @@ TEST_F(ShelfLayoutManagerTest, AutoHide) {
             GetShelfWidget()->GetWindowBoundsInScreen().y());
   EXPECT_EQ(display_bottom, display.work_area().bottom());
 
-  // Move mouse back up.
+  // Tap the system tray when shelf is shown should open the system tray menu.
+  generator.GestureTapAt(GetPrimarySystemTray()
+                             ->GetWidget()
+                             ->GetWindowBoundsInScreen()
+                             .CenterPoint());
+  EXPECT_TRUE(GetPrimarySystemTray()->HasSystemBubble());
+
+  // Move mouse back up and click to dismiss the opened system tray menu.
   generator.MoveMouseTo(0, 0);
+  generator.ClickLeftButton();
   SetState(layout_manager, SHELF_AUTO_HIDE);
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
   layout_manager->LayoutShelf();
@@ -856,13 +861,8 @@ TEST_F(ShelfLayoutManagerTest, AutoHide) {
 // Test the behavior of the shelf when it is auto hidden and it is on the
 // boundary between the primary and the secondary display.
 TEST_F(ShelfLayoutManagerTest, AutoHideShelfOnScreenBoundary) {
-  // TODO: investigate failure in mash, http://crbug.com/695686.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   UpdateDisplay("800x600,800x600");
-  // TODO: SetLayoutForCurrentDisplays() needs to ported to mash.
-  // http://crbug.com/698043.
+  // TODO(crbug.com/698043): Port SetLayoutForCurrentDisplays() to mash.
   Shell::Get()->display_manager()->SetLayoutForCurrentDisplays(
       display::test::CreateDisplayLayout(display_manager(),
                                          display::DisplayPlacement::RIGHT, 0));
@@ -1330,10 +1330,6 @@ TEST_F(ShelfLayoutManagerTest, FullscreenWindowOnSecondDisplay) {
 
 // Test for Pinned mode.
 TEST_F(ShelfLayoutManagerTest, PinnedWindowHidesShelf) {
-  // TODO: investigate failure in mash, http://crbug.com/695686.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   Shelf* shelf = GetPrimaryShelf();
 
   aura::Window* window1 = CreateTestWindow();
@@ -1417,10 +1413,6 @@ TEST_F(ShelfLayoutManagerTest, SetAlignment) {
 }
 
 TEST_F(ShelfLayoutManagerTest, GestureDrag) {
-  // TODO: investigate failure in mash, http://crbug.com/695686.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   // Slop is an implementation detail of gesture recognition, and complicates
   // these tests. Ignore it.
   ui::GestureConfiguration::GetInstance()
@@ -1457,7 +1449,11 @@ TEST_F(ShelfLayoutManagerFullscreenAppListTest,
   app_list::test::TestAppListPresenter test_app_list_presenter;
   Shell::Get()->app_list()->SetAppListPresenter(
       test_app_list_presenter.CreateInterfacePtrAndBind());
-  gfx::Point start = GetShelfWidget()->GetWindowBoundsInScreen().CenterPoint();
+  // Starts the drag from the center of the shelf's bottom.
+  gfx::Rect shelf_widget_bounds = GetShelfWidget()->GetWindowBoundsInScreen();
+  gfx::Point start =
+      gfx::Point(shelf_widget_bounds.x() + shelf_widget_bounds.width() / 2,
+                 shelf_widget_bounds.bottom());
 
   // Fling up that exceeds the velocity threshold should show the fullscreen app
   // list.
@@ -1520,10 +1516,6 @@ TEST_F(ShelfLayoutManagerFullscreenAppListTest,
 
 TEST_F(ShelfLayoutManagerFullscreenAppListTest,
        SwipingUpOnShelfInTabletModeForFullscreenAppList) {
-  // TODO: investigate failure in mash, http://crbug.com/695686.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   Shell* shell = Shell::Get();
   shell->tablet_mode_controller()->EnableTabletModeWindowManager(true);
   Shelf* shelf = GetPrimaryShelf();
@@ -1542,7 +1534,11 @@ TEST_F(ShelfLayoutManagerFullscreenAppListTest,
   constexpr base::TimeDelta kTimeDelta = base::TimeDelta::FromMilliseconds(100);
   constexpr int kNumScrollSteps = 4;
 
-  gfx::Point start = GetShelfWidget()->GetWindowBoundsInScreen().CenterPoint();
+  // Starts the drag from the center of the shelf's bottom.
+  gfx::Rect shelf_widget_bounds = GetShelfWidget()->GetWindowBoundsInScreen();
+  gfx::Point start =
+      gfx::Point(shelf_widget_bounds.x() + shelf_widget_bounds.width() / 2,
+                 shelf_widget_bounds.bottom());
   gfx::Vector2d delta;
 
   // Swiping up more than the threshold should show the app list.
@@ -1625,7 +1621,11 @@ TEST_F(ShelfLayoutManagerFullscreenAppListTest,
   constexpr base::TimeDelta kTimeDelta = base::TimeDelta::FromMilliseconds(100);
   constexpr int kNumScrollSteps = 4;
 
-  gfx::Point start = GetShelfWidget()->GetWindowBoundsInScreen().CenterPoint();
+  // Starts the drag from the center of the shelf's bottom.
+  gfx::Rect shelf_widget_bounds = GetShelfWidget()->GetWindowBoundsInScreen();
+  gfx::Point start =
+      gfx::Point(shelf_widget_bounds.x() + shelf_widget_bounds.width() / 2,
+                 shelf_widget_bounds.bottom());
   gfx::Vector2d delta;
 
   // Swiping up less than the close threshold should close the app list.
@@ -1640,6 +1640,7 @@ TEST_F(ShelfLayoutManagerFullscreenAppListTest,
             test_app_list_presenter.app_list_state());
 
   // Swiping up more than the close threshold but less than peeking threshold
+  // should keep the app list at PEEKING state.
   delta.set_y(ShelfLayoutManager::kAppListDragSnapToPeekingThreshold - 10);
   end = start - delta;
   generator.GestureScrollSequence(start, end, kTimeDelta, kNumScrollSteps);
@@ -1652,7 +1653,7 @@ TEST_F(ShelfLayoutManagerFullscreenAppListTest,
 
   // Swiping up more than the peeking threshold should keep the app list at
   // FULLSCREEN_ALL_APPS state.
-  Shell::Get()->DismissAppList();
+  Shell::Get()->app_list()->Dismiss();
   delta.set_y(ShelfLayoutManager::kAppListDragSnapToPeekingThreshold + 10);
   end = start - delta;
   generator.GestureScrollSequence(start, end, kTimeDelta, kNumScrollSteps);
@@ -1887,10 +1888,6 @@ TEST_F(ShelfLayoutManagerTest, AutohideShelfForAutohideWhenActiveWindow) {
 }
 
 TEST_F(ShelfLayoutManagerTest, ShelfFlickerOnTrayActivation) {
-  // TODO: investigate failure in mash, http://crbug.com/695686.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   Shelf* shelf = GetPrimaryShelf();
 
   // Create a visible window so auto-hide behavior is enforced.
@@ -2097,10 +2094,6 @@ TEST_F(ShelfLayoutManagerTest, ShutdownHandlesWindowActivation) {
 }
 
 TEST_F(ShelfLayoutManagerTest, ShelfLayoutInUnifiedDesktop) {
-  // TODO: requires unified desktop mode. http://crbug.com/581462.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   Shell::Get()->display_manager()->SetUnifiedDesktopEnabled(true);
   UpdateDisplay("500x400, 500x400");
 
@@ -2149,42 +2142,20 @@ class ShelfLayoutManagerKeyboardTest : public AshTestBase {
   DISALLOW_COPY_AND_ASSIGN(ShelfLayoutManagerKeyboardTest);
 };
 
-TEST_F(ShelfLayoutManagerKeyboardTest, ShelfChangeWorkAreaInNonStickyMode) {
-  // Append the flag to cause work area change in non-sticky mode.
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  command_line->AppendSwitch(::switches::kDisableNewVirtualKeyboardBehavior);
+TEST_F(ShelfLayoutManagerKeyboardTest, ShelfNotMoveOnKeyboardOpen) {
+  gfx::Rect orig_bounds = GetShelfWidget()->GetWindowBoundsInScreen();
 
   ShelfLayoutManager* layout_manager = GetShelfLayoutManager();
   InitKeyboardBounds();
   keyboard::KeyboardController* kb_controller =
       keyboard::KeyboardController::GetInstance();
-  gfx::Rect orig_work_area(
-      display::Screen::GetScreen()->GetPrimaryDisplay().work_area());
-
   // Open keyboard in non-sticky mode.
   kb_controller->ShowKeyboard(false);
   layout_manager->OnKeyboardBoundsChanging(keyboard_bounds());
   layout_manager->LayoutShelf();
 
-  // Work area should be changed.
-  EXPECT_NE(orig_work_area,
-            display::Screen::GetScreen()->GetPrimaryDisplay().work_area());
-
-  kb_controller->HideKeyboard(
-      keyboard::KeyboardController::HIDE_REASON_AUTOMATIC);
-  layout_manager->OnKeyboardBoundsChanging(gfx::Rect());
-  layout_manager->LayoutShelf();
-  EXPECT_EQ(orig_work_area,
-            display::Screen::GetScreen()->GetPrimaryDisplay().work_area());
-
-  // Open keyboard in sticky mode.
-  kb_controller->ShowKeyboard(true);
-  layout_manager->OnKeyboardBoundsChanging(keyboard_bounds());
-  layout_manager->LayoutShelf();
-
-  // Work area should be changed.
-  EXPECT_NE(orig_work_area,
-            display::Screen::GetScreen()->GetPrimaryDisplay().work_area());
+  // Shelf position should not be changed.
+  EXPECT_EQ(orig_bounds, GetShelfWidget()->GetWindowBoundsInScreen());
 }
 
 // When kAshUseNewVKWindowBehavior flag enabled, do not change accessibility
@@ -2213,6 +2184,16 @@ TEST_F(ShelfLayoutManagerKeyboardTest,
   layout_manager->LayoutShelf();
   EXPECT_EQ(orig_work_area,
             display::Screen::GetScreen()->GetPrimaryDisplay().work_area());
+}
+
+// Change accessibility keyboard work area in sticky mode.
+TEST_F(ShelfLayoutManagerKeyboardTest, ShelfShouldChangeWorkAreaInStickyMode) {
+  ShelfLayoutManager* layout_manager = GetShelfLayoutManager();
+  InitKeyboardBounds();
+  keyboard::KeyboardController* kb_controller =
+      keyboard::KeyboardController::GetInstance();
+  gfx::Rect orig_work_area(
+      display::Screen::GetScreen()->GetPrimaryDisplay().work_area());
 
   // Open keyboard in sticky mode.
   kb_controller->ShowKeyboard(true);

@@ -5,6 +5,7 @@
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 
 #include <list>
+#include <vector>
 
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
@@ -250,7 +251,8 @@ bool TabSpecificContentSettings::IsContentBlocked(
       content_type == CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA ||
       content_type == CONTENT_SETTINGS_TYPE_PPAPI_BROKER ||
       content_type == CONTENT_SETTINGS_TYPE_MIDI_SYSEX ||
-      content_type == CONTENT_SETTINGS_TYPE_ADS) {
+      content_type == CONTENT_SETTINGS_TYPE_ADS ||
+      content_type == CONTENT_SETTINGS_TYPE_SOUND) {
     const auto& it = content_settings_status_.find(content_type);
     if (it != content_settings_status_.end())
       return it->second.blocked;
@@ -329,11 +331,6 @@ void TabSpecificContentSettings::OnContentBlockedWithDetail(
     status.blockage_indicated_to_user = false;
   }
 #endif
-
-  if (type == CONTENT_SETTINGS_TYPE_PLUGINS && !details.empty() &&
-      !base::ContainsValue(blocked_plugin_names_, details)) {
-    blocked_plugin_names_.push_back(details);
-  }
 
   if (!status.blocked) {
     status.blocked = true;
@@ -710,6 +707,8 @@ void TabSpecificContentSettings::OnContentSettingChanged(
     const ContentSettingsPattern& secondary_pattern,
     ContentSettingsType content_type,
     std::string resource_identifier) {
+  if (content_type == CONTENT_SETTINGS_TYPE_SOUND)
+    OnSoundContentSettingUpdated();
   const ContentSettingsDetails details(
       primary_pattern, secondary_pattern, content_type, resource_identifier);
   const NavigationController& controller = web_contents()->GetController();
@@ -741,7 +740,7 @@ void TabSpecificContentSettings::OnContentSettingChanged(
     GetRendererContentSettingRules(map, &rules);
 
     IPC::ChannelProxy* channel =
-        web_contents()->GetRenderProcessHost()->GetChannel();
+        web_contents()->GetMainFrame()->GetProcess()->GetChannel();
     // channel might be NULL in tests.
     if (channel) {
       chrome::mojom::RendererConfigurationAssociatedPtr rc_interface;
@@ -805,7 +804,6 @@ void TabSpecificContentSettings::DidFinishNavigation(
 
   // Clear "blocked" flags.
   ClearContentSettingsExceptForNavigationRelatedSettings();
-  blocked_plugin_names_.clear();
   GeolocationDidNavigate(navigation_handle);
   MidiDidNavigate(navigation_handle);
 
@@ -824,6 +822,31 @@ void TabSpecificContentSettings::AppCacheAccessed(const GURL& manifest_url,
     allowed_local_shared_objects_.appcaches()->AddAppCache(manifest_url);
     OnContentAllowed(CONTENT_SETTINGS_TYPE_COOKIES);
   }
+}
+
+void TabSpecificContentSettings::OnAudioStateChanged(bool is_audible) {
+  // If the page became audible while sound was muted, then sound was blocked.
+  CheckSoundBlocked(is_audible);
+}
+
+void TabSpecificContentSettings::OnSoundContentSettingUpdated() {
+  // If the page is audible when the sound is muted, then sound was blocked.
+  CheckSoundBlocked(web_contents()->IsCurrentlyAudible());
+}
+
+void TabSpecificContentSettings::CheckSoundBlocked(bool is_audible) {
+  if (is_audible && GetSoundContentSetting() == CONTENT_SETTING_BLOCK)
+    OnContentBlocked(CONTENT_SETTINGS_TYPE_SOUND);
+}
+
+ContentSetting TabSpecificContentSettings::GetSoundContentSetting() const {
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents()->GetBrowserContext());
+  const HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(profile);
+  const GURL url = web_contents()->GetLastCommittedURL();
+  return map->GetContentSetting(url, url, CONTENT_SETTINGS_TYPE_SOUND,
+                                std::string());
 }
 
 void TabSpecificContentSettings::AddSiteDataObserver(

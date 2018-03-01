@@ -77,8 +77,7 @@ import org.chromium.chrome.browser.dom_distiller.DistilledPagePrefsView;
 import org.chromium.chrome.browser.dom_distiller.ReaderModeManager;
 import org.chromium.chrome.browser.download.DownloadManagerService;
 import org.chromium.chrome.browser.download.DownloadUtils;
-import org.chromium.chrome.browser.download.items
-        .OfflineContentAggregatorNotificationBridgeUiFactory;
+import org.chromium.chrome.browser.download.items.OfflineContentAggregatorNotificationBridgeUiFactory;
 import org.chromium.chrome.browser.firstrun.ForcedSigninProcessor;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.gsa.ContextReporter;
@@ -274,6 +273,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     private long mInflateInitialLayoutDurationMs;
 
     private int mUiMode;
+    private int mDensityDpi;
     private int mScreenWidthDp;
     private Runnable mRecordMultiWindowModeScreenWidthRunnable;
 
@@ -397,10 +397,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             mBottomSheetContentController =
                     (BottomSheetContentController) ((ViewStub) findViewById(R.id.bottom_nav_stub))
                             .inflate();
-            int controlContainerHeight =
-                    ((ControlContainer) findViewById(R.id.control_container)).getView().getHeight();
-            mBottomSheetContentController.init(
-                    mBottomSheet, controlContainerHeight, mTabModelSelector, this);
+            mBottomSheetContentController.init(mBottomSheet, mTabModelSelector, this);
         }
         ((BottomContainer) findViewById(R.id.bottom_container)).initialize(mFullscreenManager);
     }
@@ -817,9 +814,13 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         if (tab == null) return;
         if (hasFocus) {
             tab.onActivityShown();
+            VrShellDelegate.onActivityShown(this);
         } else {
             boolean stopped = ApplicationStatus.getStateForActivity(this) == ActivityState.STOPPED;
-            if (stopped) tab.onActivityHidden();
+            if (stopped) {
+                VrShellDelegate.onActivityHidden(this);
+                tab.onActivityHidden();
+            }
         }
     }
 
@@ -906,7 +907,10 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     @Override
     public void onStopWithNative() {
         Tab tab = getActivityTab();
-        if (tab != null && !hasWindowFocus()) tab.onActivityHidden();
+        if (!hasWindowFocus()) {
+            VrShellDelegate.onActivityHidden(this);
+            if (tab != null) tab.onActivityHidden();
+        }
         if (mAppMenuHandler != null) mAppMenuHandler.hideAppMenu();
 
         if (GSAState.getInstance(this).isGsaAvailable() && !SysUtils.isLowEndDevice()) {
@@ -1005,10 +1009,6 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             if (isActivityDestroyed()) return;
             ForcedSigninProcessor.checkCanSignIn(ChromeActivity.this);
         });
-        DeferredStartupHandler.getInstance().addDeferredTask(() -> {
-            if (isActivityDestroyed() || mBottomSheetContentController == null) return;
-            mBottomSheetContentController.initializeDefaultContent();
-        });
     }
 
     /**
@@ -1059,8 +1059,14 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         // See crbug.com/541546.
         checkAccessibility();
 
-        mUiMode = getResources().getConfiguration().uiMode;
-        mScreenWidthDp = getResources().getConfiguration().screenWidthDp;
+        Configuration config = getResources().getConfiguration();
+        mUiMode = config.uiMode;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+            mDensityDpi = config.densityDpi;
+        } else {
+            mDensityDpi = getResources().getDisplayMetrics().densityDpi;
+        }
+        mScreenWidthDp = config.screenWidthDp;
     }
 
     @Override
@@ -1364,6 +1370,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     protected void showAppMenuForKeyboardEvent() {
         if (getAppMenuHandler() == null) return;
 
+        TextBubble.dismissBubbles();
         boolean hasPermanentMenuKey = ViewConfiguration.get(this).hasPermanentMenuKey();
         getAppMenuHandler().showAppMenu(
                 hasPermanentMenuKey ? null : getToolbarManager().getMenuButton(), false);
@@ -1444,7 +1451,8 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         final long bookmarkId = tabToBookmark.getUserBookmarkId();
 
         final BookmarkModel bookmarkModel = new BookmarkModel();
-        bookmarkModel.runAfterBookmarkModelLoaded(() -> {
+
+        bookmarkModel.finishLoadingBookmarkModel(() -> {
             // Gives up the bookmarking if the tab is being destroyed.
             if (!tabToBookmark.isClosing() && tabToBookmark.isInitialized()) {
                 // The BookmarkModel will be destroyed by BookmarkUtils#addOrEditBookmark() when
@@ -1678,6 +1686,8 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     @Override
     public void onOrientationChange(int orientation) {
         if (mToolbarManager != null) mToolbarManager.onOrientationChange();
+        Tab tab = getActivityTab();
+        if (tab != null) tab.onOrientationChange();
     }
 
     /**
@@ -1699,6 +1709,16 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             return;
         }
         mUiMode = newConfig.uiMode;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+            if (newConfig.densityDpi != mDensityDpi) {
+                if (!VrShellDelegate.onDensityChanged(mDensityDpi, newConfig.densityDpi)) {
+                    recreate();
+                    return;
+                }
+                mDensityDpi = newConfig.densityDpi;
+            }
+        }
 
         if (newConfig.screenWidthDp != mScreenWidthDp) {
             mScreenWidthDp = newConfig.screenWidthDp;
@@ -1777,7 +1797,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     public final void onBackPressed() {
         if (mNativeInitialized) RecordUserAction.record("SystemBack");
 
-        TextBubble.onBackPressed();
+        TextBubble.dismissBubbles();
         if (VrShellDelegate.onBackPressed()) return;
         if (mCompositorViewHolder != null) {
             LayoutManager layoutManager = mCompositorViewHolder.getLayoutManager();
@@ -1805,6 +1825,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         if ((level >= TRIM_MEMORY_RUNNING_LOW && level < TRIM_MEMORY_UI_HIDDEN)
                 || level >= TRIM_MEMORY_MODERATE) {
             mReferencePool.drain();
+            clearToolbarResourceCache();
         }
     }
 
@@ -2209,10 +2230,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     @Override
     public boolean onActivityResultWithNative(int requestCode, int resultCode, Intent intent) {
         if (super.onActivityResultWithNative(requestCode, resultCode, intent)) return true;
-        if (requestCode == VrShellDelegate.EXIT_VR_RESULT) {
-            VrShellDelegate.onExitVrResult(resultCode);
-            return true;
-        }
+        if (VrShellDelegate.onActivityResultWithNative(requestCode, resultCode)) return true;
         return false;
     }
 
@@ -2238,8 +2256,16 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
 
     /**
      * @return the reference pool for this activity.
+     * @deprecated Use {@link ChromeApplication#getReferencePool} instead.
      */
+    // TODO(bauerb): Migrate clients to ChromeApplication#getReferencePool.
+    @Deprecated
     public DiscardableReferencePool getReferencePool() {
         return mReferencePool;
+    }
+
+    private void clearToolbarResourceCache() {
+        ControlContainer controlContainer = (ControlContainer) findViewById(R.id.control_container);
+        controlContainer.getToolbarResourceAdapter().dropCachedBitmap();
     }
 }

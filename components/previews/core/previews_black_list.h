@@ -74,21 +74,25 @@ class PreviewsBlackList {
   // it will be used to load the in-memory map asynchronously.
   PreviewsBlackList(std::unique_ptr<PreviewsOptOutStore> opt_out_store,
                     std::unique_ptr<base::Clock> clock);
-  ~PreviewsBlackList();
+  virtual ~PreviewsBlackList();
 
   // Asynchronously adds a new navigation to to the in-memory black list and
   // backing store. |opt_out| is whether the user opted out of the preview or
   // navigated away from the page without opting out. |type| is only passed to
   // the backing store. If the in memory map has reached the max number of hosts
   // allowed, and |url| is a new host, a host will be evicted based on recency
-  // of the hosts most recent opt out.
-  void AddPreviewNavigation(const GURL& url, bool opt_out, PreviewsType type);
+  // of the hosts most recent opt out. It returns the time used for recording
+  // the moment when the navigation is added for logging.
+  base::Time AddPreviewNavigation(const GURL& url,
+                                  bool opt_out,
+                                  PreviewsType type);
 
   // Synchronously determines if |host_name| should be allowed to show previews.
   // Returns the reason the blacklist disallowed the preview, or
-  // PreviewsEligibilityReason::ALLOWED if the preview is allowed.
-  PreviewsEligibilityReason IsLoadedAndAllowed(const GURL& url,
-                                               PreviewsType type) const;
+  // PreviewsEligibilityReason::ALLOWED if the preview is allowed. Virtualized
+  // in testing.
+  virtual PreviewsEligibilityReason IsLoadedAndAllowed(const GURL& url,
+                                                       PreviewsType type) const;
 
   // Asynchronously deletes all entries in the in-memory black list. Informs
   // the backing store to delete entries between |begin_time| and |end_time|,
@@ -108,10 +112,13 @@ class PreviewsBlackList {
   CreateHostIndifferentBlackListItem();
 
  private:
-  // Synchronous version of AddPreviewNavigation method.
+  // Synchronous version of AddPreviewNavigation method. |time| is the time
+  // stamp of when the navigation was determined to be an opt-out or non-opt
+  // out.
   void AddPreviewNavigationSync(const GURL& host_name,
                                 bool opt_out,
-                                PreviewsType type);
+                                PreviewsType type,
+                                base::Time time);
 
   // Synchronous version of ClearBlackList method.
   void ClearBlackListSync(base::Time begin_time, base::Time end_time);

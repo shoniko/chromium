@@ -21,6 +21,7 @@
 #include "build/build_config.h"
 #include "components/feedback/system_logs/system_logs_fetcher.h"
 #include "components/feedback/tracing_manager.h"
+#include "content/public/common/browser_side_navigation_policy.h"
 #include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/api/feedback_private/feedback_private_delegate.h"
 #include "extensions/browser/api/feedback_private/feedback_service.h"
@@ -135,8 +136,8 @@ void FeedbackPrivateAPI::RequestFeedbackForFlow(
         browser_context_);
 
     // TODO(weidongg/754329): Using DispatchEventWithLazyListener() is a
-    // temporary fix to the bug. Investigate a better solution that apply to all
-    // scenarios.
+    // temporary fix to the bug. Investigate a better solution that applies to
+    // all scenarios.
     EventRouter::Get(browser_context_)
         ->DispatchEventWithLazyListener(extension_misc::kFeedbackExtensionId,
                                         std::move(event));

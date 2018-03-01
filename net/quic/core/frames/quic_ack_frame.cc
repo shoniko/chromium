@@ -15,6 +15,10 @@ using std::min;
 
 namespace net {
 
+namespace {
+const QuicPacketNumber kMaxPrintRange = 128;
+}  // namespace
+
 PacketNumberQueue::const_iterator::const_iterator(const const_iterator& other) =
     default;
 PacketNumberQueue::const_iterator::const_iterator(const_iterator&& other) =
@@ -32,7 +36,7 @@ PacketNumberQueue::const_reverse_iterator::const_reverse_iterator(
 PacketNumberQueue::const_reverse_iterator::~const_reverse_iterator() {}
 
 PacketNumberQueue::const_iterator::const_iterator(
-    typename std::deque<Interval<QuicPacketNumber>>::const_iterator it)
+    typename QuicDeque<Interval<QuicPacketNumber>>::const_iterator it)
     : deque_it_(it), use_deque_it_(true) {}
 
 PacketNumberQueue::const_reverse_iterator::const_reverse_iterator(
@@ -41,7 +45,7 @@ PacketNumberQueue::const_reverse_iterator::const_reverse_iterator(
     : vector_it_(it), use_deque_it_(false) {}
 
 PacketNumberQueue::const_reverse_iterator::const_reverse_iterator(
-    const typename std::deque<
+    const typename QuicDeque<
         Interval<QuicPacketNumber>>::const_reverse_iterator& it)
     : deque_it_(it), use_deque_it_(true) {}
 
@@ -375,11 +379,28 @@ QuicPacketNumber PacketNumberQueue::LastIntervalLength() const {
   }
 }
 
+// Largest min...max range for packet numbers where we print the numbers
+// explicitly. If bigger than this, we print as a range  [a,d] rather
+// than [a b c d]
+
 std::ostream& operator<<(std::ostream& os, const PacketNumberQueue& q) {
   for (const Interval<QuicPacketNumber>& interval : q) {
-    for (QuicPacketNumber packet_number = interval.min();
-         packet_number < interval.max(); ++packet_number) {
-      os << packet_number << " ";
+    // Print as a range if there is a pathological condition.
+    if ((interval.min() >= interval.max()) ||
+        (interval.max() - interval.min() > kMaxPrintRange)) {
+      // If min>max, it's really a bug, so QUIC_BUG it to
+      // catch it in development.
+      QUIC_BUG_IF(interval.min() >= interval.max())
+          << "Ack Range minimum (" << interval.min() << "Not less than max ("
+          << interval.max() << ")";
+      // print range as min...max rather than full list.
+      // in the event of a bug, the list could be very big.
+      os << interval.min() << "..." << (interval.max() - 1) << " ";
+    } else {
+      for (QuicPacketNumber packet_number = interval.min();
+           packet_number < interval.max(); ++packet_number) {
+        os << packet_number << " ";
+      }
     }
   }
   return os;

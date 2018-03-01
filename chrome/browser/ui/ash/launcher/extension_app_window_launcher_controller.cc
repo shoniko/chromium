@@ -7,7 +7,6 @@
 #include "ash/public/cpp/shelf_model.h"
 #include "ash/public/cpp/shelf_types.h"
 #include "ash/public/cpp/window_properties.h"
-#include "ash/wm/window_util.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/chromeos/ash_config.h"
@@ -20,6 +19,7 @@
 #include "extensions/common/extension.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
+#include "ui/base/base_window.h"
 
 using extensions::AppWindow;
 using extensions::AppWindowRegistry;
@@ -68,6 +68,27 @@ ExtensionAppWindowLauncherController::ControllerForWindow(
   if (controller_iter == app_controller_map_.end())
     return nullptr;
   return controller_iter->second;
+}
+
+void ExtensionAppWindowLauncherController::OnItemDelegateDiscarded(
+    ash::ShelfItemDelegate* delegate) {
+  AppControllerMap::iterator it =
+      app_controller_map_.find(delegate->shelf_id());
+  if (it == app_controller_map_.end() || it->second != delegate)
+    return;
+
+  ExtensionAppWindowLauncherItemController* controller = it->second;
+  // Existing controller is no longer bound with shelf. We have to clean the
+  // cache. See crbug.com/770005.
+  VLOG(1) << "Item controller was released externally for the app "
+          << delegate->shelf_id().app_id << ".";
+  app_controller_map_.erase(it);
+
+  for (ui::BaseWindow* base_window : controller->windows()) {
+    aura::Window* window = base_window->GetNativeWindow();
+    if (window)
+      UnregisterApp(window);
+  }
 }
 
 void ExtensionAppWindowLauncherController::OnAppWindowAdded(
@@ -122,7 +143,7 @@ void ExtensionAppWindowLauncherController::RegisterApp(AppWindow* app_window) {
   window->AddObserver(this);
 
   // Find or create an item controller and launcher item.
-  ash::ShelfItemStatus status = ash::wm::IsActiveWindow(window)
+  ash::ShelfItemStatus status = app_window->GetBaseWindow()->IsActive()
                                     ? ash::STATUS_ACTIVE
                                     : ash::STATUS_RUNNING;
   AppControllerMap::iterator app_controller_iter =
@@ -163,16 +184,18 @@ void ExtensionAppWindowLauncherController::UnregisterApp(aura::Window* window) {
 
   AppControllerMap::iterator app_controller_iter =
       app_controller_map_.find(shelf_id);
-  DCHECK(app_controller_iter != app_controller_map_.end());
-  ExtensionAppWindowLauncherItemController* controller;
-  controller = app_controller_iter->second;
+  if (app_controller_iter == app_controller_map_.end())
+    return;
+
+  ExtensionAppWindowLauncherItemController* controller =
+      app_controller_iter->second;
 
   controller->RemoveWindow(controller->GetAppWindow(window));
   if (controller->window_count() == 0) {
     // If this is the last window associated with the app window shelf id,
     // close the shelf item.
-    owner()->CloseLauncherItem(shelf_id);
     app_controller_map_.erase(app_controller_iter);
+    owner()->CloseLauncherItem(shelf_id);
   }
 }
 

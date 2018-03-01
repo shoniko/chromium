@@ -30,8 +30,8 @@
 #include "core/dom/ExceptionCode.h"
 #include "core/frame/Settings.h"
 #include "core/page/Page.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/Supplementable.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/text/LocaleToScriptMapping.h"
 
 #define InternalSettingsGuardForSettingsReturn(returnValue)             \
@@ -82,8 +82,8 @@ InternalSettings::Backup::Backup(Settings* settings)
       original_image_animation_policy_(settings->GetImageAnimationPolicy()),
       original_scroll_top_left_interop_enabled_(
           RuntimeEnabledFeatures::ScrollTopLeftInteropEnabled()),
-      original_compositor_worker_enabled_(
-          RuntimeEnabledFeatures::CompositorWorkerEnabled()) {}
+      original_animation_worklet_enabled_(
+          RuntimeEnabledFeatures::AnimationWorkletEnabled()) {}
 
 void InternalSettings::Backup::RestoreTo(Settings* settings) {
   RuntimeEnabledFeatures::SetExperimentalContentSecurityPolicyFeaturesEnabled(
@@ -111,8 +111,6 @@ void InternalSettings::Backup::RestoreTo(Settings* settings) {
   settings->SetImageAnimationPolicy(original_image_animation_policy_);
   RuntimeEnabledFeatures::SetScrollTopLeftInteropEnabled(
       original_scroll_top_left_interop_enabled_);
-  RuntimeEnabledFeatures::SetCompositorWorkerEnabled(
-      original_compositor_worker_enabled_);
 }
 
 InternalSettings* InternalSettings::From(Page& page) {
@@ -144,7 +142,7 @@ void InternalSettings::ResetToConsistentState() {
 
 Settings* InternalSettings::GetSettings() const {
   if (!GetPage())
-    return 0;
+    return nullptr;
   return &GetPage()->GetSettings();
 }
 
@@ -373,7 +371,7 @@ void InternalSettings::setDefaultVideoPosterURL(
   GetSettings()->SetDefaultVideoPosterURL(url);
 }
 
-DEFINE_TRACE(InternalSettings) {
+void InternalSettings::Trace(blink::Visitor* visitor) {
   InternalSettingsGenerated::Trace(visitor);
   Supplement<Page>::Trace(visitor);
 }
@@ -520,11 +518,11 @@ void InternalSettings::SetPreloadLogging(bool enabled,
   GetSettings()->SetLogPreload(enabled);
 }
 
-void InternalSettings::setCompositorWorkerEnabled(
+void InternalSettings::setAnimationWorkletEnabled(
     bool enabled,
     ExceptionState& exception_state) {
   InternalSettingsGuardForSettings();
-  RuntimeEnabledFeatures::SetCompositorWorkerEnabled(enabled);
+  RuntimeEnabledFeatures::SetAnimationWorkletEnabled(enabled);
 }
 
 void InternalSettings::setPresentationReceiver(

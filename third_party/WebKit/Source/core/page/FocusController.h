@@ -38,6 +38,7 @@ namespace blink {
 
 struct FocusCandidate;
 struct FocusParams;
+class ContainerNode;
 class Document;
 class Element;
 class FocusChangedObserver;
@@ -54,6 +55,8 @@ class CORE_EXPORT FocusController final
   WTF_MAKE_NONCOPYABLE(FocusController);
 
  public:
+  using OwnerMap = HeapHashMap<Member<ContainerNode>, Member<Element>>;
+
   static FocusController* Create(Page*);
 
   void SetFocusedFrame(Frame*, bool notify_embedder = true);
@@ -97,12 +100,12 @@ class CORE_EXPORT FocusController final
 
   void RegisterFocusChangedObserver(FocusChangedObserver*);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   explicit FocusController(Page*);
 
-  Element* FindFocusableElement(WebFocusType, Element&);
+  Element* FindFocusableElement(WebFocusType, Element&, OwnerMap&);
 
   bool AdvanceFocus(WebFocusType,
                     bool initial_focus,

@@ -9,10 +9,14 @@
 
 #include "ash/public/interfaces/pref_connector.mojom.h"
 #include "ash/public/interfaces/user_info.mojom.h"
-#include "ash/session/session_observer.h"
+#include "ash/session/multiprofiles_intro_dialog.h"
+#include "ash/session/session_aborted_dialog.h"
+#include "ash/session/teleport_warning_dialog.h"
 #include "ash/shell.h"
 #include "ash/system/power/power_event_observer.h"
+#include "ash/system/tray/system_tray.h"
 #include "ash/wm/lock_state_controller.h"
+#include "ash/wm/overview/window_selector_controller.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/wm_event.h"
@@ -199,18 +203,14 @@ bool SessionController::IsUserFirstLogin() const {
   return GetUserSession(0)->user_info->is_new_profile;
 }
 
-bool SessionController::IsKioskSession() const {
-  if (!IsActiveUserSessionStarted())
-    return false;
-
-  user_manager::UserType active_user_type = GetUserSession(0)->user_info->type;
-  return active_user_type == user_manager::USER_TYPE_KIOSK_APP ||
-         active_user_type == user_manager::USER_TYPE_ARC_KIOSK_APP;
-}
-
 void SessionController::LockScreen() {
   if (client_)
     client_->RequestLockScreen();
+}
+
+void SessionController::RequestSignOut() {
+  if (client_)
+    client_->RequestSignOut();
 }
 
 void SessionController::SwitchActiveUser(const AccountId& account_id) {
@@ -228,6 +228,10 @@ void SessionController::ShowMultiProfileLogin() {
     client_->ShowMultiProfileLogin();
 }
 
+PrefService* SessionController::GetSigninScreenPrefService() const {
+  return signin_screen_prefs_.get();
+}
+
 PrefService* SessionController::GetUserPrefServiceForUser(
     const AccountId& account_id) {
   auto it = per_user_prefs_.find(account_id);
@@ -237,8 +241,16 @@ PrefService* SessionController::GetUserPrefServiceForUser(
   return nullptr;
 }
 
-PrefService* SessionController::GetLastActiveUserPrefService() {
+PrefService* SessionController::GetLastActiveUserPrefService() const {
   return last_active_user_prefs_;
+}
+
+PrefService* SessionController::GetActivePrefService() const {
+  // Use the active user prefs once they become available. Check the PrefService
+  // object instead of session state because prefs load is async after login.
+  if (last_active_user_prefs_)
+    return last_active_user_prefs_;
+  return signin_screen_prefs_.get();
 }
 
 void SessionController::AddObserver(SessionObserver* observer) {
@@ -379,6 +391,33 @@ void SessionController::SetSessionLengthLimit(base::TimeDelta length_limit,
     observer.OnSessionLengthLimitChanged();
 }
 
+void SessionController::CanSwitchActiveUser(
+    CanSwitchActiveUserCallback callback) {
+  // Cancel overview mode when switching user profiles.
+  WindowSelectorController* controller =
+      Shell::Get()->window_selector_controller();
+  if (controller->IsSelecting())
+    controller->ToggleOverview();
+
+  ash::Shell::Get()->GetPrimarySystemTray()->CanSwitchAwayFromActiveUser(
+      std::move(callback));
+}
+
+void SessionController::ShowMultiprofilesIntroDialog(
+    ShowMultiprofilesIntroDialogCallback callback) {
+  MultiprofilesIntroDialog::Show(std::move(callback));
+}
+
+void SessionController::ShowTeleportWarningDialog(
+    ShowTeleportWarningDialogCallback callback) {
+  TeleportWarningDialog::Show(std::move(callback));
+}
+
+void SessionController::ShowMultiprofilesSessionAbortedDialog(
+    const std::string& user_email) {
+  SessionAbortedDialog::Show(user_email);
+}
+
 void SessionController::ClearUserSessionsForTest() {
   user_sessions_.clear();
   last_active_user_prefs_ = nullptr;
@@ -393,6 +432,11 @@ void SessionController::FlushMojoForTest() {
 void SessionController::LockScreenAndFlushForTest() {
   LockScreen();
   FlushMojoForTest();
+}
+
+void SessionController::SetSigninScreenPrefServiceForTest(
+    std::unique_ptr<PrefService> prefs) {
+  OnSigninScreenPrefServiceInitialized(std::move(prefs));
 }
 
 void SessionController::ProvideUserPrefServiceForTest(
@@ -559,16 +603,14 @@ void SessionController::OnSigninScreenPrefServiceInitialized(
   if (!pref_service)
     return;
 
+  DCHECK(!signin_screen_prefs_);
   signin_screen_prefs_ = std::move(pref_service);
 
   // The signin profile should be initialized before any user profile.
   DCHECK(!last_active_user_prefs_);
 
-  // Chrome's ProfileManager::GetActiveUserProfile() can return the signin
-  // screen profile, so do the same thing here with signin screen profile prefs.
-  last_active_user_prefs_ = signin_screen_prefs_.get();
   for (auto& observer : observers_)
-    observer.OnActiveUserPrefServiceChanged(last_active_user_prefs_);
+    observer.OnSigninScreenPrefServiceInitialized(signin_screen_prefs_.get());
 }
 
 void SessionController::OnProfilePrefServiceInitialized(

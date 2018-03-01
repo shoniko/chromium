@@ -13,15 +13,16 @@
 #include "base/memory/weak_ptr.h"
 #include "content/browser/devtools/protocol/devtools_domain_handler.h"
 #include "content/browser/devtools/protocol/network.h"
+#include "content/public/common/network_service.mojom.h"
 #include "net/base/net_errors.h"
 #include "net/cookies/canonical_cookie.h"
 
 namespace net {
+class HttpRequestHeaders;
 class URLRequest;
 }  // namespace net
 
 namespace content {
-
 class DevToolsAgentHostImpl;
 class RenderFrameHostImpl;
 struct BeginNavigationParams;
@@ -38,13 +39,14 @@ namespace protocol {
 class NetworkHandler : public DevToolsDomainHandler,
                        public Network::Backend {
  public:
-  NetworkHandler();
+  explicit NetworkHandler(const std::string& host_id);
   ~NetworkHandler() override;
 
   static std::vector<NetworkHandler*> ForAgentHost(DevToolsAgentHostImpl* host);
 
   void Wire(UberDispatcher* dispatcher) override;
-  void SetRenderFrameHost(RenderFrameHostImpl* host) override;
+  void SetRenderer(RenderProcessHost* process_host,
+                   RenderFrameHostImpl* frame_host) override;
 
   Response Enable(Maybe<int> max_total_size,
                   Maybe<int> max_resource_size) override;
@@ -77,11 +79,20 @@ class NetworkHandler : public DevToolsDomainHandler,
       std::unique_ptr<SetCookiesCallback> callback) override;
 
   Response SetUserAgentOverride(const std::string& user_agent) override;
+  Response SetExtraHTTPHeaders(
+      std::unique_ptr<Network::Headers> headers) override;
   Response CanEmulateNetworkConditions(bool* result) override;
+  Response EmulateNetworkConditions(
+      bool offline,
+      double latency,
+      double download_throughput,
+      double upload_throughput,
+      Maybe<protocol::Network::ConnectionType> connection_type) override;
+  Response SetBypassServiceWorker(bool bypass) override;
 
-  DispatchResponse SetRequestInterceptionEnabled(
-      bool enabled,
-      Maybe<protocol::Array<std::string>> patterns) override;
+  DispatchResponse SetRequestInterception(
+      std::unique_ptr<protocol::Array<protocol::Network::RequestPattern>>
+          patterns) override;
   void ContinueInterceptedRequest(
       const std::string& request_id,
       Maybe<std::string> error_reason,
@@ -108,10 +119,10 @@ class NetworkHandler : public DevToolsDomainHandler,
                         net::Error error_code);
 
   bool enabled() const { return enabled_; }
-  std::string UserAgentOverride() const;
 
   Network::Frontend* frontend() const { return frontend_.get(); }
 
+  static GURL ClearUrlRef(const GURL& url);
   static std::unique_ptr<Network::Request> CreateRequestFromURLRequest(
       const net::URLRequest* request);
 
@@ -121,15 +132,23 @@ class NetworkHandler : public DevToolsDomainHandler,
                                     const std::string& interception_id);
   void InterceptedNavigationRequestFinished(const std::string& interception_id);
   bool ShouldCancelNavigation(const GlobalRequestID& global_request_id);
+  void AppendDevToolsHeaders(net::HttpRequestHeaders* headers);
+  bool ShouldBypassServiceWorker() const;
 
  private:
+  void SetNetworkConditions(mojom::NetworkConditionsPtr conditions);
+
   std::unique_ptr<Network::Frontend> frontend_;
+  RenderProcessHost* process_;
   RenderFrameHostImpl* host_;
   bool enabled_;
   bool interception_enabled_;
   std::string user_agent_;
+  std::vector<std::pair<std::string, std::string>> extra_headers_;
   base::flat_map<std::string, GlobalRequestID> navigation_requests_;
   base::flat_set<GlobalRequestID> canceled_navigation_requests_;
+  std::string host_id_;
+  bool bypass_service_worker_;
   base::WeakPtrFactory<NetworkHandler> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkHandler);

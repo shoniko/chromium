@@ -39,18 +39,19 @@ class ASH_EXPORT AccessibilityController : public SessionObserver {
   void SetHighContrastEnabled(bool enabled);
   bool IsHighContrastEnabled() const;
 
-  // Returns true if an accessibility feature is enabled that requires cursor
-  // compositing.
-  static bool RequiresCursorCompositing(PrefService* prefs);
-
   // SessionObserver:
+  void OnSigninScreenPrefServiceInitialized(PrefService* prefs) override;
   void OnActiveUserPrefServiceChanged(PrefService* prefs) override;
 
   void SetPrefServiceForTest(PrefService* prefs);
 
  private:
-  // Before login returns the signin screen profile prefs. After login returns
-  // the active user profile prefs. Returns null early during startup.
+  // Observes either the signin screen prefs or active user prefs and loads
+  // initial settings.
+  void ObservePrefs(PrefService* prefs);
+
+  // Returns |pref_service_for_test_| if not null, otherwise return
+  // SessionController::GetActivePrefService().
   PrefService* GetActivePrefService() const;
 
   void UpdateLargeCursorFromPref();

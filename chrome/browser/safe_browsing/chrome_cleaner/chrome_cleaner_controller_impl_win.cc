@@ -29,6 +29,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/chrome_cleaner_fetcher_win.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/chrome_cleaner_navigation_util_win.h"
+#include "chrome/browser/safe_browsing/chrome_cleaner/chrome_cleaner_reboot_dialog_controller_impl_win.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/chrome_cleaner_runner_win.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/settings_resetter_win.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/srt_client_info_win.h"
@@ -59,7 +60,7 @@ constexpr int kRebootRequiredExitCode = 15;
 constexpr int kRebootNotRequiredExitCode = 0;
 
 // These values are used to send UMA information and are replicated in the
-// histograms.xml file, so the order MUST NOT CHANGE.
+// enums.xml file, so the order MUST NOT CHANGE.
 enum CleanupResultHistogramValue {
   CLEANUP_RESULT_SUCCEEDED = 0,
   CLEANUP_RESULT_REBOOT_REQUIRED = 1,
@@ -69,7 +70,7 @@ enum CleanupResultHistogramValue {
 };
 
 // These values are used to send UMA information and are replicated in the
-// histograms.xml file, so the order MUST NOT CHANGE.
+// enums.xml file, so the order MUST NOT CHANGE.
 enum IPCDisconnectedHistogramValue {
   IPC_DISCONNECTED_SUCCESS = 0,
   IPC_DISCONNECTED_LOST_WHILE_SCANNING = 1,
@@ -84,7 +85,7 @@ enum IPCDisconnectedHistogramValue {
 base::FilePath VerifyAndRenameDownloadedCleaner(
     base::FilePath downloaded_path,
     ChromeCleanerFetchStatus fetch_status) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   if (downloaded_path.empty() || !base::PathExists(downloaded_path))
     return base::FilePath();
@@ -177,6 +178,12 @@ void ChromeCleanerControllerDelegate::ResetTaggedProfiles(
         std::move(profiles), std::move(continuation),
         base::MakeUnique<PostCleanupSettingsResetter::Delegate>());
   }
+}
+
+void ChromeCleanerControllerDelegate::StartRebootPromptFlow(
+    ChromeCleanerController* controller) {
+  // The controller object decides if and when a prompt should be shown.
+  ChromeCleanerRebootDialogControllerImpl::Create(controller);
 }
 
 // static
@@ -558,11 +565,8 @@ void ChromeCleanerControllerImpl::OnCleanerProcessDone(
       RecordCleanupResultHistogram(CLEANUP_RESULT_REBOOT_REQUIRED);
       SetStateAndNotifyObservers(State::kRebootRequired);
 
-      Browser* browser = chrome_cleaner_util::FindBrowser();
-      if (browser)
-        chrome_cleaner_util::OpenSettingsPage(
-            browser, WindowOpenDisposition::NEW_BACKGROUND_TAB,
-            /*skip_if_current_tab=*/true);
+      // Start the reboot prompt flow.
+      delegate_->StartRebootPromptFlow(this);
       return;
     }
 
@@ -570,11 +574,9 @@ void ChromeCleanerControllerImpl::OnCleanerProcessDone(
       RecordCleanupResultHistogram(CLEANUP_RESULT_SUCCEEDED);
       delegate_->ResetTaggedProfiles(
           g_browser_process->profile_manager()->GetLoadedProfiles(),
-          // OnSettingsResetCompleted() will take care of transitioning to the
-          // kIdle state with IdleReason kCleaningSucceeded.
-          base::BindOnce(&ChromeCleanerControllerImpl::OnSettingsResetCompleted,
-                         base::Unretained(this)));
-      ResetCleanerDataAndInvalidateWeakPtrs();
+          base::BindOnce(&base::DoNothing));
+      idle_reason_ = IdleReason::kCleaningSucceeded;
+      SetStateAndNotifyObservers(State::kIdle);
       return;
     }
   }
@@ -596,11 +598,6 @@ void ChromeCleanerControllerImpl::InitiateReboot() {
     for (auto& observer : observer_list_)
       observer.OnRebootFailed();
   }
-}
-
-void ChromeCleanerControllerImpl::OnSettingsResetCompleted() {
-  idle_reason_ = IdleReason::kCleaningSucceeded;
-  SetStateAndNotifyObservers(State::kIdle);
 }
 
 }  // namespace safe_browsing

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/browser/accessibility/accessibility_tree_formatter.h"
+#include "content/browser/accessibility/accessibility_tree_formatter_browser.h"
 
 #include <atk/atk.h>
 
@@ -19,7 +19,8 @@
 
 namespace content {
 
-class AccessibilityTreeFormatterAuraLinux : public AccessibilityTreeFormatter {
+class AccessibilityTreeFormatterAuraLinux
+    : public AccessibilityTreeFormatterBrowser {
  public:
   explicit AccessibilityTreeFormatterAuraLinux();
   ~AccessibilityTreeFormatterAuraLinux() override;
@@ -31,7 +32,9 @@ class AccessibilityTreeFormatterAuraLinux : public AccessibilityTreeFormatter {
   const std::string GetDenyString() override;
   void AddProperties(const BrowserAccessibility& node,
                      base::DictionaryValue* dict) override;
-  base::string16 ToString(const base::DictionaryValue& node) override;
+  base::string16 ProcessTreeForOutput(
+      const base::DictionaryValue& node,
+      base::DictionaryValue* filtered_dict_result = nullptr) override;
 };
 
 // static
@@ -73,8 +76,13 @@ void AccessibilityTreeFormatterAuraLinux::AddProperties(
   dict->Set("states", std::move(states));
 }
 
-base::string16 AccessibilityTreeFormatterAuraLinux::ToString(
-    const base::DictionaryValue& node) {
+base::string16 AccessibilityTreeFormatterAuraLinux::ProcessTreeForOutput(
+    const base::DictionaryValue& node,
+    base::DictionaryValue* filtered_dict_result) {
+  base::string16 error_value;
+  if (node.GetString("error", &error_value))
+    return error_value;
+
   base::string16 line;
   std::string role_value;
   node.GetString("role", &role_value);

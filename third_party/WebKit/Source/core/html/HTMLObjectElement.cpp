@@ -25,7 +25,6 @@
 #include "core/html/HTMLObjectElement.h"
 
 #include "bindings/core/v8/ScriptEventListener.h"
-#include "core/HTMLNames.h"
 #include "core/dom/Attribute.h"
 #include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
@@ -40,6 +39,7 @@
 #include "core/html/HTMLMetaElement.h"
 #include "core/html/HTMLParamElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
+#include "core/html_names.h"
 #include "core/layout/api/LayoutEmbeddedItem.h"
 #include "core/plugins/PluginView.h"
 #include "platform/network/mime/MIMETypeRegistry.h"
@@ -66,7 +66,7 @@ HTMLObjectElement* HTMLObjectElement::Create(Document& document,
   return element;
 }
 
-DEFINE_TRACE(HTMLObjectElement) {
+void HTMLObjectElement::Trace(blink::Visitor* visitor) {
   ListedElement::Trace(visitor);
   HTMLPlugInElement::Trace(visitor);
 }
@@ -206,7 +206,7 @@ bool HTMLObjectElement::HasFallbackContent() const {
     if (child->IsTextNode()) {
       if (!ToText(child)->ContainsOnlyWhitespace())
         return true;
-    } else if (!isHTMLParamElement(*child)) {
+    } else if (!IsHTMLParamElement(*child)) {
       return true;
     }
   }
@@ -366,10 +366,10 @@ void HTMLObjectElement::RenderFallbackContent() {
 
   // Before we give up and use fallback content, check to see if this is a MIME
   // type issue.
-  if (image_loader_ && image_loader_->GetImage() &&
-      image_loader_->GetImage()->GetContentStatus() !=
+  if (image_loader_ && image_loader_->GetContent() &&
+      image_loader_->GetContent()->GetContentStatus() !=
           ResourceStatus::kLoadError) {
-    service_type_ = image_loader_->GetImage()->GetResponse().MimeType();
+    service_type_ = image_loader_->GetContent()->GetResponse().MimeType();
     if (!IsImageType()) {
       // If we don't think we have an image type anymore, then clear the image
       // from the loader.
@@ -396,7 +396,7 @@ bool HTMLObjectElement::IsExposed() const {
       return false;
   }
   for (HTMLElement& element : Traversal<HTMLElement>::DescendantsOf(*this)) {
-    if (isHTMLObjectElement(element) || isHTMLEmbedElement(element))
+    if (IsHTMLObjectElement(element) || IsHTMLEmbedElement(element))
       return false;
   }
   return true;
@@ -407,13 +407,13 @@ bool HTMLObjectElement::ContainsJavaApplet() const {
     return true;
 
   for (HTMLElement& child : Traversal<HTMLElement>::ChildrenOf(*this)) {
-    if (isHTMLParamElement(child) &&
+    if (IsHTMLParamElement(child) &&
         DeprecatedEqualIgnoringCase(child.GetNameAttribute(), "type") &&
         MIMETypeRegistry::IsJavaAppletMIMEType(
             child.getAttribute(valueAttr).GetString()))
       return true;
-    if (isHTMLObjectElement(child) &&
-        toHTMLObjectElement(child).ContainsJavaApplet())
+    if (IsHTMLObjectElement(child) &&
+        ToHTMLObjectElement(child).ContainsJavaApplet())
       return true;
   }
 

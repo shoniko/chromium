@@ -22,10 +22,10 @@
 
 #include "core/svg/SVGStyleElement.h"
 
-#include "core/MediaTypeNames.h"
 #include "core/css/CSSStyleSheet.h"
 #include "core/dom/TaskRunnerHelper.h"
 #include "core/dom/events/Event.h"
+#include "core/media_type_names.h"
 #include "platform/wtf/StdLibExtras.h"
 
 namespace blink {
@@ -141,7 +141,7 @@ void SVGStyleElement::DispatchPendingEvent() {
   DispatchEvent(Event::Create(EventTypeNames::error));
 }
 
-DEFINE_TRACE(SVGStyleElement) {
+void SVGStyleElement::Trace(blink::Visitor* visitor) {
   StyleElement::Trace(visitor);
   SVGElement::Trace(visitor);
 }

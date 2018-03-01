@@ -29,6 +29,7 @@
 #include "ui/display/screen_base.h"
 #include "ui/display/types/display_constants.h"
 #include "ui/events/event_rewriter.h"
+#include "ui/gfx/geometry/point_conversions.h"
 
 #if defined(OS_CHROMEOS)
 #include "ui/chromeos/events/event_rewriter_chromeos.h"
@@ -76,7 +77,8 @@ bool DisplayManager::SetDisplayConfiguration(
     const std::vector<display::Display>& displays,
     const std::vector<display::ViewportMetrics>& viewport_metrics,
     int64_t primary_display_id,
-    int64_t internal_display_id) {
+    int64_t internal_display_id,
+    const std::vector<display::Display>& mirrors) {
   if (window_server_->display_creation_config() !=
       DisplayCreationConfig::MANUAL) {
     LOG(ERROR) << "SetDisplayConfiguration is only valid when roots manually "
@@ -120,6 +122,11 @@ bool DisplayManager::SetDisplayConfiguration(
     LOG(ERROR) << "SetDisplayConfiguration internal display id not in displays";
     return false;
   }
+  if (!mirrors.empty()) {
+    NOTIMPLEMENTED() << "TODO(crbug.com/764472): Mus unified/mirroring modes.";
+    return false;
+  }
+
   // See comment in header as to why this doesn't use Display::SetInternalId().
   internal_display_id_ = internal_display_id;
 
@@ -335,8 +342,8 @@ void DisplayManager::OnActiveUserIdChanged(const UserId& previously_active_id,
   int64_t mouse_display_id = 0;
   if (previous_window_manager_state) {
     mouse_location_on_display =
-        previous_window_manager_state->event_dispatcher()
-            ->mouse_pointer_last_location();
+        gfx::ToFlooredPoint(previous_window_manager_state->event_dispatcher()
+                                ->mouse_pointer_last_location());
     mouse_display_id = previous_window_manager_state->event_dispatcher()
                            ->mouse_pointer_display_id();
     previous_window_manager_state->Deactivate();

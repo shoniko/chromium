@@ -7,6 +7,7 @@
 #include "build/build_config.h"
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/frame_host/frame_tree_node.h"
+#include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/notification_service.h"
@@ -462,10 +463,10 @@ IN_PROC_BROWSER_TEST_F(FrameTreeBrowserTest, ChildFrameWithSrcdoc) {
       child, "domAutomationController.send(document.origin);", &frame_origin));
   EXPECT_TRUE(
       child->current_frame_host()->GetLastCommittedOrigin().IsSameOriginWith(
-          url::Origin(GURL(frame_origin))));
+          url::Origin::Create(GURL(frame_origin))));
   EXPECT_FALSE(
       root->current_frame_host()->GetLastCommittedOrigin().IsSameOriginWith(
-          url::Origin(GURL(frame_origin))));
+          url::Origin::Create(GURL(frame_origin))));
 
   // Create a new iframe with srcdoc and add it to the main frame. It should
   // be created in the same SiteInstance as the parent.
@@ -520,16 +521,17 @@ IN_PROC_BROWSER_TEST_F(FrameTreeBrowserTest, SandboxFlagsSetForChildFrames) {
   // which resets both SandboxFlags::Scripts and
   // SandboxFlags::AutomaticFeatures bits per blink::parseSandboxPolicy(), and
   // third frame has "allow-scripts allow-same-origin".
-  EXPECT_EQ(blink::WebSandboxFlags::kNone, root->effective_sandbox_flags());
+  EXPECT_EQ(blink::WebSandboxFlags::kNone,
+            root->effective_frame_policy().sandbox_flags);
   EXPECT_EQ(blink::WebSandboxFlags::kAll,
-            root->child_at(0)->effective_sandbox_flags());
+            root->child_at(0)->effective_frame_policy().sandbox_flags);
   EXPECT_EQ(blink::WebSandboxFlags::kAll & ~blink::WebSandboxFlags::kScripts &
                 ~blink::WebSandboxFlags::kAutomaticFeatures,
-            root->child_at(1)->effective_sandbox_flags());
+            root->child_at(1)->effective_frame_policy().sandbox_flags);
   EXPECT_EQ(blink::WebSandboxFlags::kAll & ~blink::WebSandboxFlags::kScripts &
                 ~blink::WebSandboxFlags::kAutomaticFeatures &
                 ~blink::WebSandboxFlags::kOrigin,
-            root->child_at(2)->effective_sandbox_flags());
+            root->child_at(2)->effective_frame_policy().sandbox_flags);
 
   // Sandboxed frames should set a unique origin unless they have the
   // "allow-same-origin" directive.
@@ -542,7 +544,7 @@ IN_PROC_BROWSER_TEST_F(FrameTreeBrowserTest, SandboxFlagsSetForChildFrames) {
   GURL frame_url(embedded_test_server()->GetURL("/title1.html"));
   NavigateFrameToURL(root->child_at(0), frame_url);
   EXPECT_EQ(blink::WebSandboxFlags::kAll,
-            root->child_at(0)->effective_sandbox_flags());
+            root->child_at(0)->effective_frame_policy().sandbox_flags);
 }
 
 // Ensure that a popup opened from a subframe sets its opener to the subframe's
@@ -626,7 +628,7 @@ IN_PROC_BROWSER_TEST_F(CrossProcessFrameTreeBrowserTest,
 
   EXPECT_NE(shell()->web_contents()->GetRenderViewHost(), rvh);
   EXPECT_NE(shell()->web_contents()->GetSiteInstance(), child_instance);
-  EXPECT_NE(shell()->web_contents()->GetRenderProcessHost(), rph);
+  EXPECT_NE(shell()->web_contents()->GetMainFrame()->GetProcess(), rph);
 
   // Ensure that the root node has a proxy for the child node's SiteInstance.
   EXPECT_TRUE(root->render_manager()->GetRenderFrameProxyHost(child_instance));

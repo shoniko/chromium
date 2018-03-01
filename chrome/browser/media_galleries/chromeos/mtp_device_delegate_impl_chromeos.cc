@@ -332,7 +332,7 @@ void CloseStorageAndDestroyTaskHelperOnUIThread(
 // - For other error cases, base::File::FILE_ERROR_FAILED is set.
 std::pair<int, base::File::Error> OpenFileDescriptor(const char* file_path,
                                                      const int flags) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   if (base::DirectoryExists(base::FilePath(file_path)))
     return std::make_pair(-1, base::File::FILE_ERROR_NOT_A_FILE);
@@ -346,7 +346,7 @@ std::pair<int, base::File::Error> OpenFileDescriptor(const char* file_path,
 
 // Closes |file_descriptor| on a background task runner.
 void CloseFileDescriptor(const int file_descriptor) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   IGNORE_EINTR(close(file_descriptor));
 }
@@ -367,13 +367,9 @@ void FakeCopyFileProgressCallback(int64_t size) {}
 MTPDeviceDelegateImplLinux::PendingTaskInfo::PendingTaskInfo(
     const base::FilePath& path,
     content::BrowserThread::ID thread_id,
-    const tracked_objects::Location& location,
+    const base::Location& location,
     const base::Closure& task)
-    : path(path),
-      thread_id(thread_id),
-      location(location),
-      task(task) {
-}
+    : path(path), thread_id(thread_id), location(location), task(task) {}
 
 MTPDeviceDelegateImplLinux::PendingTaskInfo::PendingTaskInfo(
     const PendingTaskInfo& other) = default;

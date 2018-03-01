@@ -10,7 +10,7 @@ package org.chromium.chrome.browser;
  */
 public abstract class ChromeSwitches {
     // Switches used from Java.  Please continue switch style used Chrome where
-    // options-have-hypens and are_not_split_with_underscores.
+    // options-have-hyphens and are_not_split_with_underscores.
 
     /** Mimic a low end device */
     public static final String ENABLE_ACCESSIBILITY_TAB_SWITCHER =

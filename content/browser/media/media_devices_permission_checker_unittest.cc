@@ -38,7 +38,7 @@ class TestWebContentsDelegate : public content::WebContentsDelegate {
 class MediaDevicesPermissionCheckerTest : public RenderViewHostImplTestHarness {
  public:
   MediaDevicesPermissionCheckerTest()
-      : origin_(GURL("https://www.google.com")),
+      : origin_(url::Origin::Create(GURL("https://www.google.com"))),
         callback_run_(false),
         callback_result_(false) {}
 
@@ -121,7 +121,8 @@ TEST_F(MediaDevicesPermissionCheckerTest, CheckPermissionWithFeaturePolicy) {
   // Ensure that the policy is ignored if kUseFeaturePolicyForPermissions is
   // disabled.
   base::test::ScopedFeatureList empty_feature_list;
-  empty_feature_list.Init();
+  empty_feature_list.InitAndDisableFeature(
+      features::kUseFeaturePolicyForPermissions);
   EXPECT_TRUE(CheckPermission(MEDIA_DEVICE_TYPE_AUDIO_INPUT));
   EXPECT_TRUE(CheckPermission(MEDIA_DEVICE_TYPE_VIDEO_INPUT));
 }

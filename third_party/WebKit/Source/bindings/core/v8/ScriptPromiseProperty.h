@@ -8,9 +8,9 @@
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromisePropertyBase.h"
 #include "bindings/core/v8/ToV8ForCore.h"
-#include "platform/ScriptForbiddenScope.h"
+#include "platform/bindings/ScriptForbiddenScope.h"
 #include "platform/wtf/Noncopyable.h"
-#include "platform/wtf/PassRefPtr.h"
+#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -72,7 +72,7 @@ class ScriptPromiseProperty : public ScriptPromisePropertyBase {
   // This method keeps the holder object and the property name.
   void Reset();
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   v8::Local<v8::Object> Holder(v8::Isolate*,

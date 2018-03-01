@@ -7,9 +7,8 @@ package org.chromium.chrome.browser.payments;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.MediumTest;
 
-import junit.framework.Assert;
-
 import org.junit.After;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -113,8 +112,7 @@ public class AndroidPaymentAppFinderTest implements PaymentAppCreatedCallback {
     public void setUp() throws Throwable {
         mRule.startMainActivityOnBlankPage();
         mPackageManager.reset();
-        mServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        mServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         mDownloader.setTestServerUri(new URI(mServer.getURL("/components/test/data/payments/")));
         mPaymentApps = new ArrayList<>();
         mAllPaymentAppsCreated = false;
@@ -992,6 +990,75 @@ public class AndroidPaymentAppFinderTest implements PaymentAppCreatedCallback {
         appIdentifiers.add(mPaymentApps.get(1).getAppIdentifier());
         Assert.assertTrue(appIdentifiers.contains("com.ikepay"));
         Assert.assertTrue(appIdentifiers.contains("com.alicepay"));
+    }
+
+    /**
+     * Verify that a payment app with duplicate default and supported method can use its own
+     * default payment method, which supports all origins.
+     * Repeated app look ups should succeed.
+     */
+    @Test
+    @Feature({"Payments"})
+    public void testDuplicateDefaultAndSupportedMethodAndAllOriginsSupported() throws Throwable {
+        Set<String> methods = new HashSet<>();
+        methods.add("https://henrypay.com/webpay");
+        mPackageManager.installPaymentApp(
+                "HenryPay", "com.henrypay", "https://henrypay.com/webpay", "55555555551111111111");
+        mPackageManager.setStringArrayMetaData(
+                "com.henrypay", new String[] {"https://henrypay.com/webpay"});
+
+        findApps(methods);
+
+        Assert.assertEquals("1 app should match the query", 1, mPaymentApps.size());
+        Assert.assertEquals("com.henrypay", mPaymentApps.get(0).getAppIdentifier());
+
+        mPaymentApps.clear();
+        mAllPaymentAppsCreated = false;
+
+        findApps(methods);
+
+        Assert.assertEquals("1 app should still match the query", 1, mPaymentApps.size());
+        Assert.assertEquals("com.henrypay", mPaymentApps.get(0).getAppIdentifier());
+    }
+
+    /**
+     * If a payment method supports two apps from different origins, both apps should be found.
+     * Repeated app look ups should succeed.
+     */
+    @Test
+    @Feature({"Payments"})
+    public void testTwoAppsFromDifferentOriginsWithTheSamePaymentMethod() throws Throwable {
+        Set<String> methods = new HashSet<>();
+        methods.add("https://jonpay.com/webpay");
+        mPackageManager.installPaymentApp(
+                "AlicePay", "com.alicepay", "https://alicepay.com/webpay", "ABCDEFABCDEFABCDEFAB");
+        mPackageManager.installPaymentApp(
+                "BobPay", "com.bobpay", "https://bobpay.com/webpay", "01020304050607080900");
+        mPackageManager.setStringArrayMetaData(
+                "com.alicepay", new String[] {"https://jonpay.com/webpay"});
+        mPackageManager.setStringArrayMetaData(
+                "com.bobpay", new String[] {"https://jonpay.com/webpay"});
+
+        findApps(methods);
+
+        Assert.assertEquals("2 apps should match the query", 2, mPaymentApps.size());
+        Set<String> appIdentifiers = new HashSet<>();
+        appIdentifiers.add(mPaymentApps.get(0).getAppIdentifier());
+        appIdentifiers.add(mPaymentApps.get(1).getAppIdentifier());
+        Assert.assertTrue(appIdentifiers.contains("com.alicepay"));
+        Assert.assertTrue(appIdentifiers.contains("com.bobpay"));
+
+        mPaymentApps.clear();
+        mAllPaymentAppsCreated = false;
+
+        findApps(methods);
+
+        Assert.assertEquals("2 apps should still match the query", 2, mPaymentApps.size());
+        appIdentifiers.clear();
+        appIdentifiers.add(mPaymentApps.get(0).getAppIdentifier());
+        appIdentifiers.add(mPaymentApps.get(1).getAppIdentifier());
+        Assert.assertTrue(appIdentifiers.contains("com.alicepay"));
+        Assert.assertTrue(appIdentifiers.contains("com.bobpay"));
     }
 
     private void findApps(final Set<String> methodNames) throws Throwable {

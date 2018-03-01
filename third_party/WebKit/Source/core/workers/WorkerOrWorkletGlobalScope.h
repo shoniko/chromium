@@ -7,8 +7,9 @@
 
 #include "bindings/core/v8/V8CacheOptions.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/frame/UseCounter.h"
+#include "core/frame/WebFeatureForward.h"
 #include "core/workers/WorkerClients.h"
+#include "platform/wtf/BitVector.h"
 
 namespace blink {
 
@@ -23,7 +24,7 @@ class CORE_EXPORT WorkerOrWorkletGlobalScope : public ExecutionContext {
   WorkerOrWorkletGlobalScope(v8::Isolate*,
                              WorkerClients*,
                              WorkerReportingProxy&);
-  virtual ~WorkerOrWorkletGlobalScope();
+  ~WorkerOrWorkletGlobalScope() override;
 
   // ExecutionContext
   bool IsWorkerOrWorkletGlobalScope() const final { return true; }
@@ -39,8 +40,7 @@ class CORE_EXPORT WorkerOrWorkletGlobalScope : public ExecutionContext {
   virtual void EvaluateClassicScript(
       const KURL& script_url,
       String source_code,
-      std::unique_ptr<Vector<char>> cached_meta_data,
-      V8CacheOptions) = 0;
+      std::unique_ptr<Vector<char>> cached_meta_data) = 0;
 
   // Returns true when the WorkerOrWorkletGlobalScope is closing (e.g. via
   // WorkerGlobalScope#close() method). If this returns true, the worker is
@@ -64,7 +64,8 @@ class CORE_EXPORT WorkerOrWorkletGlobalScope : public ExecutionContext {
   virtual WorkerThread* GetThread() const = 0;
 
   // Available only when off-main-thread-fetch is enabled.
-  ResourceFetcher* GetResourceFetcher();
+  ResourceFetcher* Fetcher() const override;
+  ResourceFetcher* EnsureFetcher();
 
   WorkerClients* Clients() const { return worker_clients_.Get(); }
 
@@ -74,7 +75,9 @@ class CORE_EXPORT WorkerOrWorkletGlobalScope : public ExecutionContext {
 
   WorkerReportingProxy& ReportingProxy() { return reporting_proxy_; }
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
+
+  scoped_refptr<WebTaskRunner> GetTaskRunner(TaskType);
 
  private:
   CrossThreadPersistent<WorkerClients> worker_clients_;

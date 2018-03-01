@@ -22,12 +22,14 @@
 #ifndef LayoutSelection_h
 #define LayoutSelection_h
 
-#include "core/editing/Position.h"
-#include "core/editing/VisibleSelection.h"
+#include "core/CoreExport.h"
+#include "core/editing/Forward.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
+class IntRect;
+class LayoutObject;
 class FrameSelection;
 
 // This class represents a selection range in layout tree for painting and
@@ -40,8 +42,6 @@ class FrameSelection;
 // editing/ passes them as offsets in the DOM tree but layout uses them as
 // offset in the layout tree. This doesn't work in the cases of
 // CSS first-letter or character transform. See crbug.com/17528.
-// TODO(yoichio): Remove unused functionality comparing to
-// SelectionMarkingRange.
 class SelectionPaintRange {
   DISALLOW_NEW();
 
@@ -67,24 +67,24 @@ class SelectionPaintRange {
 
   SelectionPaintRange() = default;
   SelectionPaintRange(LayoutObject* start_layout_object,
-                      int start_offset,
+                      base::Optional<int> start_offset,
                       LayoutObject* end_layout_object,
-                      int end_offset);
+                      base::Optional<int> end_offset);
 
   bool operator==(const SelectionPaintRange& other) const;
 
   LayoutObject* StartLayoutObject() const;
-  int StartOffset() const;
+  base::Optional<int> StartOffset() const;
   LayoutObject* EndLayoutObject() const;
-  int EndOffset() const;
+  base::Optional<int> EndOffset() const;
 
   bool IsNull() const { return !start_layout_object_; }
 
  private:
   LayoutObject* start_layout_object_ = nullptr;
-  int start_offset_ = -1;
+  base::Optional<int> start_offset_ = base::nullopt;
   LayoutObject* end_layout_object_ = nullptr;
-  int end_offset_ = -1;
+  base::Optional<int> end_offset_ = base::nullopt;
 };
 
 class LayoutSelection final : public GarbageCollected<LayoutSelection> {
@@ -105,7 +105,7 @@ class LayoutSelection final : public GarbageCollected<LayoutSelection> {
   base::Optional<int> SelectionEnd() const;
   void OnDocumentShutdown();
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   LayoutSelection(FrameSelection&);

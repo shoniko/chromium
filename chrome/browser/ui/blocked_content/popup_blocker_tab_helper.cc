@@ -4,13 +4,19 @@
 
 #include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
 
+#include <string>
+
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/subresource_filter/chrome_subresource_filter_client.h"
 #include "chrome/browser/ui/blocked_content/blocked_window_params.h"
+#include "chrome/browser/ui/blocked_content/console_logger.h"
+#include "chrome/browser/ui/blocked_content/popup_tracker.h"
+#include "chrome/browser/ui/blocked_content/safe_browsing_triggered_popup_blocker.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/common/chrome_render_frame.mojom.h"
@@ -46,10 +52,12 @@ struct PopupBlockerTabHelper::BlockedRequest {
   blink::mojom::WindowFeatures window_features;
 };
 
-PopupBlockerTabHelper::PopupBlockerTabHelper(
-    content::WebContents* web_contents)
-    : content::WebContentsObserver(web_contents) {
-}
+PopupBlockerTabHelper::PopupBlockerTabHelper(content::WebContents* web_contents)
+    : content::WebContentsObserver(web_contents),
+      safe_browsing_triggered_popup_blocker_(
+          SafeBrowsingTriggeredPopupBlocker::MaybeCreate(
+              web_contents,
+              base::MakeUnique<ConsoleLogger>())) {}
 
 PopupBlockerTabHelper::~PopupBlockerTabHelper() {
 }
@@ -60,6 +68,15 @@ void PopupBlockerTabHelper::AddObserver(Observer* observer) {
 
 void PopupBlockerTabHelper::RemoveObserver(Observer* observer) {
   observers_.RemoveObserver(observer);
+}
+
+// static
+bool PopupBlockerTabHelper::ConsiderForPopupBlocking(
+    WindowOpenDisposition disposition) {
+  return disposition == WindowOpenDisposition::NEW_POPUP ||
+         disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB ||
+         disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB ||
+         disposition == WindowOpenDisposition::NEW_WINDOW;
 }
 
 void PopupBlockerTabHelper::DidFinishNavigation(
@@ -74,8 +91,8 @@ void PopupBlockerTabHelper::DidFinishNavigation(
   }
 
   // Close blocked popups.
-  if (!blocked_popups_.IsEmpty()) {
-    blocked_popups_.Clear();
+  if (!blocked_popups_.empty()) {
+    blocked_popups_.clear();
     PopupNotificationVisibilityChanged(false);
   }
 }
@@ -97,6 +114,8 @@ bool PopupBlockerTabHelper::MaybeBlockPopup(
     const blink::mojom::WindowFeatures& window_features) {
   DCHECK(!open_url_params ||
          open_url_params->user_gesture == params.user_gesture);
+
+  LogAction(Action::kInitiated);
 
   const bool user_gesture = params.user_gesture;
   if (!web_contents)
@@ -129,15 +148,23 @@ bool PopupBlockerTabHelper::MaybeBlockPopup(
     return false;
   }
 
-  // The subresource_filter triggers an extra aggressive popup blocker on
-  // pages where ads are being blocked, even if there is a user gesture.
   if (user_gesture) {
     auto* driver_factory = subresource_filter::
         ContentSubresourceFilterDriverFactory::FromWebContents(web_contents);
-    if (!driver_factory ||
-        !driver_factory->ShouldDisallowNewWindow(open_url_params)) {
+    auto* safe_browsing_blocker =
+        popup_blocker->safe_browsing_triggered_popup_blocker_.get();
+
+    // TODO(crbug.com/761385): The subresource_filter popup blocker is
+    // deprecated. Remove the subresource_filter code here once the
+    // safe_browsing popup blocker is operational.
+    bool allowed_subresource_filter =
+        !driver_factory ||
+        !driver_factory->ShouldDisallowNewWindow(open_url_params);
+    bool allowed_safe_browsing =
+        !safe_browsing_blocker ||
+        !safe_browsing_blocker->ShouldApplyStrongPopupBlocker(open_url_params);
+    if (allowed_subresource_filter && allowed_safe_browsing)
       return false;
-    }
     ChromeSubresourceFilterClient::LogAction(kActionPopupBlocked);
   }
 
@@ -148,11 +175,14 @@ bool PopupBlockerTabHelper::MaybeBlockPopup(
 void PopupBlockerTabHelper::AddBlockedPopup(
     const chrome::NavigateParams& params,
     const blink::mojom::WindowFeatures& window_features) {
+  LogAction(Action::kBlocked);
   if (blocked_popups_.size() >= kMaximumNumberOfPopups)
     return;
 
-  auto id = blocked_popups_.Add(
-      base::MakeUnique<BlockedRequest>(params, window_features));
+  int id = next_id_;
+  next_id_++;
+  blocked_popups_[id] =
+      base::MakeUnique<BlockedRequest>(params, window_features);
   TabSpecificContentSettings::FromWebContents(web_contents())->
       OnContentBlocked(CONTENT_SETTINGS_TYPE_POPUPS);
   for (auto& observer : observers_)
@@ -162,9 +192,14 @@ void PopupBlockerTabHelper::AddBlockedPopup(
 void PopupBlockerTabHelper::ShowBlockedPopup(
     int32_t id,
     WindowOpenDisposition disposition) {
-  BlockedRequest* popup = blocked_popups_.Lookup(id);
-  if (!popup)
+  auto it = blocked_popups_.find(id);
+  if (it == blocked_popups_.end())
     return;
+
+  UMA_HISTOGRAM_ENUMERATION("ContentSettings.Popups.ClickThroughPosition",
+                            GetPopupPosition(id), PopupPosition::kLast);
+
+  BlockedRequest* popup = it->second.get();
 
   // We set user_gesture to true here, so the new popup gets correctly focused.
   popup->params.user_gesture = true;
@@ -176,19 +211,24 @@ void PopupBlockerTabHelper::ShowBlockedPopup(
 #else
   chrome::Navigate(&popup->params);
 #endif
-  if (popup->params.disposition == WindowOpenDisposition::NEW_POPUP &&
-      popup->params.target_contents) {
-    content::RenderFrameHost* host =
-        popup->params.target_contents->GetMainFrame();
-    DCHECK(host);
-    chrome::mojom::ChromeRenderFrameAssociatedPtr client;
-    host->GetRemoteAssociatedInterfaces()->GetInterface(&client);
-    client->SetWindowFeatures(popup->window_features.Clone());
+  if (popup->params.target_contents) {
+    PopupTracker::CreateForWebContents(popup->params.target_contents,
+                                       web_contents());
+
+    if (popup->params.disposition == WindowOpenDisposition::NEW_POPUP) {
+      content::RenderFrameHost* host =
+          popup->params.target_contents->GetMainFrame();
+      DCHECK(host);
+      chrome::mojom::ChromeRenderFrameAssociatedPtr client;
+      host->GetRemoteAssociatedInterfaces()->GetInterface(&client);
+      client->SetWindowFeatures(popup->window_features.Clone());
+    }
   }
 
-  blocked_popups_.Remove(id);
-  if (blocked_popups_.IsEmpty())
+  blocked_popups_.erase(id);
+  if (blocked_popups_.empty())
     PopupNotificationVisibilityChanged(false);
+  LogAction(Action::kClickedThrough);
 }
 
 size_t PopupBlockerTabHelper::GetBlockedPopupsCount() const {
@@ -198,10 +238,29 @@ size_t PopupBlockerTabHelper::GetBlockedPopupsCount() const {
 PopupBlockerTabHelper::PopupIdMap
     PopupBlockerTabHelper::GetBlockedPopupRequests() {
   PopupIdMap result;
-  for (base::IDMap<std::unique_ptr<BlockedRequest>>::const_iterator iter(
-           &blocked_popups_);
-       !iter.IsAtEnd(); iter.Advance()) {
-    result[iter.GetCurrentKey()] = iter.GetCurrentValue()->params.url;
+  for (const auto& it : blocked_popups_) {
+    result[it.first] = it.second->params.url;
   }
   return result;
+}
+
+PopupBlockerTabHelper::PopupPosition PopupBlockerTabHelper::GetPopupPosition(
+    int32_t id) const {
+  DCHECK(base::ContainsKey(blocked_popups_, id));
+  if (blocked_popups_.size() == 1u)
+    return PopupPosition::kOnlyPopup;
+
+  if (blocked_popups_.begin()->first == id)
+    return PopupPosition::kFirstPopup;
+
+  if (blocked_popups_.rbegin()->first == id)
+    return PopupPosition::kLastPopup;
+
+  return PopupPosition::kMiddlePopup;
+}
+
+// static
+void PopupBlockerTabHelper::LogAction(Action action) {
+  UMA_HISTOGRAM_ENUMERATION("ContentSettings.Popups.BlockerActions", action,
+                            Action::kLast);
 }

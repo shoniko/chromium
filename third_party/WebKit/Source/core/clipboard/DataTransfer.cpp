@@ -28,18 +28,18 @@
 #include <memory>
 
 #include "build/build_config.h"
-#include "core/HTMLNames.h"
 #include "core/clipboard/DataObject.h"
 #include "core/clipboard/DataTransferItem.h"
 #include "core/clipboard/DataTransferItemList.h"
 #include "core/editing/EphemeralRange.h"
 #include "core/editing/FrameSelection.h"
+#include "core/editing/VisibleSelection.h"
 #include "core/editing/serializers/Serialization.h"
 #include "core/fileapi/FileList.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/VisualViewport.h"
 #include "core/html/HTMLImageElement.h"
-#include "core/html/TextControlElement.h"
+#include "core/html/forms/TextControlElement.h"
 #include "core/layout/LayoutImage.h"
 #include "core/layout/LayoutObject.h"
 #include "core/loader/resource/ImageResourceContent.h"
@@ -115,8 +115,14 @@ class DraggedNodeImageBuilder {
                             kPaintLayerAppliedTransform |
                             kPaintLayerUncachedClipRects;
     PaintRecordBuilder builder(
-        DataTransfer::DeviceSpaceBounds(bounding_box, *local_frame_));
+        DataTransfer::DeviceSpaceRect(bounding_box, *local_frame_));
+
+    dragged_layout_object->GetDocument().Lifecycle().AdvanceTo(
+        DocumentLifecycle::kInPaint);
     PaintLayerPainter(*layer).Paint(builder.Context(), painting_info, flags);
+    dragged_layout_object->GetDocument().Lifecycle().AdvanceTo(
+        DocumentLifecycle::kPaintClean);
+
     PropertyTreeState border_box_properties = PropertyTreeState::Root();
     if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled()) {
       border_box_properties =
@@ -186,7 +192,8 @@ static String ConvertDragOperationToEffectAllowed(DragOperation op) {
 // We provide the IE clipboard types (URL and Text), and the clipboard types
 // specified in the WHATWG Web Applications 1.0 draft see
 // http://www.whatwg.org/specs/web-apps/current-work/ Section 6.3.5.3
-static String NormalizeType(const String& type, bool* convert_to_url = 0) {
+static String NormalizeType(const String& type,
+                            bool* convert_to_url = nullptr) {
   String clean_type = type.StripWhiteSpace().DeprecatedLower();
   if (clean_type == kMimeTypeText ||
       clean_type.StartsWith(kMimeTypeTextPlainEtc))
@@ -320,8 +327,8 @@ void DataTransfer::setDragImage(Element* image, int x, int y) {
     return;
 
   IntPoint location(x, y);
-  if (isHTMLImageElement(*image) && !image->isConnected())
-    SetDragImageResource(toHTMLImageElement(*image).CachedImage(), location);
+  if (IsHTMLImageElement(*image) && !image->isConnected())
+    SetDragImageResource(ToHTMLImageElement(*image).CachedImage(), location);
   else
     SetDragImageElement(image, location);
 }
@@ -337,26 +344,33 @@ void DataTransfer::ClearDragImage() {
 
 void DataTransfer::SetDragImageResource(ImageResourceContent* img,
                                         const IntPoint& loc) {
-  setDragImage(img, 0, loc);
+  setDragImage(img, nullptr, loc);
 }
 
 void DataTransfer::SetDragImageElement(Node* node, const IntPoint& loc) {
-  setDragImage(0, node, loc);
+  setDragImage(nullptr, node, loc);
+}
+
+FloatRect DataTransfer::ClipByVisualViewport(const FloatRect& rect_in_frame,
+                                             const LocalFrame& frame) {
+  IntRect viewport_in_root_frame =
+      IntRect(frame.GetPage()->GetVisualViewport().VisibleRect());
+  FloatRect viewport_in_frame =
+      frame.View()->ConvertFromRootFrame(viewport_in_root_frame);
+  auto* view_scrollable_area = frame.View()->LayoutViewportScrollableArea();
+  viewport_in_frame.Move(view_scrollable_area->GetScrollOffset());
+  return Intersection(viewport_in_frame, rect_in_frame);
 }
 
 // static
-// Converts from bounds in CSS space to device space based on the given
-// frame.
-FloatRect DataTransfer::DeviceSpaceBounds(const FloatRect css_bounds,
-                                          const LocalFrame& frame) {
+// Converts from bounds in CSS space to device space based on the given frame.
+FloatRect DataTransfer::DeviceSpaceRect(const FloatRect css_rect,
+                                        const LocalFrame& frame) {
   float device_scale_factor = frame.GetPage()->DeviceScaleFactorDeprecated();
   float page_scale_factor = frame.GetPage()->GetVisualViewport().Scale();
-  FloatRect device_bounds(css_bounds);
-  device_bounds.SetWidth(css_bounds.Width() * device_scale_factor *
-                         page_scale_factor);
-  device_bounds.SetHeight(css_bounds.Height() * device_scale_factor *
-                          page_scale_factor);
-  return device_bounds;
+  FloatRect device_rect(css_rect);
+  device_rect.Scale(device_scale_factor * page_scale_factor);
+  return device_rect;
 }
 
 // static
@@ -366,23 +380,24 @@ std::unique_ptr<DragImage> DataTransfer::CreateDragImageForFrame(
     const LocalFrame& frame,
     float opacity,
     RespectImageOrientationEnum image_orientation,
-    const FloatRect& css_bounds,
+    const FloatRect& css_rect,
     PaintRecordBuilder& builder,
     const PropertyTreeState& property_tree_state) {
   float device_scale_factor = frame.GetPage()->DeviceScaleFactorDeprecated();
   float page_scale_factor = frame.GetPage()->GetVisualViewport().Scale();
 
-  FloatRect device_bounds = DeviceSpaceBounds(css_bounds, frame);
+  FloatRect rect_in_visual_viewport = ClipByVisualViewport(css_rect, frame);
+  FloatRect device_rect = DeviceSpaceRect(rect_in_visual_viewport, frame);
 
   AffineTransform transform;
+  transform.Translate(-device_rect.X(), -device_rect.Y());
   transform.Scale(device_scale_factor * page_scale_factor);
-  transform.Translate(-device_bounds.X(), -device_bounds.Y());
 
   // Rasterize upfront, since DragImage::create() is going to do it anyway
   // (SkImage::asLegacyBitmap).
   SkSurfaceProps surface_props(0, kUnknown_SkPixelGeometry);
   sk_sp<SkSurface> surface = SkSurface::MakeRasterN32Premul(
-      device_bounds.Width(), device_bounds.Height(), &surface_props);
+      device_rect.Width(), device_rect.Height(), &surface_props);
   if (!surface)
     return nullptr;
 
@@ -390,11 +405,12 @@ std::unique_ptr<DragImage> DataTransfer::CreateDragImageForFrame(
   skia_paint_canvas.concat(AffineTransformToSkMatrix(transform));
   builder.EndRecording(skia_paint_canvas, property_tree_state);
 
-  RefPtr<Image> image = StaticBitmapImage::Create(surface->makeImageSnapshot());
+  scoped_refptr<Image> image =
+      StaticBitmapImage::Create(surface->makeImageSnapshot());
   float screen_device_scale_factor =
       frame.GetPage()->GetChromeClient().GetScreenInfo().device_scale_factor;
 
-  return DragImage::Create(image.Get(), image_orientation,
+  return DragImage::Create(image.get(), image_orientation,
                            screen_device_scale_factor, kInterpolationHigh,
                            opacity);
 }
@@ -426,13 +442,13 @@ static ImageResourceContent* GetImageResourceContent(Element* element) {
   DCHECK(element);
   LayoutObject* layout_object = element->GetLayoutObject();
   if (!layout_object || !layout_object->IsImage())
-    return 0;
+    return nullptr;
 
   LayoutImage* image = ToLayoutImage(layout_object);
   if (image->CachedImage() && !image->CachedImage()->ErrorOccurred())
     return image->CachedImage();
 
-  return 0;
+  return nullptr;
 }
 
 static void WriteImageToDataObject(DataObject* data_object,
@@ -443,7 +459,7 @@ static void WriteImageToDataObject(DataObject* data_object,
   if (!cached_image || !cached_image->GetImage() || !cached_image->IsLoaded())
     return;
 
-  RefPtr<SharedBuffer> image_buffer = cached_image->GetImage()->Data();
+  scoped_refptr<SharedBuffer> image_buffer = cached_image->GetImage()->Data();
   if (!image_buffer || !image_buffer->size())
     return;
 
@@ -649,10 +665,11 @@ String ConvertDragOperationToDropZoneOperation(DragOperation operation) {
   }
 }
 
-DEFINE_TRACE(DataTransfer) {
+void DataTransfer::Trace(blink::Visitor* visitor) {
   visitor->Trace(data_object_);
   visitor->Trace(drag_image_);
   visitor->Trace(drag_image_element_);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

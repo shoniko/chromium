@@ -5,6 +5,7 @@
 #include "content/browser/service_worker/service_worker_storage.h"
 
 #include <stddef.h>
+#include <memory>
 #include <utility>
 
 #include "base/bind_helpers.h"
@@ -28,6 +29,8 @@
 #include "net/base/net_errors.h"
 #include "storage/browser/quota/quota_manager_proxy.h"
 #include "storage/browser/quota/special_storage_policy.h"
+#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_object.mojom.h"
+#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_registration.mojom.h"
 
 using std::swap;
 
@@ -35,9 +38,12 @@ namespace content {
 
 namespace {
 
-void RunSoon(const tracked_objects::Location& from_here,
-             const base::Closure& closure) {
+void RunSoon(const base::Location& from_here, const base::Closure& closure) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(from_here, closure);
+}
+
+void RunSoon(const base::Location& from_here, base::OnceClosure closure) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(from_here, std::move(closure));
 }
 
 void CompleteFindNow(
@@ -53,7 +59,7 @@ void CompleteFindNow(
 }
 
 void CompleteFindSoon(
-    const tracked_objects::Location& from_here,
+    const base::Location& from_here,
     scoped_refptr<ServiceWorkerRegistration> registration,
     ServiceWorkerStatusCode status,
     const ServiceWorkerStorage::FindRegistrationCallback& callback) {
@@ -66,8 +72,8 @@ const base::FilePath::CharType kDatabaseName[] =
 const base::FilePath::CharType kDiskCacheName[] =
     FILE_PATH_LITERAL("ScriptCache");
 
-const int kMaxMemDiskCacheSize = 10 * 1024 * 1024;
-const int kMaxDiskCacheSize = 250 * 1024 * 1024;
+const int kMaxServiceWorkerStorageMemDiskCacheSize = 10 * 1024 * 1024;
+const int kMaxServiceWorkerStorageDiskCacheSize = 250 * 1024 * 1024;
 
 ServiceWorkerStatusCode DatabaseStatusToStatusCode(
     ServiceWorkerDatabase::Status status) {
@@ -92,17 +98,15 @@ void DidUpdateNavigationPreloadState(
 }  // namespace
 
 ServiceWorkerStorage::InitialData::InitialData()
-    : next_registration_id(kInvalidServiceWorkerRegistrationId),
-      next_version_id(kInvalidServiceWorkerVersionId),
+    : next_registration_id(blink::mojom::kInvalidServiceWorkerRegistrationId),
+      next_version_id(blink::mojom::kInvalidServiceWorkerVersionId),
       next_resource_id(kInvalidServiceWorkerResourceId) {}
 
 ServiceWorkerStorage::InitialData::~InitialData() {
 }
 
-ServiceWorkerStorage::
-DidDeleteRegistrationParams::DidDeleteRegistrationParams()
-    : registration_id(kInvalidServiceWorkerRegistrationId) {
-}
+ServiceWorkerStorage::DidDeleteRegistrationParams::DidDeleteRegistrationParams()
+    : registration_id(blink::mojom::kInvalidServiceWorkerRegistrationId) {}
 
 ServiceWorkerStorage::DidDeleteRegistrationParams::DidDeleteRegistrationParams(
     const DidDeleteRegistrationParams& other) = default;
@@ -609,7 +613,7 @@ void ServiceWorkerStorage::StoreUserData(
   }
   DCHECK_EQ(INITIALIZED, state_);
 
-  if (registration_id == kInvalidServiceWorkerRegistrationId ||
+  if (registration_id == blink::mojom::kInvalidServiceWorkerRegistrationId ||
       key_value_pairs.empty()) {
     RunSoon(FROM_HERE, base::Bind(callback, SERVICE_WORKER_ERROR_FAILED));
     return;
@@ -644,7 +648,8 @@ void ServiceWorkerStorage::GetUserData(int64_t registration_id,
   }
   DCHECK_EQ(INITIALIZED, state_);
 
-  if (registration_id == kInvalidServiceWorkerRegistrationId || keys.empty()) {
+  if (registration_id == blink::mojom::kInvalidServiceWorkerRegistrationId ||
+      keys.empty()) {
     RunSoon(FROM_HERE, base::Bind(callback, std::vector<std::string>(),
                                   SERVICE_WORKER_ERROR_FAILED));
     return;
@@ -680,7 +685,7 @@ void ServiceWorkerStorage::GetUserDataByKeyPrefix(
   }
   DCHECK_EQ(INITIALIZED, state_);
 
-  if (registration_id == kInvalidServiceWorkerRegistrationId) {
+  if (registration_id == blink::mojom::kInvalidServiceWorkerRegistrationId) {
     RunSoon(FROM_HERE, base::Bind(callback, std::vector<std::string>(),
                                   SERVICE_WORKER_ERROR_FAILED));
     return;
@@ -717,7 +722,8 @@ void ServiceWorkerStorage::ClearUserData(int64_t registration_id,
     return;
   }
 
-  if (registration_id == kInvalidServiceWorkerRegistrationId || keys.empty()) {
+  if (registration_id == blink::mojom::kInvalidServiceWorkerRegistrationId ||
+      keys.empty()) {
     RunSoon(FROM_HERE, base::Bind(callback, SERVICE_WORKER_ERROR_FAILED));
     return;
   }
@@ -755,7 +761,7 @@ void ServiceWorkerStorage::ClearUserDataByKeyPrefixes(
     return;
   }
 
-  if (registration_id == kInvalidServiceWorkerRegistrationId ||
+  if (registration_id == blink::mojom::kInvalidServiceWorkerRegistrationId ||
       key_prefixes.empty()) {
     RunSoon(FROM_HERE, base::Bind(callback, SERVICE_WORKER_ERROR_FAILED));
     return;
@@ -876,14 +882,14 @@ void ServiceWorkerStorage::DiskCacheImplDoneWithDisk() {
 
 int64_t ServiceWorkerStorage::NewRegistrationId() {
   if (state_ == DISABLED)
-    return kInvalidServiceWorkerRegistrationId;
+    return blink::mojom::kInvalidServiceWorkerRegistrationId;
   DCHECK_EQ(INITIALIZED, state_);
   return next_registration_id_++;
 }
 
 int64_t ServiceWorkerStorage::NewVersionId() {
   if (state_ == DISABLED)
-    return kInvalidServiceWorkerVersionId;
+    return blink::mojom::kInvalidServiceWorkerVersionId;
   DCHECK_EQ(INITIALIZED, state_);
   return next_version_id_++;
 }
@@ -942,14 +948,18 @@ void ServiceWorkerStorage::PurgeResources(const ResourceList& resources) {
   StartPurgingResources(resources);
 }
 
+bool ServiceWorkerStorage::LazyInitializeForTest(base::OnceClosure callback) {
+  return LazyInitialize(std::move(callback));
+}
+
 ServiceWorkerStorage::ServiceWorkerStorage(
     const base::FilePath& path,
     base::WeakPtr<ServiceWorkerContextCore> context,
     scoped_refptr<base::SequencedTaskRunner> database_task_runner,
     storage::QuotaManagerProxy* quota_manager_proxy,
     storage::SpecialStoragePolicy* special_storage_policy)
-    : next_registration_id_(kInvalidServiceWorkerRegistrationId),
-      next_version_id_(kInvalidServiceWorkerVersionId),
+    : next_registration_id_(blink::mojom::kInvalidServiceWorkerRegistrationId),
+      next_version_id_(blink::mojom::kInvalidServiceWorkerVersionId),
       next_resource_id_(kInvalidServiceWorkerResourceId),
       state_(UNINITIALIZED),
       expecting_done_with_disk_on_disable_(false),
@@ -979,17 +989,17 @@ base::FilePath ServiceWorkerStorage::GetDiskCachePath() {
       .Append(kDiskCacheName);
 }
 
-bool ServiceWorkerStorage::LazyInitialize(const base::Closure& callback) {
+bool ServiceWorkerStorage::LazyInitialize(base::OnceClosure callback) {
   switch (state_) {
     case INITIALIZED:
       return true;
     case DISABLED:
       return false;
     case INITIALIZING:
-      pending_tasks_.push_back(callback);
+      pending_tasks_.push_back(std::move(callback));
       return false;
     case UNINITIALIZED:
-      pending_tasks_.push_back(callback);
+      pending_tasks_.push_back(std::move(callback));
       // Fall-through.
   }
 
@@ -1016,14 +1026,16 @@ void ServiceWorkerStorage::DidReadInitialData(
     registered_origins_.swap(data->origins);
     foreign_fetch_origins_.swap(data->foreign_fetch_origins);
     state_ = INITIALIZED;
+    ServiceWorkerMetrics::RecordRegisteredOriginCount(
+        registered_origins_.size());
   } else {
     DVLOG(2) << "Failed to initialize: "
              << ServiceWorkerDatabase::StatusToString(status);
     ScheduleDeleteAndStartOver();
   }
 
-  for (const auto& task : pending_tasks_)
-    RunSoon(FROM_HERE, task);
+  for (base::OnceClosure& task : pending_tasks_)
+    RunSoon(FROM_HERE, std::move(task));
   pending_tasks_.clear();
 }
 
@@ -1391,8 +1403,8 @@ ServiceWorkerStorage::GetOrCreateRegistration(
     return registration;
 
   registration = new ServiceWorkerRegistration(
-      ServiceWorkerRegistrationOptions(data.scope), data.registration_id,
-      context_);
+      blink::mojom::ServiceWorkerRegistrationOptions(data.scope),
+      data.registration_id, context_);
   registration->set_resources_total_size_bytes(data.resources_total_size_bytes);
   registration->set_last_update_check(data.last_update_check);
   if (pending_deletions_.find(data.registration_id) !=
@@ -1477,8 +1489,8 @@ ServiceWorkerDiskCache* ServiceWorkerStorage::disk_cache() {
 
   base::FilePath path = GetDiskCachePath();
   if (path.empty()) {
-    int rv = disk_cache_->InitWithMemBackend(kMaxMemDiskCacheSize,
-                                             net::CompletionCallback());
+    int rv = disk_cache_->InitWithMemBackend(
+        kMaxServiceWorkerStorageMemDiskCacheSize, net::CompletionCallback());
     DCHECK_EQ(net::OK, rv);
     return disk_cache_.get();
   }
@@ -1491,7 +1503,7 @@ void ServiceWorkerStorage::InitializeDiskCache() {
   disk_cache_->set_is_waiting_to_initialize(false);
   expecting_done_with_disk_on_disable_ = true;
   int rv = disk_cache_->InitWithDiskBackend(
-      GetDiskCachePath(), kMaxDiskCacheSize, false,
+      GetDiskCachePath(), kMaxServiceWorkerStorageDiskCacheSize, false,
       base::BindOnce(&ServiceWorkerStorage::DiskCacheImplDoneWithDisk,
                      weak_factory_.GetWeakPtr()),
       base::Bind(&ServiceWorkerStorage::OnDiskCacheInitialized,
@@ -1772,11 +1784,11 @@ void ServiceWorkerStorage::FindForDocumentInDB(
 
   // Find one with a pattern match.
   LongestScopeMatcher matcher(document_url);
-  int64_t match = kInvalidServiceWorkerRegistrationId;
+  int64_t match = blink::mojom::kInvalidServiceWorkerRegistrationId;
   for (const auto& registration_data : registration_data_list)
     if (matcher.MatchLongest(registration_data.scope))
       match = registration_data.registration_id;
-  if (match != kInvalidServiceWorkerRegistrationId)
+  if (match != blink::mojom::kInvalidServiceWorkerRegistrationId)
     status = database->ReadRegistration(match, origin, &data, &resources);
 
   original_task_runner->PostTask(

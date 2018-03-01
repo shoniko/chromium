@@ -23,6 +23,12 @@ std::string GetLogName(SupportedSource source_type) {
       return "modetest";
     case SupportedSource::kLsusb:
       return "lsusb";
+    case SupportedSource::kLspci:
+      return "lspci";
+    case SupportedSource::kIfconfig:
+      return "ifconfig";
+    case SupportedSource::kUptime:
+      return "uptime";
   }
   NOTREACHED();
   return "";

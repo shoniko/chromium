@@ -5,6 +5,7 @@
 #include "ash/system/user/user_view.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "ash/metrics/user_metrics_recorder.h"
@@ -14,11 +15,9 @@
 #include "ash/root_window_controller.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
-#include "ash/shell_delegate.h"
 #include "ash/shell_port.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ash/system/tray/system_tray.h"
-#include "ash/system/tray/system_tray_controller.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_popup_item_style.h"
 #include "ash/system/tray/tray_popup_utils.h"
@@ -26,7 +25,6 @@
 #include "ash/system/user/login_status.h"
 #include "ash/system/user/rounded_image_view.h"
 #include "ash/system/user/user_card_view.h"
-#include "base/memory/ptr_util.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user_info.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -66,9 +64,21 @@ void SwitchUser(UserIndex user_index) {
       controller->GetUserSession(user_index)->user_info->account_id);
 }
 
-bool IsMultiProfileSupportedAndUserActive() {
-  return Shell::Get()->shell_delegate()->IsMultiProfilesEnabled() &&
-         !Shell::Get()->session_controller()->IsUserSessionBlocked();
+// Returns true when clicking the user card should show the user dropdown menu.
+bool IsUserDropdownEnabled() {
+  // Don't allow user add or switch when screen cast warning dialog is open.
+  // See http://crrev.com/291276 and http://crbug.com/353170.
+  if (ShellPort::Get()->IsSystemModalWindowOpen())
+    return false;
+
+  // Don't allow at login, lock or when adding a multi-profile user.
+  SessionController* session = Shell::Get()->session_controller();
+  if (session->IsUserSessionBlocked())
+    return false;
+
+  // Show if we can add or switch users.
+  return session->GetAddUserPolicy() == AddUserSessionPolicy::ALLOWED ||
+         session->NumberOfLoggedInUsers() > 1;
 }
 
 // Creates the view shown in the user switcher popup ("AddUserMenuOption").
@@ -83,10 +93,11 @@ views::View* CreateAddUserView(AddUserSessionPolicy policy) {
   view->SetBackground(views::CreateThemedSolidBackground(
       view, ui::NativeTheme::kColorId_BubbleBackground));
 
-  int message_id = 0;
+  base::string16 message;
   switch (policy) {
     case AddUserSessionPolicy::ALLOWED: {
-      message_id = IDS_ASH_STATUS_TRAY_SIGN_IN_ANOTHER_ACCOUNT;
+      message = l10n_util::GetStringUTF16(
+          IDS_ASH_STATUS_TRAY_SIGN_IN_ANOTHER_ACCOUNT);
 
       auto* icon = new views::ImageView();
       icon->SetImage(
@@ -95,17 +106,21 @@ views::View* CreateAddUserView(AddUserSessionPolicy policy) {
       break;
     }
     case AddUserSessionPolicy::ERROR_NOT_ALLOWED_PRIMARY_USER:
-      message_id = IDS_ASH_STATUS_TRAY_MESSAGE_NOT_ALLOWED_PRIMARY_USER;
+      message = l10n_util::GetStringUTF16(
+          IDS_ASH_STATUS_TRAY_MESSAGE_NOT_ALLOWED_PRIMARY_USER);
       break;
     case AddUserSessionPolicy::ERROR_MAXIMUM_USERS_REACHED:
-      message_id = IDS_ASH_STATUS_TRAY_MESSAGE_CANNOT_ADD_USER;
+      message = l10n_util::GetStringFUTF16Int(
+          IDS_ASH_STATUS_TRAY_MESSAGE_CANNOT_ADD_USER,
+          session_manager::kMaximumNumberOfUserSessions);
       break;
     case AddUserSessionPolicy::ERROR_NO_ELIGIBLE_USERS:
-      message_id = IDS_ASH_STATUS_TRAY_MESSAGE_OUT_OF_USERS;
+      message =
+          l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_MESSAGE_OUT_OF_USERS);
       break;
   }
 
-  auto* command_label = new views::Label(l10n_util::GetStringUTF16(message_id));
+  auto* command_label = new views::Label(message);
   command_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   command_label->SetMultiLine(true);
 
@@ -215,7 +230,7 @@ UserView::UserView(SystemTrayItem* owner, LoginStatus login) : owner_(owner) {
       views::BoxLayout::CROSS_AXIS_ALIGNMENT_CENTER);
   layout->SetFlexForView(user_card_container_, 1);
 
-  SetBorder(base::MakeUnique<ActiveUserBorder>());
+  SetBorder(std::make_unique<ActiveUserBorder>());
 }
 
 UserView::~UserView() {
@@ -249,9 +264,8 @@ void UserView::ButtonPressed(views::Button* sender, const ui::Event& event) {
   if (sender == logout_button_) {
     Shell::Get()->metrics()->RecordUserMetricsAction(UMA_STATUS_AREA_SIGN_OUT);
     HideUserDropdownWidget();
-    Shell::Get()->system_tray_controller()->SignOut();
-  } else if (sender == user_card_container_ &&
-             IsMultiProfileSupportedAndUserActive()) {
+    Shell::Get()->session_controller()->RequestSignOut();
+  } else if (sender == user_card_container_ && IsUserDropdownEnabled()) {
     ToggleUserDropdownWidget();
   } else if (user_dropdown_widget_ &&
              sender->GetWidget() == user_dropdown_widget_.get()) {
@@ -293,10 +307,8 @@ void UserView::AddUserCard(LoginStatus login) {
   DCHECK(!user_card_container_);
   DCHECK(!user_card_view_);
   user_card_view_ = new UserCardView(0);
-  // The entry is clickable when no system modal dialog is open and the multi
-  // profile option is active.
-  if (!ShellPort::Get()->IsSystemModalWindowOpen() &&
-      IsMultiProfileSupportedAndUserActive()) {
+  // The entry is clickable when the user menu can be opened.
+  if (IsUserDropdownEnabled()) {
     user_card_container_ = new ButtonFromView(
         user_card_view_, this, TrayPopupInkDropStyle::INSET_BOUNDS);
   } else {

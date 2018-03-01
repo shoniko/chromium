@@ -47,7 +47,7 @@ class GpuBlacklistTest : public testing::Test {
         0,        // exceptions count
         nullptr,  // exceptions
     }};
-    GpuControlListData data("1.0", 1, kTestEntries);
+    GpuControlListData data(1, kTestEntries);
     std::unique_ptr<GpuBlacklist> blacklist = GpuBlacklist::Create(data);
     std::set<int> type =
         blacklist->MakeDecision(GpuBlacklist::kOsMacosx, "10.12.3", gpu_info());
@@ -95,9 +95,6 @@ GPU_BLACKLIST_FEATURE_TEST(FlashStage3DBaseline,
 GPU_BLACKLIST_FEATURE_TEST(AcceleratedVideoDecode,
                            GPU_FEATURE_TYPE_ACCELERATED_VIDEO_DECODE)
 
-GPU_BLACKLIST_FEATURE_TEST(AcceleratedVideoEncode,
-                           GPU_FEATURE_TYPE_ACCELERATED_VIDEO_ENCODE)
-
 GPU_BLACKLIST_FEATURE_TEST(PanelFitting,
                            GPU_FEATURE_TYPE_PANEL_FITTING)
 
@@ -105,6 +102,6 @@ GPU_BLACKLIST_FEATURE_TEST(GpuRasterization,
                            GPU_FEATURE_TYPE_GPU_RASTERIZATION)
 
 GPU_BLACKLIST_FEATURE_TEST(WebGL2,
-                           GPU_FEATURE_TYPE_WEBGL2)
+                           GPU_FEATURE_TYPE_ACCELERATED_WEBGL2)
 
 }  // namespace gpu

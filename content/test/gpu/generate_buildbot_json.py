@@ -17,6 +17,15 @@ import sys
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 SRC_DIR = os.path.dirname(os.path.dirname(os.path.dirname(THIS_DIR)))
 
+# Current stable Windows NVIDIA GT 610 device/driver identifier.
+WIN_NVIDIA_GEFORCE_610_STABLE_DRIVER = '10de:104a-23.21.13.8792'
+
+# Current experimental Windows NVIDIA GT 610 device/driver identifier.
+WIN_NVIDIA_GEFORCE_610_EXPERIMENTAL_DRIVER = '10de:104a-23.21.13.8792'
+
+# Use this to match all drivers for the NVIDIA GT 610.
+NVIDIA_GEFORCE_610_ALL_DRIVERS = '10de:104a-*'
+
 # "Types" of waterfalls and bots. A bot's type is the union of its own
 # type and the type of its waterfall. Predicates can apply to these
 # sets in order to run tests only on a certain subset of the bots.
@@ -87,6 +96,14 @@ class Predicates(object):
   def DEQP(x):
     return Types.DEQP in x
 
+# Most of the bots live in the Chrome-GPU pool as defined here (Google
+# employees only, sorry):
+# https://chrome-internal.googlesource.com/infradata/config/+/master/configs/
+#   chromium-swarm/bots.cfg
+#
+# Some of them, like the Mac Minis and Nexus 5X devices, are shared
+# resources and live in the regular Chrome pool.
+
 WATERFALL = {
   'name': 'chromium.gpu',
   'type': Types.GPU,
@@ -104,8 +121,9 @@ WATERFALL = {
     'Win7 Release (NVIDIA)': {
       'swarming_dimensions': [
         {
-          'gpu': '10de:104a',
-          'os': 'Windows-2008ServerR2-SP1'
+          'gpu': WIN_NVIDIA_GEFORCE_610_STABLE_DRIVER,
+          'os': 'Windows-2008ServerR2-SP1',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -115,8 +133,9 @@ WATERFALL = {
     'Win7 Debug (NVIDIA)': {
       'swarming_dimensions': [
         {
-          'gpu': '10de:104a',
-          'os': 'Windows-2008ServerR2-SP1'
+          'gpu': WIN_NVIDIA_GEFORCE_610_STABLE_DRIVER,
+          'os': 'Windows-2008ServerR2-SP1',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Debug',
@@ -127,8 +146,7 @@ WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '8086:0a2e',
-          # TODO(crbug.com/754777): change to 10.12.6.
-          'os': 'Mac-10.12'
+          'os': 'Mac-10.12.6',
         },
       ],
       'build_config': 'Release',
@@ -139,8 +157,7 @@ WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '8086:0a2e',
-          # TODO(crbug.com/754777): change to 10.12.6.
-          'os': 'Mac-10.12'
+          'os': 'Mac-10.12.6',
         },
       ],
       'build_config': 'Debug',
@@ -152,8 +169,8 @@ WATERFALL = {
         {
           'gpu': '1002:6821',
           'hidpi': '1',
-          # TODO(crbug.com/754777): change to 10.12.6.
-          'os': 'Mac'
+          'os': 'Mac-10.12.6',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -165,8 +182,8 @@ WATERFALL = {
         {
           'gpu': '1002:6821',
           'hidpi': '1',
-          # TODO(crbug.com/754777): change to 10.12.6.
-          'os': 'Mac'
+          'os': 'Mac-10.12.6',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Debug',
@@ -177,7 +194,8 @@ WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '10de:104a',
-          'os': 'Ubuntu'
+          'os': 'Ubuntu',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -188,7 +206,8 @@ WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '10de:104a',
-          'os': 'Ubuntu'
+          'os': 'Ubuntu',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Debug',
@@ -218,8 +237,9 @@ FYI_WATERFALL = {
     'Win7 Release (NVIDIA)': {
       'swarming_dimensions': [
         {
-          'gpu': '10de:104a',
-          'os': 'Windows-2008ServerR2-SP1'
+          'gpu': WIN_NVIDIA_GEFORCE_610_STABLE_DRIVER,
+          'os': 'Windows-2008ServerR2-SP1',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -229,8 +249,9 @@ FYI_WATERFALL = {
     'Win7 Debug (NVIDIA)': {
       'swarming_dimensions': [
         {
-          'gpu': '10de:104a',
-          'os': 'Windows-2008ServerR2-SP1'
+          'gpu': WIN_NVIDIA_GEFORCE_610_STABLE_DRIVER,
+          'os': 'Windows-2008ServerR2-SP1',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Debug',
@@ -240,8 +261,9 @@ FYI_WATERFALL = {
     'Win7 dEQP Release (NVIDIA)': {
       'swarming_dimensions': [
         {
-          'gpu': '10de:104a',
-          'os': 'Windows-2008ServerR2-SP1'
+          'gpu': WIN_NVIDIA_GEFORCE_610_STABLE_DRIVER,
+          'os': 'Windows-2008ServerR2-SP1',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -249,11 +271,24 @@ FYI_WATERFALL = {
       'os_type': 'win',
       'type': Types.DEQP,
     },
+    'Win7 Experimental Release (NVIDIA)': {
+      'swarming_dimensions': [
+        {
+          'gpu': WIN_NVIDIA_GEFORCE_610_EXPERIMENTAL_DRIVER,
+          'os': 'Windows-2008ServerR2-SP1',
+          'pool': 'Chrome-GPU',
+        },
+      ],
+      'build_config': 'Release',
+      'swarming': True,
+      'os_type': 'win',
+    },
     'Win10 Release (NVIDIA)': {
       'swarming_dimensions': [
         {
-          'gpu': '10de:104a',
-          'os': 'Windows-10'
+          'gpu': WIN_NVIDIA_GEFORCE_610_STABLE_DRIVER,
+          'os': 'Windows-10',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -263,8 +298,9 @@ FYI_WATERFALL = {
     'Win10 Debug (NVIDIA)': {
       'swarming_dimensions': [
         {
-          'gpu': '10de:104a',
-          'os': 'Windows-10'
+          'gpu': WIN_NVIDIA_GEFORCE_610_STABLE_DRIVER,
+          'os': 'Windows-10',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Debug',
@@ -275,7 +311,8 @@ FYI_WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '1002:6613',
-          'os': 'Windows-2008ServerR2-SP1'
+          'os': 'Windows-2008ServerR2-SP1',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -286,7 +323,8 @@ FYI_WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '1002:6613',
-          'os': 'Windows-2008ServerR2-SP1'
+          'os': 'Windows-2008ServerR2-SP1',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Debug',
@@ -297,7 +335,8 @@ FYI_WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '1002:6613',
-          'os': 'Windows-2008ServerR2-SP1'
+          'os': 'Windows-2008ServerR2-SP1',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -335,7 +374,7 @@ FYI_WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '1002:6613',
-          'os': 'Windows-2008ServerR2-SP1'
+          'os': 'Windows-2008ServerR2-SP1',
         },
       ],
       'build_config': 'Release',
@@ -347,8 +386,9 @@ FYI_WATERFALL = {
     'Win7 x64 Release (NVIDIA)': {
       'swarming_dimensions': [
         {
-          'gpu': '10de:104a',
-          'os': 'Windows-2008ServerR2-SP1'
+          'gpu': WIN_NVIDIA_GEFORCE_610_STABLE_DRIVER,
+          'os': 'Windows-2008ServerR2-SP1',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release_x64',
@@ -358,8 +398,9 @@ FYI_WATERFALL = {
     'Win7 x64 Debug (NVIDIA)': {
       'swarming_dimensions': [
         {
-          'gpu': '10de:104a',
-          'os': 'Windows-2008ServerR2-SP1'
+          'gpu': WIN_NVIDIA_GEFORCE_610_STABLE_DRIVER,
+          'os': 'Windows-2008ServerR2-SP1',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Debug_x64',
@@ -369,8 +410,9 @@ FYI_WATERFALL = {
     'Win7 x64 dEQP Release (NVIDIA)': {
       'swarming_dimensions': [
         {
-          'gpu': '10de:104a',
-          'os': 'Windows-2008ServerR2-SP1'
+          'gpu': WIN_NVIDIA_GEFORCE_610_STABLE_DRIVER,
+          'os': 'Windows-2008ServerR2-SP1',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release_x64',
@@ -382,8 +424,7 @@ FYI_WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '8086:0a2e',
-          # TODO(crbug.com/754777): change to 10.12.6.
-          'os': 'Mac-10.12'
+          'os': 'Mac-10.12.6',
         },
       ],
       'build_config': 'Release',
@@ -394,8 +435,7 @@ FYI_WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '8086:0a2e',
-          # TODO(crbug.com/754777): change to 10.12.6.
-          'os': 'Mac-10.12'
+          'os': 'Mac-10.12.6',
         },
       ],
       'build_config': 'Debug',
@@ -433,8 +473,8 @@ FYI_WATERFALL = {
         {
           'gpu': '10de:0fe9',
           'hidpi': '1',
-          # TODO(crbug.com/754777): change to 10.12.6.
-          'os': 'Mac'
+          'os': 'Mac-10.12.6',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -446,8 +486,8 @@ FYI_WATERFALL = {
         {
           'gpu': '10de:0fe9',
           'hidpi': '1',
-          # TODO(crbug.com/754777): change to 10.12.6.
-          'os': 'Mac'
+          'os': 'Mac-10.12.6',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Debug',
@@ -459,8 +499,8 @@ FYI_WATERFALL = {
         {
           'gpu': '1002:6821',
           'hidpi': '1',
-          # TODO(crbug.com/754777): change to 10.12.6.
-          'os': 'Mac'
+          'os': 'Mac-10.12.6',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -472,8 +512,8 @@ FYI_WATERFALL = {
         {
           'gpu': '1002:6821',
           'hidpi': '1',
-          # TODO(crbug.com/754777): change to 10.12.6.
-          'os': 'Mac'
+          'os': 'Mac-10.12.6',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Debug',
@@ -484,7 +524,7 @@ FYI_WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '8086:0a2e',
-          'os': 'Mac'
+          'os': 'Mac-10.12.6'
         },
       ],
       'build_config': 'Release',
@@ -497,7 +537,7 @@ FYI_WATERFALL = {
         {
           'gpu': '1002:6821',
           'hidpi': '1',
-          'os': 'Mac'
+          'os': 'Mac-10.12.6',
         },
       ],
       'build_config': 'Release',
@@ -510,7 +550,7 @@ FYI_WATERFALL = {
         {
           'gpu': '10de:0fe9',
           'hidpi': '1',
-          'os': 'Mac'
+          'os': 'Mac-10.12.6',
         },
       ],
       'build_config': 'Release',
@@ -523,14 +563,13 @@ FYI_WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '8086:0a2e',
-          # TODO(crbug.com/754777): change to 10.12.6.
-          'os': 'Mac-10.12'
+          'os': 'Mac-10.12.6',
         },
         {
           'gpu': '1002:6821',
           'hidpi': '1',
-          # TODO(crbug.com/754777): change to 10.12.6.
-          'os': 'Mac'
+          'os': 'Mac-10.12.6',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -538,11 +577,40 @@ FYI_WATERFALL = {
       'os_type': 'mac',
       'is_asan': True,
     },
+    'Mac dEQP Release AMD': {
+      # This bot spawns jobs on multiple GPU types.
+      'swarming_dimensions': [
+        {
+          'gpu': '1002:6821',
+          'hidpi': '1',
+          'os': 'Mac-10.12.6',
+          'pool': 'Chrome-GPU',
+        },
+      ],
+      'build_config': 'Release',
+      'swarming': True,
+      'os_type': 'mac',
+      'type': Types.DEQP,
+    },
+    'Mac dEQP Release Intel': {
+      # This bot spawns jobs on multiple GPU types.
+      'swarming_dimensions': [
+        {
+          'gpu': '8086:0a2e',
+          'os': 'Mac-10.12.6',
+        },
+      ],
+      'build_config': 'Release',
+      'swarming': True,
+      'os_type': 'mac',
+      'type': Types.DEQP,
+    },
     'Linux Release (NVIDIA)': {
       'swarming_dimensions': [
         {
           'gpu': '10de:104a',
-          'os': 'Ubuntu'
+          'os': 'Ubuntu',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -566,7 +634,8 @@ FYI_WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '10de:104a',
-          'os': 'Ubuntu'
+          'os': 'Ubuntu',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Debug',
@@ -577,7 +646,8 @@ FYI_WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '10de:104a',
-          'os': 'Ubuntu'
+          'os': 'Ubuntu',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -615,7 +685,8 @@ FYI_WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '10de:104a',
-          'os': 'Ubuntu'
+          'os': 'Ubuntu',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -745,8 +816,9 @@ FYI_WATERFALL = {
     'Optional Win7 Release (NVIDIA)': {
       'swarming_dimensions': [
         {
-          'gpu': '10de:104a',
-          'os': 'Windows-2008ServerR2-SP1'
+          'gpu': WIN_NVIDIA_GEFORCE_610_STABLE_DRIVER,
+          'os': 'Windows-2008ServerR2-SP1',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -758,8 +830,7 @@ FYI_WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '8086:0a2e',
-          # TODO(crbug.com/754777): change to 10.12.6.
-          'os': 'Mac-10.12'
+          'os': 'Mac-10.12.6',
         },
       ],
       'build_config': 'Release',
@@ -772,8 +843,8 @@ FYI_WATERFALL = {
         {
           'gpu': '10de:0fe9',
           'hidpi': '1',
-          # TODO(crbug.com/754777): change to 10.12.6.
-          'os': 'Mac'
+          'os': 'Mac-10.12.6',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -786,8 +857,8 @@ FYI_WATERFALL = {
         {
           'gpu': '1002:6821',
           'hidpi': '1',
-          # TODO(crbug.com/754777): change to 10.12.6.
-          'os': 'Mac'
+          'os': 'Mac-10.12.6',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -799,7 +870,8 @@ FYI_WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '10de:104a',
-          'os': 'Ubuntu'
+          'os': 'Ubuntu',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -815,7 +887,8 @@ FYI_WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '1002:6613',
-          'os': 'Windows-2008ServerR2-SP1'
+          'os': 'Windows-2008ServerR2-SP1',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -897,8 +970,9 @@ V8_FYI_WATERFALL = {
     'Win Release (NVIDIA)': {
       'swarming_dimensions': [
         {
-          'gpu': '10de:104a',
-          'os': 'Windows-2008ServerR2-SP1'
+          'gpu': WIN_NVIDIA_GEFORCE_610_STABLE_DRIVER,
+          'os': 'Windows-2008ServerR2-SP1',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -909,8 +983,7 @@ V8_FYI_WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '8086:0a2e',
-          # TODO(crbug.com/754777): change to 10.12.6.
-          'os': 'Mac-10.12'
+          'os': 'Mac-10.12.6',
         },
       ],
       'build_config': 'Release',
@@ -921,7 +994,8 @@ V8_FYI_WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '10de:104a',
-          'os': 'Ubuntu'
+          'os': 'Ubuntu',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -932,7 +1006,8 @@ V8_FYI_WATERFALL = {
       'swarming_dimensions': [
         {
           'gpu': '10de:104a',
-          'os': 'Ubuntu'
+          'os': 'Ubuntu',
+          'pool': 'Chrome-GPU',
         },
       ],
       'build_config': 'Release',
@@ -966,7 +1041,7 @@ COMMON_GTESTS = {
         'build_configs': ['Release', 'Release_x64'],
         'swarming_dimension_sets': [
           {
-            'gpu': '10de:104a',
+            'gpu': NVIDIA_GEFORCE_610_ALL_DRIVERS,
             'os': 'Windows-2008ServerR2-SP1'
           }
         ],
@@ -979,6 +1054,9 @@ COMMON_GTESTS = {
         ],
       },
     ],
+    'swarming': {
+      'shards': 4,
+    },
     'args': [
       '--test-launcher-batch-limit=400'
     ]
@@ -988,14 +1066,10 @@ COMMON_GTESTS = {
     'tester_configs': [
       {
         'predicate': Predicates.DEQP,
-        # Run only on the Win7 NVIDIA/AMD R7 240 32- and 64-bit bots (and
-        # trybots) for the time being, at least until more capacity is
-        # added.
-        'build_configs': ['Release', 'Release_x64'],
         'swarming_dimension_sets': [
           # NVIDIA Win 7
           {
-            'gpu': '10de:104a',
+            'gpu': NVIDIA_GEFORCE_610_ALL_DRIVERS,
             'os': 'Windows-2008ServerR2-SP1'
           },
           # AMD Win 7
@@ -1027,14 +1101,22 @@ COMMON_GTESTS = {
     'tester_configs': [
       {
         'predicate': Predicates.DEQP,
-        # Run only on the Linux Release NVIDIA 32- and 64-bit bots (and
-        # trybots) for the time being, at least until more capacity is added.
-        'build_configs': ['Release', 'Release_x64'],
         'swarming_dimension_sets': [
-          # NVIDIA Linux
+          # Linux NVIDIA
           {
             'gpu': '10de:104a',
             'os': 'Ubuntu'
+          },
+          # Mac Intel
+          {
+            'gpu': '8086:0a2e',
+            'os': 'Mac-10.12.6'
+          },
+          # Mac AMD
+          {
+            'gpu': '1002:6821',
+            'hidpi': '1',
+            'os': 'Mac-10.12.6'
           },
         ],
       },
@@ -1079,6 +1161,9 @@ COMMON_GTESTS = {
         ],
       },
     ],
+    'swarming': {
+      'shards': 4,
+    },
     'test': 'angle_deqp_gles2_tests',
     # Only pass the display type to desktop. The Android runner doesn't support
     # passing args to the executable but only one display type is supported on
@@ -1117,7 +1202,7 @@ COMMON_GTESTS = {
       },
     ],
     'swarming': {
-      'shards': 4,
+      'shards': 12,
     },
     'test': 'angle_deqp_gles3_tests',
     # Only pass the display type to desktop. The Android runner doesn't support
@@ -1138,23 +1223,17 @@ COMMON_GTESTS = {
       {
         # TODO(jmadill): Run this on ANGLE roll tryservers.
         'predicate': Predicates.DEQP,
-        # Run only on the NVIDIA and AMD Win7 bots (and trybots) for the time
-        # being, at least until more capacity is added.
-        'build_configs': ['Release'],
         'swarming_dimension_sets': [
           # NVIDIA Win 7
           {
-            'gpu': '10de:104a',
+            'gpu': NVIDIA_GEFORCE_610_ALL_DRIVERS,
             'os': 'Windows-2008ServerR2-SP1'
           },
-          # Temporarily disable AMD deqp ES3 tests due to issues with the log
-          # size causing out-of-memory errors in the recipe engine.
-          # crbug.com/713196
           # AMD Win 7
-          #{
-          #  'gpu': '1002:6613',
-          #  'os': 'Windows-2008ServerR2-SP1'
-          #}
+          {
+            'gpu': '1002:6613',
+            'os': 'Windows-2008ServerR2-SP1'
+          },
         ],
       }
     ],
@@ -1180,15 +1259,23 @@ COMMON_GTESTS = {
       {
         # TODO(jmadill): Run this on ANGLE roll tryservers.
         'predicate': Predicates.DEQP,
-        # Run only on the Linux Release NVIDIA 32-bit bots (and trybots) for
-        # the time being, at least until more capacity is added.
-        'build_configs': ['Release'],
         'swarming_dimension_sets': [
           # NVIDIA Linux
           {
             'gpu': '10de:104a',
             'os': 'Ubuntu'
-          }
+          },
+          # Mac Intel
+          {
+            'gpu': '8086:0a2e',
+            'os': 'Mac-10.12.6'
+          },
+          # Mac AMD
+          {
+            'gpu': '1002:6821',
+            'hidpi': '1',
+            'os': 'Mac-10.12.6'
+          },
         ],
       }
     ],
@@ -1213,11 +1300,9 @@ COMMON_GTESTS = {
     'tester_configs': [
       {
         'predicate': Predicates.DEQP,
-        # Run on the Win Release NVIDIA bots.
-        'build_configs': ['Release'],
         'swarming_dimension_sets': [
           {
-            'gpu': '10de:104a',
+            'gpu': NVIDIA_GEFORCE_610_ALL_DRIVERS,
             'os': 'Windows-2008ServerR2-SP1'
           }
         ],
@@ -1231,9 +1316,7 @@ COMMON_GTESTS = {
       },
     ],
     'swarming': {
-      # TODO(geofflang): Increase the number of shards as more tests start to
-      # pass and runtime increases.
-      'shards': 4,
+      'shards': 6,
     },
     'test': 'angle_deqp_gles31_tests',
     'args': [
@@ -1246,11 +1329,9 @@ COMMON_GTESTS = {
     'tester_configs': [
       {
         'predicate': Predicates.DEQP,
-        # Run on the Win Release NVIDIA bots.
-        'build_configs': ['Release'],
         'swarming_dimension_sets': [
           {
-            'gpu': '10de:104a',
+            'gpu': NVIDIA_GEFORCE_610_ALL_DRIVERS,
             'os': 'Windows-2008ServerR2-SP1'
           },
           {
@@ -1268,9 +1349,7 @@ COMMON_GTESTS = {
       },
     ],
     'swarming': {
-      # TODO(geofflang): Increase the number of shards as more tests start to
-      # pass and runtime increases.
-      'shards': 4,
+      'shards': 6,
     },
     'test': 'angle_deqp_gles31_tests',
     'args': [
@@ -1377,7 +1456,10 @@ COMMON_GTESTS = {
         ],
       },
     ],
-    'desktop_args': ['--use-gpu-in-tests']
+    'desktop_args': [
+      '--use-gpu-in-tests',
+      '--use-cmd-decoder=validating',
+    ]
   },
   'gl_tests_passthrough': {
     'tester_configs': [
@@ -1395,7 +1477,7 @@ COMMON_GTESTS = {
     'test': 'gl_tests',
     'desktop_args': [
       '--use-gpu-in-tests',
-      '--use-passthrough-cmd-decoder',
+      '--use-cmd-decoder=passthrough',
      ]
   },
   'gl_unittests': {
@@ -1408,6 +1490,25 @@ COMMON_GTESTS = {
     ],
     'desktop_args': ['--use-gpu-in-tests'],
     'linux_args': [ '--no-xvfb' ]
+  },
+  'gpu_unittests': {
+    'tester_configs': [
+      {
+        # Run this on the FYI waterfall and optional tryservers.
+        'predicate': Predicates.FYI_AND_OPTIONAL,
+        # gpu_unittests is killing the Swarmed Linux GPU bots
+        # similarly to how content_unittests was:
+        # http://crbug.com/763498 .
+        'os_types': ['win', 'mac', 'android'],
+      },
+    ],
+    'disabled_tester_configs': [
+      {
+        'names': [
+          'Linux Ozone (Intel)',
+        ],
+      },
+    ],
   },
   # The gles2_conform_tests are closed-source and deliberately only run
   # on the FYI waterfall and the optional tryservers.
@@ -1826,6 +1927,9 @@ TELEMETRY_GPU_INTEGRATION_TESTS = {
         ],
       },
     ],
+    'extra_browser_args': [
+      '--use-cmd-decoder=validating',
+    ],
     'asan_args': ['--is-asan'],
     'android_swarming': {
       # On desktop platforms these don't take very long (~7 minutes),
@@ -1845,6 +1949,9 @@ TELEMETRY_GPU_INTEGRATION_TESTS = {
       '--read-abbreviated-json-results-from=' + \
       '../../content/test/data/gpu/webgl_conformance_tests_output.json',
     ],
+    'swarming': {
+      'shards': 2,
+    },
   },
   'webgl_conformance_d3d9_tests': {
     'tester_configs': [
@@ -1865,15 +1972,46 @@ TELEMETRY_GPU_INTEGRATION_TESTS = {
     'target_name': 'webgl_conformance',
     'extra_browser_args': [
       '--use-angle=d3d9',
+      '--use-cmd-decoder=validating',
     ],
     'asan_args': ['--is-asan'],
+    'swarming': {
+      'shards': 2,
+    },
   },
-  'webgl_conformance_gl_tests': {
+  'webgl_conformance_d3d11_passthrough': {
+    'tester_configs': [
+      {
+        # Run this on the FYI waterfall, optional tryservers, and Win
+        # ANGLE AMD tryserver.
+        'predicate': Predicates.FYI_AND_OPTIONAL_AND_WIN_ANGLE_AMD,
+        'os_types': ['win'],
+        'disabled_instrumentation_types': ['tsan'],
+      }
+    ],
+    'disabled_tester_configs': [
+      {
+        'names': [
+          'Linux Ozone (Intel)',
+        ],
+      },
+    ],
+    'target_name': 'webgl_conformance',
+    'extra_browser_args': [
+      '--use-angle=d3d11',
+      '--use-cmd-decoder=passthrough',
+    ],
+    'asan_args': ['--is-asan'],
+    'swarming': {
+      'shards': 2,
+    },
+  },
+  'webgl_conformance_gl_passthrough': {
     'tester_configs': [
       {
         # Run this on the FYI waterfall and optional tryservers.
         'predicate': Predicates.FYI_AND_OPTIONAL,
-        'os_types': ['win'],
+        'os_types': ['linux', 'win'],
         'disabled_instrumentation_types': ['tsan'],
       }
     ],
@@ -1912,57 +2050,14 @@ TELEMETRY_GPU_INTEGRATION_TESTS = {
     ],
     'target_name': 'webgl_conformance',
     'extra_browser_args': [
-      '--use-angle=gl',
-    ],
-    'asan_args': ['--is-asan'],
-  },
-  'webgl_conformance_d3d11_passthrough': {
-    'tester_configs': [
-      {
-        # Run this on the FYI waterfall, optional tryservers, and Win
-        # ANGLE AMD tryserver.
-        'predicate': Predicates.FYI_AND_OPTIONAL_AND_WIN_ANGLE_AMD,
-        'os_types': ['win'],
-        'disabled_instrumentation_types': ['tsan'],
-      }
-    ],
-    'disabled_tester_configs': [
-      {
-        'names': [
-          'Linux Ozone (Intel)',
-        ],
-      },
-    ],
-    'target_name': 'webgl_conformance',
-    'extra_browser_args': [
-      '--use-angle=d3d11',
-      '--use-passthrough-cmd-decoder',
-    ],
-    'asan_args': ['--is-asan'],
-  },
-  'webgl_conformance_gl_passthrough': {
-    'tester_configs': [
-      {
-        # Run this on the FYI waterfall and optional tryservers.
-        'predicate': Predicates.FYI_AND_OPTIONAL,
-        'os_types': ['linux'],
-        'disabled_instrumentation_types': ['tsan'],
-      }
-    ],
-    'disabled_tester_configs': [
-      {
-        'names': [
-          'Linux Ozone (Intel)',
-        ],
-      },
-    ],
-    'target_name': 'webgl_conformance',
-    'extra_browser_args': [
       '--use-gl=angle',
       '--use-angle=gl',
-      '--use-passthrough-cmd-decoder',
+      '--use-cmd-decoder=passthrough',
     ],
     'asan_args': ['--is-asan'],
+    'swarming': {
+      'shards': 2,
+    },
   },
   'webgl2_conformance_tests': {
     'tester_configs': [
@@ -1992,6 +2087,9 @@ TELEMETRY_GPU_INTEGRATION_TESTS = {
       },
     ],
     'target_name': 'webgl_conformance',
+    'extra_browser_args': [
+      '--use-cmd-decoder=validating',
+    ],
     'args': [
       '--webgl-conformance-version=2.0.1',
       # The current working directory when run via isolate is
@@ -2004,7 +2102,7 @@ TELEMETRY_GPU_INTEGRATION_TESTS = {
     'swarming': {
       # These tests currently take about an hour and fifteen minutes
       # to run. Split them into roughly 5-minute shards.
-      'shards': 15,
+      'shards': 20,
     },
   },
   'webgl2_conformance_gl_passthrough_tests': {
@@ -2043,7 +2141,7 @@ TELEMETRY_GPU_INTEGRATION_TESTS = {
     'extra_browser_args': [
       '--use-gl=angle',
       '--use-angle=gl',
-      '--use-passthrough-cmd-decoder',
+      '--use-cmd-decoder=passthrough',
     ],
     'args': [
       '--webgl-conformance-version=2.0.1',
@@ -2056,8 +2154,8 @@ TELEMETRY_GPU_INTEGRATION_TESTS = {
     'asan_args': ['--is-asan'],
     'swarming': {
       # These tests currently take about an hour and fifteen minutes
-      # to run. Split them into roughly 5-minute shards.
-      'shards': 15,
+      # to run serially.
+      'shards': 20,
     },
   },
   'webgl2_conformance_gl_tests': {
@@ -2070,7 +2168,7 @@ TELEMETRY_GPU_INTEGRATION_TESTS = {
         # Only run on the NVIDIA Release Windows bots.
         'swarming_dimension_sets': [
           {
-            'gpu': '10de:104a',
+            'gpu': NVIDIA_GEFORCE_610_ALL_DRIVERS,
             'os': 'Windows-2008ServerR2-SP1'
           },
         ],
@@ -2087,7 +2185,22 @@ TELEMETRY_GPU_INTEGRATION_TESTS = {
     'target_name': 'webgl_conformance',
     'extra_browser_args': [
       '--use-angle=gl',
+      '--use-cmd-decoder=validating',
     ],
+    'args': [
+      '--webgl-conformance-version=2.0.1',
+      # The current working directory when run via isolate is
+      # out/Debug or out/Release. Reference this file relatively to
+      # it.
+      '--read-abbreviated-json-results-from=' + \
+      '../../content/test/data/gpu/webgl2_conformance_tests_output.json',
+    ],
+    'asan_args': ['--is-asan'],
+    'swarming': {
+      # These tests currently take about an hour and fifteen minutes
+      # to run serially.
+      'shards': 20,
+    },
   },
   'webgl2_conformance_d3d11_passthrough_tests': {
     'tester_configs': [
@@ -2099,7 +2212,7 @@ TELEMETRY_GPU_INTEGRATION_TESTS = {
         # Only run on the NVIDIA Release Windows bots.
         'swarming_dimension_sets': [
           {
-            'gpu': '10de:104a',
+            'gpu': NVIDIA_GEFORCE_610_ALL_DRIVERS,
             'os': 'Windows-2008ServerR2-SP1'
           },
         ],
@@ -2109,7 +2222,7 @@ TELEMETRY_GPU_INTEGRATION_TESTS = {
     'target_name': 'webgl_conformance',
     'extra_browser_args': [
       '--use-angle=d3d11',
-      '--use-passthrough-cmd-decoder',
+      '--use-cmd-decoder=passthrough',
     ],
     'args': [
       '--webgl-conformance-version=2.0.1',
@@ -2123,7 +2236,7 @@ TELEMETRY_GPU_INTEGRATION_TESTS = {
     'swarming': {
       # These tests currently take about an hour and fifteen minutes
       # to run. Split them into roughly 5-minute shards.
-      'shards': 15,
+      'shards': 20,
     },
   },
 }
@@ -2131,21 +2244,26 @@ TELEMETRY_GPU_INTEGRATION_TESTS = {
 # These isolated tests don't use telemetry. They need to be placed in the
 # isolated_scripts section of the generated json.
 NON_TELEMETRY_ISOLATED_SCRIPT_TESTS = {
-  # We run angle_perftests on the ANGLE CQ to ensure the tests don't crash.
+  # We run perf tests on the CQ to ensure the tests don't crash.
   'angle_perftests': {
     'tester_configs': [
       {
         'predicate': Predicates.FYI_AND_OPTIONAL,
-        # Run on the Win/Linux Release NVIDIA bots.
-        'build_configs': ['Release'],
+        # Run on the Win/Linux Release NVIDIA bots and Nexus 5X
+        'build_configs': ['Release', 'android-chromium'],
         'swarming_dimension_sets': [
           {
-            'gpu': '10de:104a',
+            'gpu': NVIDIA_GEFORCE_610_ALL_DRIVERS,
             'os': 'Windows-2008ServerR2-SP1'
           },
           {
             'gpu': '10de:104a',
             'os': 'Ubuntu'
+          },
+          {
+            'device_type': 'bullhead',
+            'device_os': 'M',
+            'os': 'Android'
           }
         ],
       },
@@ -2156,6 +2274,70 @@ NON_TELEMETRY_ISOLATED_SCRIPT_TESTS = {
           'Linux Ozone (Intel)',
         ],
       },
+    ],
+    'args': [
+      # Tell the tests to exit after one frame for faster iteration.
+      '--one-frame-only',
+    ],
+  },
+
+  'validating_command_buffer_perftests': {
+    'tester_configs': [
+      {
+        'predicate': Predicates.FYI_AND_OPTIONAL,
+        # Run on the Win Release NVIDIA bots.
+        # TODO(jmadill): Run on Linux bots when possible.
+        'build_configs': ['Release'],
+        'swarming_dimension_sets': [
+          {
+            'gpu': NVIDIA_GEFORCE_610_ALL_DRIVERS,
+            'os': 'Windows-2008ServerR2-SP1'
+          },
+        ],
+      },
+    ],
+    'disabled_tester_configs': [
+      {
+        'names': [
+          'Linux Ozone (Intel)',
+        ],
+      },
+    ],
+    'compile_target': 'command_buffer_perftests',
+    'isolate_name': 'command_buffer_perftests',
+    'args': [
+      '--use-cmd-decoder=validating',
+      '--use-stub',
+    ],
+  },
+
+  'passthrough_command_buffer_perftests': {
+    'tester_configs': [
+      {
+        'predicate': Predicates.FYI_AND_OPTIONAL,
+        # Run on the Win Release NVIDIA bots.
+        # TODO(jmadill): Run on Linux bots when possible.
+        'build_configs': ['Release'],
+        'swarming_dimension_sets': [
+          {
+            'gpu': NVIDIA_GEFORCE_610_ALL_DRIVERS,
+            'os': 'Windows-2008ServerR2-SP1'
+          },
+        ],
+      },
+    ],
+    'disabled_tester_configs': [
+      {
+        'names': [
+          'Linux Ozone (Intel)',
+        ],
+      },
+    ],
+    'compile_target': 'command_buffer_perftests',
+    'isolate_name': 'command_buffer_perftests',
+    'args': [
+      '--use-cmd-decoder=passthrough',
+      '--use-angle=gl-null',
     ],
   },
 }
@@ -2169,7 +2351,9 @@ def substitute_args(tester_config, args):
   }
 
   if 'gpu' in tester_config['swarming_dimensions'][0]:
-    gpu = tester_config['swarming_dimensions'][0]['gpu'].split(':')
+    # First remove the driver version, then split into vendor and device.
+    gpu = tester_config['swarming_dimensions'][0]['gpu']
+    gpu = gpu.split('-')[0].split(':')
     substitutions['gpu_vendor_id'] = gpu[0]
     substitutions['gpu_device_id'] = gpu[1]
 
@@ -2178,7 +2362,16 @@ def substitute_args(tester_config, args):
 def matches_swarming_dimensions(tester_config, dimension_sets):
   for dimensions in dimension_sets:
     for cur_dims in tester_config['swarming_dimensions']:
-      if set(dimensions.items()).issubset(cur_dims.items()):
+      match = True
+      for key, value in dimensions.iteritems():
+        if key not in cur_dims:
+          match = False
+        elif value.endswith('*'):
+          if not cur_dims[key].startswith(value[0:-1]):
+            match = False
+        elif cur_dims[key] != value:
+          match = False
+      if match:
         return True
   return False
 
@@ -2427,9 +2620,15 @@ def generate_telemetry_tests(tester_name, tester_config,
 
 def generate_non_telemetry_isolated_test(tester_name, tester_config,
                                          test, test_config):
+  override_compile_targets = None
+  if 'compile_target' in test_config:
+    override_compile_targets = [test_config['compile_target']]
+  isolate_name = test
+  if 'isolate_name' in test_config:
+    isolate_name = test_config['isolate_name']
   return generate_isolated_test(tester_name, tester_config, test,
-                                test_config,
-                                None, test, None, [])
+                                test_config, None, isolate_name,
+                                override_compile_targets, [])
 
 def generate_non_telemetry_isolated_tests(tester_name, tester_config,
                                           test_dictionary):

@@ -4,20 +4,26 @@
 
 #include "core/layout/ng/inline/ng_offset_mapping_result.h"
 
+#include "core/dom/Node.h"
+#include "core/dom/Text.h"
+#include "core/layout/ng/inline/ng_inline_node.h"
+
 namespace blink {
 
 NGOffsetMappingUnit::NGOffsetMappingUnit(NGOffsetMappingUnitType type,
-                                         const LayoutText* owner,
+                                         const Node& node,
                                          unsigned dom_start,
                                          unsigned dom_end,
                                          unsigned text_content_start,
                                          unsigned text_content_end)
     : type_(type),
-      owner_(owner),
+      owner_(&node),
       dom_start_(dom_start),
       dom_end_(dom_end),
       text_content_start_(text_content_start),
       text_content_end_(text_content_end) {}
+
+NGOffsetMappingUnit::~NGOffsetMappingUnit() = default;
 
 unsigned NGOffsetMappingUnit::ConvertDOMOffsetToTextContent(
     unsigned offset) const {
@@ -36,20 +42,32 @@ unsigned NGOffsetMappingUnit::ConvertDOMOffsetToTextContent(
   return offset - dom_start_ + text_content_start_;
 }
 
-NGOffsetMappingResult::NGOffsetMappingResult(NGOffsetMappingResult&& other)
-    : NGOffsetMappingResult(std::move(other.units_), std::move(other.ranges_)) {
+const NGOffsetMappingResult* GetNGOffsetMappingFor(const Node& node,
+                                                   unsigned offset) {
+  Optional<NGInlineNode> inline_node = GetNGInlineNodeFor(node, offset);
+  if (!inline_node)
+    return nullptr;
+  return &inline_node->ComputeOffsetMappingIfNeeded();
 }
 
+NGOffsetMappingResult::NGOffsetMappingResult(NGOffsetMappingResult&& other)
+    : NGOffsetMappingResult(std::move(other.units_),
+                            std::move(other.ranges_),
+                            other.text_) {}
+
 NGOffsetMappingResult::NGOffsetMappingResult(UnitVector&& units,
-                                             RangeMap&& ranges)
-    : units_(units), ranges_(ranges) {}
+                                             RangeMap&& ranges,
+                                             String text)
+    : units_(units), ranges_(ranges), text_(text) {}
+
+NGOffsetMappingResult::~NGOffsetMappingResult() = default;
 
 const NGOffsetMappingUnit* NGOffsetMappingResult::GetMappingUnitForDOMOffset(
-    const LayoutText* layout_text,
+    const Node& node,
     unsigned offset) const {
   unsigned range_start;
   unsigned range_end;
-  std::tie(range_start, range_end) = ranges_.at(layout_text);
+  std::tie(range_start, range_end) = ranges_.at(&node);
   if (range_start == range_end || units_[range_start].DOMStart() > offset)
     return nullptr;
   // Find the last unit where unit.dom_start <= offset
@@ -61,6 +79,107 @@ const NGOffsetMappingUnit* NGOffsetMappingResult::GetMappingUnitForDOMOffset(
   if (unit->DOMEnd() < offset)
     return nullptr;
   return unit;
+}
+
+NGMappingUnitRange NGOffsetMappingResult::GetMappingUnitsForDOMOffsetRange(
+    const Node& node,
+    unsigned start_offset,
+    unsigned end_offset) const {
+  unsigned range_start;
+  unsigned range_end;
+  std::tie(range_start, range_end) = ranges_.at(&node);
+  if (range_start == range_end || units_[range_start].DOMStart() > end_offset ||
+      units_[range_end - 1].DOMEnd() < start_offset)
+    return {};
+
+  // Find the first unit where unit.dom_end >= start_offset
+  const NGOffsetMappingUnit* result_begin = std::lower_bound(
+      units_.begin() + range_start, units_.begin() + range_end, start_offset,
+      [](const NGOffsetMappingUnit& unit, unsigned offset) {
+        return unit.DOMEnd() < offset;
+      });
+
+  // Find the next of the last unit where unit.dom_start <= end_offset
+  const NGOffsetMappingUnit* result_end =
+      std::upper_bound(result_begin, units_.begin() + range_end, end_offset,
+                       [](unsigned offset, const NGOffsetMappingUnit& unit) {
+                         return offset < unit.DOMStart();
+                       });
+
+  return {result_begin, result_end};
+}
+
+Optional<unsigned> NGOffsetMappingResult::GetTextContentOffset(
+    const Node& node,
+    unsigned offset) const {
+  const NGOffsetMappingUnit* unit = GetMappingUnitForDOMOffset(node, offset);
+  if (!unit)
+    return WTF::nullopt;
+  return unit->ConvertDOMOffsetToTextContent(offset);
+}
+
+Optional<unsigned> NGOffsetMappingResult::StartOfNextNonCollapsedCharacter(
+    const Node& node,
+    unsigned offset) const {
+  const NGOffsetMappingUnit* unit = GetMappingUnitForDOMOffset(node, offset);
+  if (!unit)
+    return WTF::nullopt;
+
+  while (unit != units_.end() && unit->GetOwner() == node) {
+    if (unit->DOMEnd() > offset &&
+        unit->GetType() != NGOffsetMappingUnitType::kCollapsed)
+      return std::max(offset, unit->DOMStart());
+    ++unit;
+  }
+  return WTF::nullopt;
+}
+
+Optional<unsigned> NGOffsetMappingResult::EndOfLastNonCollapsedCharacter(
+    const Node& node,
+    unsigned offset) const {
+  const NGOffsetMappingUnit* unit = GetMappingUnitForDOMOffset(node, offset);
+  if (!unit)
+    return WTF::nullopt;
+
+  while (unit->GetOwner() == node) {
+    if (unit->DOMStart() < offset &&
+        unit->GetType() != NGOffsetMappingUnitType::kCollapsed)
+      return std::min(offset, unit->DOMEnd());
+    if (unit == units_.begin())
+      break;
+    --unit;
+  }
+  return WTF::nullopt;
+}
+
+bool NGOffsetMappingResult::IsBeforeNonCollapsedCharacter(
+    const Node& node,
+    unsigned offset) const {
+  const NGOffsetMappingUnit* unit = GetMappingUnitForDOMOffset(node, offset);
+  return unit && offset < unit->DOMEnd() &&
+         unit->GetType() != NGOffsetMappingUnitType::kCollapsed;
+}
+
+bool NGOffsetMappingResult::IsAfterNonCollapsedCharacter(
+    const Node& node,
+    unsigned offset) const {
+  if (!offset)
+    return false;
+  // In case we have one unit ending at |offset| and another starting at
+  // |offset|, we need to find the former. Hence, search with |offset - 1|.
+  const NGOffsetMappingUnit* unit =
+      GetMappingUnitForDOMOffset(node, offset - 1);
+  return unit && offset > unit->DOMStart() &&
+         unit->GetType() != NGOffsetMappingUnitType::kCollapsed;
+}
+
+Optional<UChar> NGOffsetMappingResult::GetCharacterBefore(
+    const Node& node,
+    unsigned offset) const {
+  Optional<unsigned> text_content_offset = GetTextContentOffset(node, offset);
+  if (!text_content_offset || !*text_content_offset)
+    return WTF::nullopt;
+  return text_[*text_content_offset - 1];
 }
 
 }  // namespace blink

@@ -54,6 +54,7 @@ class TestWebState : public WebState {
   const base::string16& GetTitle() const override;
   bool IsLoading() const override;
   double GetLoadingProgress() const override;
+  bool IsVisible() const override;
   bool IsCrashed() const override;
   bool IsEvicted() const override;
   bool IsBeingDestroyed() const override;
@@ -89,6 +90,7 @@ class TestWebState : public WebState {
   void SetContentIsHTML(bool content_is_html);
   void SetLoading(bool is_loading);
   void SetCurrentURL(const GURL& url);
+  void SetVisibleURL(const GURL& url);
   void SetTrustLevel(URLVerificationTrustLevel trust_level);
   void SetNavigationManager(
       std::unique_ptr<NavigationManager> navigation_manager);
@@ -109,6 +111,7 @@ class TestWebState : public WebState {
   BrowserState* browser_state_;
   bool web_usage_enabled_;
   bool is_loading_;
+  bool is_visible_;
   bool is_crashed_;
   bool is_evicted_;
   CRWContentView* transient_content_view_;

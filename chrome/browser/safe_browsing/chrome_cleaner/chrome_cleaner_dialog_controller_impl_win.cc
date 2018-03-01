@@ -7,22 +7,19 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/chrome_cleaner_navigation_util_win.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/srt_field_trial_win.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "components/component_updater/pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "ui/base/window_open_disposition.h"
 
 namespace safe_browsing {
 
 namespace {
-
-void OpenSettingsPage(Browser* browser) {
-  chrome_cleaner_util::OpenSettingsPage(
-      browser, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      /*skip_if_current_tab=*/false);
-}
 
 // These values are used to send UMA information and are replicated in the
 // histograms.xml file, so the order MUST NOT CHANGE.
@@ -95,7 +92,8 @@ void ChromeCleanerDialogControllerImpl::Accept(bool logs_enabled) {
       logs_enabled
           ? ChromeCleanerController::UserResponse::kAcceptedWithLogs
           : ChromeCleanerController::UserResponse::kAcceptedWithoutLogs);
-  OpenSettingsPage(browser_);
+  chrome_cleaner_util::OpenSettingsPage(
+      browser_, WindowOpenDisposition::NEW_FOREGROUND_TAB);
   OnInteractionDone();
 }
 
@@ -150,7 +148,8 @@ void ChromeCleanerDialogControllerImpl::DetailsButtonClicked(
       "SoftwareReporter.PromptDialog_DetailsButtonClicked"));
 
   cleaner_controller_->SetLogsEnabled(logs_enabled);
-  OpenSettingsPage(browser_);
+  chrome_cleaner_util::OpenSettingsPage(
+      browser_, WindowOpenDisposition::NEW_FOREGROUND_TAB);
   OnInteractionDone();
 }
 
@@ -232,6 +231,19 @@ void ChromeCleanerDialogControllerImpl::SetPromptDelegateForTests(
 }
 
 void ChromeCleanerDialogControllerImpl::ShowChromeCleanerPrompt() {
+  DCHECK(browser_);
+  Profile* profile = browser_->profile();
+  DCHECK(profile);
+  PrefService* prefs = profile->GetPrefs();
+  DCHECK(prefs);
+
+  // Don't show the prompt again if it's been shown before for this profile and
+  // for the current variations seed.
+  const std::string incoming_seed = GetIncomingSRTSeed();
+  const std::string old_seed = prefs->GetString(prefs::kSwReporterPromptSeed);
+  if (!incoming_seed.empty() && incoming_seed != old_seed)
+    prefs->SetString(prefs::kSwReporterPromptSeed, incoming_seed);
+
   prompt_delegate_->ShowChromeCleanerPrompt(browser_, this,
                                             cleaner_controller_);
   dialog_shown_ = true;

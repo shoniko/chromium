@@ -192,8 +192,6 @@ class TestWebGraphicsContext3D {
   virtual void produceTextureDirectCHROMIUM(GLuint texture,
                                             GLenum target,
                                             const GLbyte* mailbox) {}
-  virtual void consumeTextureCHROMIUM(GLenum target,
-                                      const GLbyte* mailbox) { }
   virtual GLuint createAndConsumeTextureCHROMIUM(GLenum target,
                                                  const GLbyte* mailbox);
 
@@ -343,6 +341,9 @@ class TestWebGraphicsContext3D {
   }
   void set_support_texture_half_float_linear(bool support) {
     test_capabilities_.texture_half_float_linear = support;
+  }
+  void set_support_texture_norm16(bool support) {
+    test_capabilities_.texture_norm16 = support;
   }
   void set_msaa_is_slow(bool msaa_is_slow) {
     test_capabilities_.msaa_is_slow = msaa_is_slow;

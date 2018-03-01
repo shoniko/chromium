@@ -6,9 +6,9 @@
 #define CHROME_BROWSER_VR_VR_SHELL_RENDERER_H_
 
 #include <memory>
-#include <queue>
 #include <vector>
 
+#include "base/containers/queue.h"
 #include "base/macros.h"
 #include "chrome/browser/vr/ui_element_renderer.h"
 #include "chrome/browser/vr/vr_controller_model.h"
@@ -39,18 +39,18 @@ class VrShellRenderer : public vr::UiElementRenderer {
   // vr::UiElementRenderer interface (exposed to UI elements).
   void DrawTexturedQuad(int texture_data_handle,
                         TextureLocation texture_location,
-                        const gfx::Transform& view_proj_matrix,
+                        const gfx::Transform& model_view_proj_matrix,
                         const gfx::RectF& copy_rect,
                         float opacity,
                         gfx::SizeF element_size,
                         float corner_radius) override;
-  void DrawGradientQuad(const gfx::Transform& view_proj_matrix,
+  void DrawGradientQuad(const gfx::Transform& model_view_proj_matrix,
                         const SkColor edge_color,
                         const SkColor center_color,
                         float opacity,
                         gfx::SizeF element_size,
                         float corner_radius) override;
-  void DrawGradientGridQuad(const gfx::Transform& view_proj_matrix,
+  void DrawGradientGridQuad(const gfx::Transform& model_view_proj_matrix,
                             const SkColor edge_color,
                             const SkColor center_color,
                             const SkColor grid_color,
@@ -69,11 +69,6 @@ class VrShellRenderer : public vr::UiElementRenderer {
 
   void Flush();
 
-  gfx::Size surface_texture_size() const { return surface_texture_size_; }
-  void set_surface_texture_size(const gfx::Size& surface_texture_size) {
-    surface_texture_size_ = surface_texture_size;
-  }
-
  private:
   void FlushIfNecessary(BaseRenderer* renderer);
 
@@ -88,8 +83,6 @@ class VrShellRenderer : public vr::UiElementRenderer {
   std::unique_ptr<ControllerRenderer> controller_renderer_;
   std::unique_ptr<GradientQuadRenderer> gradient_quad_renderer_;
   std::unique_ptr<GradientGridRenderer> gradient_grid_renderer_;
-
-  gfx::Size surface_texture_size_;
 
   DISALLOW_COPY_AND_ASSIGN(VrShellRenderer);
 };
@@ -136,10 +129,9 @@ class TexturedQuadRenderer : public BaseRenderer {
   // Enqueues a textured quad for rendering. The GL will ultimately be issued
   // in |Flush|.
   void AddQuad(int texture_data_handle,
-               const gfx::Transform& view_proj_matrix,
+               const gfx::Transform& model_view_proj_matrix,
                const gfx::RectF& copy_rect,
                float opacity,
-               const gfx::Size& surface_texture_size,
                const gfx::SizeF& element_size,
                float corner_radius);
 
@@ -153,10 +145,9 @@ class TexturedQuadRenderer : public BaseRenderer {
  private:
   struct QuadData {
     int texture_data_handle;
-    gfx::Transform view_proj_matrix;
+    gfx::Transform model_view_proj_matrix;
     gfx::RectF copy_rect;
     float opacity;
-    gfx::Size surface_texture_size;
     gfx::SizeF element_size;
     float corner_radius;
   };
@@ -167,7 +158,6 @@ class TexturedQuadRenderer : public BaseRenderer {
   // Uniforms
   GLuint model_view_proj_matrix_handle_;
   GLuint corner_offset_handle_;
-  GLuint corner_scale_handle_;
   GLuint opacity_handle_;
   GLuint texture_handle_;
   GLuint copy_rect_handler_;
@@ -176,7 +166,7 @@ class TexturedQuadRenderer : public BaseRenderer {
   GLuint corner_position_handle_;
   GLuint offset_scale_handle_;
 
-  std::queue<QuadData> quad_queue_;
+  base::queue<QuadData> quad_queue_;
 
   DISALLOW_COPY_AND_ASSIGN(TexturedQuadRenderer);
 };
@@ -286,11 +276,10 @@ class GradientQuadRenderer : public BaseRenderer {
   GradientQuadRenderer();
   ~GradientQuadRenderer() override;
 
-  void Draw(const gfx::Transform& view_proj_matrix,
+  void Draw(const gfx::Transform& model_view_proj_matrix,
             SkColor edge_color,
             SkColor center_color,
             float opacity,
-            const gfx::Size& surface_texture_size,
             const gfx::SizeF& element_size,
             float corner_radius);
 
@@ -304,7 +293,6 @@ class GradientQuadRenderer : public BaseRenderer {
   GLuint corner_offset_handle_;
   GLuint corner_position_handle_;
   GLuint offset_scale_handle_;
-  GLuint corner_scale_handle_;
   GLuint opacity_handle_;
   GLuint center_color_handle_;
   GLuint edge_color_handle_;
@@ -317,7 +305,7 @@ class GradientGridRenderer : public BaseQuadRenderer {
   GradientGridRenderer();
   ~GradientGridRenderer() override;
 
-  void Draw(const gfx::Transform& view_proj_matrix,
+  void Draw(const gfx::Transform& model_view_proj_matrix,
             SkColor edge_color,
             SkColor center_color,
             SkColor grid_color,

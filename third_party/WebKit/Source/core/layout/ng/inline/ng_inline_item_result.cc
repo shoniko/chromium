@@ -47,12 +47,17 @@ void NGLineInfo::SetLineStyle(const NGInlineNode& node,
   }
 }
 
-void NGLineInfo::SetLineLocation(LayoutUnit line_left,
-                                 LayoutUnit available_width,
-                                 LayoutUnit line_top) {
-  line_left_ = line_left;
+void NGLineInfo::SetLineOffset(NGLogicalOffset line_offset,
+                               LayoutUnit available_width) {
+  line_offset_ = line_offset;
   available_width_ = available_width;
-  line_top_ = line_top;
+}
+
+void NGLineInfo::SetLineEndShapeResult(
+    scoped_refptr<ShapeResult> result,
+    scoped_refptr<const ComputedStyle> style) {
+  line_end_shape_result_ = std::move(result);
+  line_end_style_ = std::move(style);
 }
 
 }  // namespace blink

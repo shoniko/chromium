@@ -5,17 +5,21 @@
 #ifndef DEVICE_U2F_U2F_SIGN_H_
 #define DEVICE_U2F_U2F_SIGN_H_
 
+#include <memory>
 #include <vector>
 
-#include "u2f_request.h"
+#include "device/u2f/u2f_request.h"
 
 namespace device {
+
+class U2fDiscovery;
 
 class U2fSign : public U2fRequest {
  public:
   U2fSign(const std::vector<std::vector<uint8_t>>& registered_keys,
           const std::vector<uint8_t>& challenge_hash,
           const std::vector<uint8_t>& app_param,
+          std::vector<std::unique_ptr<U2fDiscovery>> discoveries,
           const ResponseCallback& cb);
   ~U2fSign() override;
 
@@ -23,6 +27,7 @@ class U2fSign : public U2fRequest {
       const std::vector<std::vector<uint8_t>>& registered_keys,
       const std::vector<uint8_t>& challenge_hash,
       const std::vector<uint8_t>& app_param,
+      std::vector<std::unique_ptr<U2fDiscovery>> discoveries,
       const ResponseCallback& cb);
 
  private:

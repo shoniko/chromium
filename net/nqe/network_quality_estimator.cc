@@ -12,7 +12,6 @@
 #include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_macros.h"
@@ -218,9 +217,7 @@ NetworkQualityEstimator::NetworkQualityEstimator(
     NetLog* net_log)
     : params_(std::move(params)),
       use_localhost_requests_(false),
-      use_small_responses_(false),
       disable_offline_check_(false),
-      add_default_platform_observations_(true),
       tick_clock_(new base::DefaultTickClock()),
       last_connection_change_(tick_clock_->NowTicks()),
       current_network_id_(nqe::internal::NetworkID(
@@ -266,13 +263,12 @@ NetworkQualityEstimator::NetworkQualityEstimator(
     RecordExternalEstimateProviderMetrics(
         EXTERNAL_ESTIMATE_PROVIDER_STATUS_NOT_AVAILABLE);
   }
-  current_network_id_ = GetCurrentNetworkID();
 
   throughput_analyzer_.reset(new nqe::internal::ThroughputAnalyzer(
-      params_.get(), base::ThreadTaskRunnerHandle::Get(),
+      this, params_.get(), base::ThreadTaskRunnerHandle::Get(),
       base::Bind(&NetworkQualityEstimator::OnNewThroughputObservationAvailable,
                  base::Unretained(this)),
-      net_log_));
+      tick_clock_.get(), net_log_));
 
   watcher_factory_.reset(new nqe::internal::SocketWatcherFactory(
       base::ThreadTaskRunnerHandle::Get(),
@@ -286,13 +282,13 @@ NetworkQualityEstimator::NetworkQualityEstimator(
   // tools/metrics/histograms/histograms.xml.
   accuracy_recording_intervals_.push_back(base::TimeDelta::FromSeconds(15));
 
-  ComputeEffectiveConnectionType();
+  GatherEstimatesForNextConnectionType();
 }
 
 void NetworkQualityEstimator::AddDefaultEstimates() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  if (!add_default_platform_observations_)
+  if (!params_->add_default_platform_observations())
     return;
 
   if (params_->DefaultObservation(current_network_id_.type).http_rtt() !=
@@ -414,6 +410,12 @@ void NetworkQualityEstimator::NotifyHeadersReceived(const URLRequest& request) {
                                    tick_clock_->NowTicks(), signal_strength_,
                                    NETWORK_QUALITY_OBSERVATION_SOURCE_HTTP);
   AddAndNotifyObserversOfRTT(http_rtt_observation);
+  throughput_analyzer_->NotifyBytesRead(request);
+}
+
+void NetworkQualityEstimator::NotifyBytesRead(const URLRequest& request) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  throughput_analyzer_->NotifyBytesRead(request);
 }
 
 void NetworkQualityEstimator::RecordAccuracyAfterMainFrame(
@@ -677,8 +679,7 @@ void NetworkQualityEstimator::SetUseLocalHostRequestsForTesting(
 void NetworkQualityEstimator::SetUseSmallResponsesForTesting(
     bool use_small_responses) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  use_small_responses_ = use_small_responses;
-  throughput_analyzer_->SetUseSmallResponsesForTesting(use_small_responses_);
+  params_->SetUseSmallResponsesForTesting(use_small_responses);
 }
 
 void NetworkQualityEstimator::DisableOfflineCheckForTesting(
@@ -686,12 +687,6 @@ void NetworkQualityEstimator::DisableOfflineCheckForTesting(
   DCHECK(thread_checker_.CalledOnValidThread());
   disable_offline_check_ = disable_offline_check;
   network_quality_store_->DisableOfflineCheckForTesting(disable_offline_check_);
-}
-
-void NetworkQualityEstimator::SetAddDefaultPlatformObservationsForTesting(
-    bool add_default_platform_observations) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  add_default_platform_observations_ = add_default_platform_observations;
 }
 
 void NetworkQualityEstimator::ReportEffectiveConnectionTypeForTesting(
@@ -761,6 +756,9 @@ void NetworkQualityEstimator::OnConnectionTypeChanged(
   downstream_throughput_kbps_observations_.Clear();
   rtt_ms_observations_.Clear();
 
+  if (external_estimate_provider_)
+    external_estimate_provider_->ClearCachedEstimate();
+
 #if defined(OS_ANDROID)
   if (params_->weight_multiplier_per_signal_strength_level() < 1.0 &&
       NetworkChangeNotifier::IsConnectionCellular(current_network_id_.type)) {
@@ -787,7 +785,14 @@ void NetworkQualityEstimator::OnConnectionTypeChanged(
       EFFECTIVE_CONNECTION_TYPE_UNKNOWN;
   rtt_observations_size_at_last_ect_computation_ = 0;
   throughput_observations_size_at_last_ect_computation_ = 0;
+  estimated_quality_at_last_main_frame_ = nqe::internal::NetworkQuality();
 
+  GatherEstimatesForNextConnectionType();
+  throughput_analyzer_->OnConnectionTypeChanged();
+}
+
+void NetworkQualityEstimator::GatherEstimatesForNextConnectionType() {
+  DCHECK(thread_checker_.CalledOnValidThread());
   // Update the local state as part of preparation for the new connection.
   current_network_id_ = GetCurrentNetworkID();
   RecordNetworkIDAvailability();
@@ -798,10 +803,7 @@ void NetworkQualityEstimator::OnConnectionTypeChanged(
   // unavailable, add the default estimates.
   if (!ReadCachedNetworkQualityEstimate())
     AddDefaultEstimates();
-  estimated_quality_at_last_main_frame_ = nqe::internal::NetworkQuality();
-
-  throughput_analyzer_->OnConnectionTypeChanged();
-  MaybeComputeEffectiveConnectionType();
+  ComputeEffectiveConnectionType();
 }
 
 void NetworkQualityEstimator::MaybeQueryExternalEstimateProvider() const {
@@ -1513,6 +1515,8 @@ bool NetworkQualityEstimator::ReadCachedNetworkQualityEstimate() {
 
   if (current_network_id_.type !=
           NetworkChangeNotifier::ConnectionType::CONNECTION_WIFI &&
+      current_network_id_.type !=
+          NetworkChangeNotifier::ConnectionType::CONNECTION_ETHERNET &&
       !disable_offline_check_) {
     return false;
   }
@@ -1603,6 +1607,7 @@ void NetworkQualityEstimator::SetTickClockForTesting(
     std::unique_ptr<base::TickClock> tick_clock) {
   DCHECK(thread_checker_.CalledOnValidThread());
   tick_clock_ = std::move(tick_clock);
+  throughput_analyzer_->SetTickClockForTesting(tick_clock_.get());
 }
 
 double NetworkQualityEstimator::RandDouble() const {
@@ -1684,7 +1689,7 @@ void NetworkQualityEstimator::OnNewThroughputObservationAvailable(
     int32_t downstream_kbps) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  if (downstream_kbps == 0)
+  if (downstream_kbps <= 0)
     return;
 
   DCHECK_NE(nqe::internal::kInvalidThroughput, downstream_kbps);
@@ -1733,12 +1738,10 @@ void NetworkQualityEstimator::
     observer.OnEffectiveConnectionTypeChanged(effective_connection_type_);
 
   // Add the estimates of the current network to the cache store.
-  if (effective_connection_type_ != EFFECTIVE_CONNECTION_TYPE_UNKNOWN) {
     network_quality_store_->Add(current_network_id_,
                                 nqe::internal::CachedNetworkQuality(
                                     tick_clock_->NowTicks(), network_quality_,
                                     effective_connection_type_));
-  }
 }
 
 void NetworkQualityEstimator::NotifyObserversOfRTTOrThroughputComputed() const {
@@ -1865,6 +1868,8 @@ void NetworkQualityEstimator::MaybeUpdateNetworkQualityFromCache(
     return;
   if (network_id.type !=
           NetworkChangeNotifier::ConnectionType::CONNECTION_WIFI &&
+      network_id.type !=
+          NetworkChangeNotifier::ConnectionType::CONNECTION_ETHERNET &&
       !disable_offline_check_) {
     return;
   }

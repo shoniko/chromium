@@ -26,10 +26,10 @@
 #define LiveNodeListBase_h
 
 #include "core/CoreExport.h"
-#include "core/HTMLNames.h"
 #include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/html/CollectionType.h"
+#include "core/html_names.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -98,7 +98,7 @@ class CORE_EXPORT LiveNodeListBase : public GarbageCollectedMixin {
       unsigned& current_offset,
       MatchFunc);
 
-  DEFINE_INLINE_VIRTUAL_TRACE() { visitor->Trace(owner_node_); }
+  virtual void Trace(blink::Visitor* visitor) { visitor->Trace(owner_node_); }
 
  private:
   Member<ContainerNode> owner_node_;  // Cannot be null.

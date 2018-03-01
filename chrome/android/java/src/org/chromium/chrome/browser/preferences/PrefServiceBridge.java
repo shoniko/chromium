@@ -104,6 +104,14 @@ public final class PrefServiceBridge {
     }
 
     /**
+     * @param preference The name of the preference.
+     * @return Whether the specified preference is enabled.
+     */
+    public boolean getBoolean(@Pref int preference) {
+        return nativeGetBoolean(preference);
+    }
+
+    /**
      * Migrates (synchronously) the preferences to the most recent version.
      */
     public void migratePreferences(Context context) {
@@ -335,6 +343,13 @@ public final class PrefServiceBridge {
      */
     public boolean isBackgroundSyncAllowed() {
         return nativeGetBackgroundSyncEnabled();
+    }
+
+    /**
+     * @return true if websites are allowed to play sound.
+     */
+    public boolean isSoundEnabled() {
+        return nativeGetSoundEnabled();
     }
 
     /**
@@ -662,13 +677,6 @@ public final class PrefServiceBridge {
         nativeMigrateBrowsingDataPreferences();
     }
 
-    /**
-     * @return Whether browser history can be deleted by the user.
-     */
-    public boolean canDeleteBrowsingHistory() {
-        return nativeCanDeleteBrowsingHistory();
-    }
-
     public void setAllowCookiesEnabled(boolean allow) {
         nativeSetAllowCookiesEnabled(allow);
     }
@@ -715,6 +723,10 @@ public final class PrefServiceBridge {
 
     public void setPasswordEchoEnabled(boolean enabled) {
         nativeSetPasswordEchoEnabled(enabled);
+    }
+
+    public void setSoundEnabled(boolean allow) {
+        nativeSetSoundEnabled(allow);
     }
 
     /**
@@ -897,6 +909,10 @@ public final class PrefServiceBridge {
         return nativeGetSupervisedUserSecondCustodianProfileImageURL();
     }
 
+    public void setChromeHomePersonalizedOmniboxSuggestionsEnabled(boolean enabled) {
+        nativeSetChromeHomePersonalizedOmniboxSuggestionsEnabled(enabled);
+    }
+
     private native boolean nativeIsContentSettingEnabled(int contentSettingType);
     private native boolean nativeIsContentSettingManaged(int contentSettingType);
     private native void nativeSetContentSettingEnabled(int contentSettingType, boolean allow);
@@ -961,6 +977,7 @@ public final class PrefServiceBridge {
         nativeSetSupervisedUserId(supervisedUserId);
     }
 
+    private native boolean nativeGetBoolean(int preference);
     private native boolean nativeGetAcceptCookiesEnabled();
     private native boolean nativeGetAcceptCookiesUserModifiable();
     private native boolean nativeGetAcceptCookiesManagedByCustodian();
@@ -995,6 +1012,7 @@ public final class PrefServiceBridge {
     private native boolean nativeGetIncognitoModeManaged();
     private native boolean nativeGetPrintingEnabled();
     private native boolean nativeGetPrintingManaged();
+    private native boolean nativeGetSoundEnabled();
     private native boolean nativeGetSupervisedUserSafeSitesEnabled();
     private native void nativeSetTranslateEnabled(boolean enabled);
     private native void nativeResetTranslateDefaults();
@@ -1009,7 +1027,6 @@ public final class PrefServiceBridge {
     private native int nativeGetLastClearBrowsingDataTab();
     private native void nativeSetLastClearBrowsingDataTab(int lastTab);
     private native void nativeMigrateBrowsingDataPreferences();
-    private native boolean nativeCanDeleteBrowsingHistory();
     private native void nativeSetAutoplayEnabled(boolean allow);
     private native void nativeSetAllowCookiesEnabled(boolean allow);
     private native void nativeSetBackgroundSyncEnabled(boolean allow);
@@ -1027,6 +1044,7 @@ public final class PrefServiceBridge {
     private native void nativeSetNotificationsEnabled(boolean allow);
     private native void nativeSetNotificationsVibrateEnabled(boolean enabled);
     private native void nativeSetPasswordEchoEnabled(boolean enabled);
+    private native void nativeSetSoundEnabled(boolean allow);
     private native boolean nativeCanPrefetchAndPrerender();
     private native AboutVersionStrings nativeGetAboutVersionStrings();
     private native void nativeSetContextualSearchPreference(String preference);
@@ -1066,4 +1084,5 @@ public final class PrefServiceBridge {
     private native void nativeSetLatestVersionWhenClickedUpdateMenuItem(String version);
     private native String nativeGetLatestVersionWhenClickedUpdateMenuItem();
     private native void nativeSetSupervisedUserId(String supervisedUserId);
+    private native void nativeSetChromeHomePersonalizedOmniboxSuggestionsEnabled(boolean enabled);
 }

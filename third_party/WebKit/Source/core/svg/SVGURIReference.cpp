@@ -20,11 +20,11 @@
 
 #include "core/svg/SVGURIReference.h"
 
-#include "core/XLinkNames.h"
 #include "core/dom/Document.h"
 #include "core/dom/IdTargetObserver.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/svg/SVGElement.h"
+#include "core/xlink_names.h"
 #include "platform/weborigin/KURL.h"
 
 namespace blink {
@@ -51,7 +51,7 @@ SVGURIReference::SVGURIReference(SVGElement* element)
   href_->AddToPropertyMap(element);
 }
 
-DEFINE_TRACE(SVGURIReference) {
+void SVGURIReference::Trace(blink::Visitor* visitor) {
   visitor->Trace(href_);
 }
 

@@ -138,7 +138,7 @@ TEST_F(PasswordReuseDetectionManagerTest, NoReuseCheckingAfterReuseFound) {
   PasswordReuseDetectionManager manager(&client_);
 
   // Simulate that reuse found.
-  manager.OnReuseFound(base::string16(), true, {}, 0);
+  manager.OnReuseFound(0ul, true, {}, 0);
 
   // Expect no checking of reuse.
   EXPECT_CALL(*store_, CheckReuse(_, _, _)).Times(0);
@@ -148,6 +148,27 @@ TEST_F(PasswordReuseDetectionManagerTest, NoReuseCheckingAfterReuseFound) {
   manager.DidNavigateMainFrame(GURL("https://www.example.com"));
   EXPECT_CALL(*store_, CheckReuse(base::ASCIIToUTF16("1"), _, _));
   manager.OnKeyPressed(base::ASCIIToUTF16("1"));
+}
+
+// Verify that keystoke buffer is cleared only on cross host navigation.
+TEST_F(PasswordReuseDetectionManagerTest, DidNavigateMainFrame) {
+  EXPECT_CALL(client_, GetPasswordStore())
+      .WillRepeatedly(testing::Return(store_.get()));
+  PasswordReuseDetectionManager manager(&client_);
+
+  manager.DidNavigateMainFrame(GURL("https://www.example1.com/123"));
+  EXPECT_CALL(*store_, CheckReuse(base::ASCIIToUTF16("1"), _, _));
+  manager.OnKeyPressed(base::ASCIIToUTF16("1"));
+
+  // Check that the buffer is not cleared on the same host navigation.
+  manager.DidNavigateMainFrame(GURL("https://www.example1.com/456"));
+  EXPECT_CALL(*store_, CheckReuse(base::ASCIIToUTF16("12"), _, _));
+  manager.OnKeyPressed(base::ASCIIToUTF16("2"));
+
+  // Check that the buffer is cleared on the cross host navigation.
+  manager.DidNavigateMainFrame(GURL("https://www.example2.com/123"));
+  EXPECT_CALL(*store_, CheckReuse(base::ASCIIToUTF16("3"), _, _));
+  manager.OnKeyPressed(base::ASCIIToUTF16("3"));
 }
 
 }  // namespace

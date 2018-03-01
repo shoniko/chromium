@@ -4,9 +4,10 @@
 
 #include "core/html/media/MediaRemotingInterstitial.h"
 
+#include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/TaskRunnerHelper.h"
 #include "core/html/HTMLImageElement.h"
-#include "core/html/HTMLVideoElement.h"
+#include "core/html/media/HTMLVideoElement.h"
 #include "core/html/media/MediaRemotingElements.h"
 #include "platform/text/PlatformLocale.h"
 #include "public/platform/WebLocalizedString.h"
@@ -48,7 +49,8 @@ MediaRemotingInterstitial::MediaRemotingInterstitial(
 
 void MediaRemotingInterstitial::Show(
     const WebString& remote_device_friendly_name) {
-  DCHECK(!should_be_visible_);
+  if (should_be_visible_)
+    return;
   if (remote_device_friendly_name.IsEmpty()) {
     cast_text_message_->setInnerText(
         GetVideoElement().GetLocale().QueryString(
@@ -71,7 +73,8 @@ void MediaRemotingInterstitial::Show(
 }
 
 void MediaRemotingInterstitial::Hide() {
-  DCHECK(should_be_visible_);
+  if (!should_be_visible_)
+    return;
   if (toggle_insterstitial_timer_.IsActive())
     toggle_insterstitial_timer_.Stop();
   should_be_visible_ = false;
@@ -104,7 +107,7 @@ void MediaRemotingInterstitial::OnPosterImageChanged() {
       GetVideoElement().getAttribute(HTMLNames::posterAttr));
 }
 
-DEFINE_TRACE(MediaRemotingInterstitial) {
+void MediaRemotingInterstitial::Trace(blink::Visitor* visitor) {
   visitor->Trace(video_element_);
   visitor->Trace(background_image_);
   visitor->Trace(exit_button_);

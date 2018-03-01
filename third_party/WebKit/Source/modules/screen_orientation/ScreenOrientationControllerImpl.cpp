@@ -42,7 +42,7 @@ ScreenOrientationControllerImpl::ScreenOrientationControllerImpl(
     WebScreenOrientationClient* client)
     : ScreenOrientationController(frame),
       ContextLifecycleObserver(frame.GetDocument()),
-      PlatformEventController(&frame),
+      PlatformEventController(frame.GetDocument()),
       client_(client),
       dispatch_event_timer_(
           TaskRunnerHelper::Get(TaskType::kMiscPlatformAPI, &frame),
@@ -242,7 +242,7 @@ void ScreenOrientationControllerImpl::NotifyDispatcher() {
     StopUpdating();
 }
 
-DEFINE_TRACE(ScreenOrientationControllerImpl) {
+void ScreenOrientationControllerImpl::Trace(blink::Visitor* visitor) {
   visitor->Trace(orientation_);
   ContextLifecycleObserver::Trace(visitor);
   Supplement<LocalFrame>::Trace(visitor);

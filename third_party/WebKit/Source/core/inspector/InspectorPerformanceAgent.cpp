@@ -22,8 +22,13 @@ namespace {
 
 static const char kPerformanceAgentEnabled[] = "PerformanceAgentEnabled";
 
-static const char* kInstanceCounterNames[] = {
-#define INSTANCE_COUNTER_NAME(name) #name "Count",
+constexpr bool isPlural(const char* str, int len) {
+  return len > 1 && str[len - 2] == 's';
+}
+
+static constexpr const char* kInstanceCounterNames[] = {
+#define INSTANCE_COUNTER_NAME(name) \
+  (isPlural(#name, sizeof(#name)) ? #name : #name "s"),
     INSTANCE_COUNTERS_LIST(INSTANCE_COUNTER_NAME)
 #undef INSTANCE_COUNTER_NAME
 };
@@ -196,7 +201,7 @@ void InspectorPerformanceAgent::DidProcessTask(double start_time,
   task_start_time_ = 0;
 }
 
-DEFINE_TRACE(InspectorPerformanceAgent) {
+void InspectorPerformanceAgent::Trace(blink::Visitor* visitor) {
   visitor->Trace(inspected_frames_);
   InspectorBaseAgent<protocol::Performance::Metainfo>::Trace(visitor);
 }

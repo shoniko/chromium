@@ -58,7 +58,6 @@
 #include "chrome/browser/metrics/chrome_metrics_services_manager_client.h"
 #include "chrome/browser/metrics/thread_watcher.h"
 #include "chrome/browser/net/chrome_net_log_helper.h"
-#include "chrome/browser/net/crl_set_fetcher.h"
 #include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/browser/notifications/notification_platform_bridge.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
@@ -104,7 +103,6 @@
 #include "components/prefs/pref_service.h"
 #include "components/rappor/public/rappor_utils.h"
 #include "components/rappor/rappor_service_impl.h"
-#include "components/safe_json/safe_json_parser.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/subresource_filter/content/browser/content_ruleset_service.h"
 #include "components/subresource_filter/core/browser/ruleset_service.h"
@@ -160,10 +158,6 @@
 #include "chrome/browser/ui/apps/chrome_app_window_client.h"
 #include "components/storage_monitor/storage_monitor.h"
 #include "extensions/common/extension_l10n_util.h"
-#endif
-
-#if !defined(DISABLE_NACL)
-#include "chrome/browser/component_updater/pnacl_component_installer.h"
 #endif
 
 #if BUILDFLAG(ENABLE_PLUGINS)
@@ -292,8 +286,6 @@ BrowserProcessImpl::~BrowserProcessImpl() {
 #if !defined(OS_ANDROID)
   KeepAliveRegistry::GetInstance()->RemoveObserver(this);
 #endif  // !defined(OS_ANDROID)
-
-  tracked_objects::ThreadData::EnsureCleanupWasCalled(4);
 
   g_browser_process = NULL;
 }
@@ -566,11 +558,6 @@ metrics::MetricsService* BrowserProcessImpl::metrics_service() {
 rappor::RapporServiceImpl* BrowserProcessImpl::rappor_service() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return GetMetricsServicesManager()->GetRapporServiceImpl();
-}
-
-ukm::UkmRecorder* BrowserProcessImpl::ukm_recorder() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  return GetMetricsServicesManager()->GetUkmService();
 }
 
 IOThread* BrowserProcessImpl::io_thread() {
@@ -975,25 +962,6 @@ BrowserProcessImpl::component_updater() {
           g_browser_process->local_state()));
 
   return component_updater_.get();
-}
-
-CRLSetFetcher* BrowserProcessImpl::crl_set_fetcher() {
-  if (!crl_set_fetcher_)
-    crl_set_fetcher_ = base::MakeRefCounted<CRLSetFetcher>();
-  return crl_set_fetcher_.get();
-}
-
-component_updater::PnaclComponentInstaller*
-BrowserProcessImpl::pnacl_component_installer() {
-#if !defined(DISABLE_NACL)
-  if (!pnacl_component_installer_) {
-    pnacl_component_installer_ =
-        base::MakeRefCounted<component_updater::PnaclComponentInstaller>();
-  }
-  return pnacl_component_installer_.get();
-#else
-  return nullptr;
-#endif
 }
 
 component_updater::SupervisedUserWhitelistInstaller*

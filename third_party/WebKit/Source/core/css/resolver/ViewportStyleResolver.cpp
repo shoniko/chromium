@@ -47,6 +47,8 @@
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
 #include "core/layout/api/LayoutViewItem.h"
+#include "core/page/ChromeClient.h"
+#include "core/page/Page.h"
 
 namespace blink {
 
@@ -298,6 +300,12 @@ Length ViewportStyleResolver::ViewportLengthValue(CSSPropertyID id) {
     has_viewport_units_ = true;
   document_style->SetHasViewportUnits(document_style_has_viewport_units);
 
+  if (result.IsFixed() && document_->GetPage()) {
+    float scaled_value =
+        document_->GetPage()->GetChromeClient().WindowToViewportScalar(
+            result.GetFloatValue());
+    result.SetValue(scaled_value);
+  }
   return result;
 }
 
@@ -339,7 +347,7 @@ void ViewportStyleResolver::UpdateViewport(
   needs_update_ = kNoUpdate;
 }
 
-DEFINE_TRACE(ViewportStyleResolver) {
+void ViewportStyleResolver::Trace(blink::Visitor* visitor) {
   visitor->Trace(document_);
   visitor->Trace(property_set_);
   visitor->Trace(initial_viewport_medium_);

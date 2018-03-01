@@ -12,7 +12,6 @@
 #include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
@@ -76,6 +75,8 @@ int SpdyHttpStream::InitializeStream(const HttpRequestInfo* request_info,
     return ERR_CONNECTION_CLOSED;
 
   request_info_ = request_info;
+  // TODO(bnc): Remove this condition once pushed headers are properly
+  // validated.  https://crbug.com/554220.
   if (request_info_->method == "GET") {
     int error = spdy_session_->GetPushStream(request_info_->url, priority,
                                              &stream_, stream_net_log);

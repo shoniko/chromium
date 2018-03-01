@@ -50,7 +50,6 @@
 #include "core/style/StyleNonInheritedVariables.h"
 #include "core/style/StyleRay.h"
 #include "platform/LengthFunctions.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/fonts/Font.h"
 #include "platform/fonts/FontSelector.h"
 #include "platform/geometry/FloatRoundedRect.h"
@@ -92,12 +91,12 @@ struct SameSizeAsComputedStyle : public RefCounted<SameSizeAsComputedStyle> {
 // ComputedStyle.
 ASSERT_SIZE(ComputedStyle, SameSizeAsComputedStyle);
 
-RefPtr<ComputedStyle> ComputedStyle::Create() {
-  return AdoptRef(new ComputedStyle(InitialStyle()));
+scoped_refptr<ComputedStyle> ComputedStyle::Create() {
+  return WTF::AdoptRef(new ComputedStyle(InitialStyle()));
 }
 
-RefPtr<ComputedStyle> ComputedStyle::CreateInitialStyle() {
-  return AdoptRef(new ComputedStyle());
+scoped_refptr<ComputedStyle> ComputedStyle::CreateInitialStyle() {
+  return WTF::AdoptRef(new ComputedStyle());
 }
 
 ComputedStyle& ComputedStyle::MutableInitialStyle() {
@@ -111,18 +110,18 @@ void ComputedStyle::InvalidateInitialStyle() {
   MutableInitialStyle().SetTapHighlightColor(InitialTapHighlightColor());
 }
 
-RefPtr<ComputedStyle> ComputedStyle::CreateAnonymousStyleWithDisplay(
+scoped_refptr<ComputedStyle> ComputedStyle::CreateAnonymousStyleWithDisplay(
     const ComputedStyle& parent_style,
     EDisplay display) {
-  RefPtr<ComputedStyle> new_style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> new_style = ComputedStyle::Create();
   new_style->InheritFrom(parent_style);
   new_style->SetUnicodeBidi(parent_style.GetUnicodeBidi());
   new_style->SetDisplay(display);
   return new_style;
 }
 
-RefPtr<ComputedStyle> ComputedStyle::Clone(const ComputedStyle& other) {
-  return AdoptRef(new ComputedStyle(other));
+scoped_refptr<ComputedStyle> ComputedStyle::Clone(const ComputedStyle& other) {
+  return WTF::AdoptRef(new ComputedStyle(other));
 }
 
 ALWAYS_INLINE ComputedStyle::ComputedStyle()
@@ -251,6 +250,29 @@ StyleSelfAlignmentData ComputedStyle::ResolvedJustifySelf(
   return parent_style->ResolvedJustifyItems(normal_value_behaviour);
 }
 
+StyleContentAlignmentData ResolvedContentAlignment(
+    const StyleContentAlignmentData& value,
+    const StyleContentAlignmentData& normal_behaviour) {
+  return (value.GetPosition() == kContentPositionNormal &&
+          value.Distribution() == kContentDistributionDefault)
+             ? normal_behaviour
+             : value;
+}
+
+StyleContentAlignmentData ComputedStyle::ResolvedAlignContent(
+    const StyleContentAlignmentData& normal_behaviour) const {
+  // We will return the behaviour of 'normal' value if needed, which is specific
+  // of each layout model.
+  return ResolvedContentAlignment(AlignContent(), normal_behaviour);
+}
+
+StyleContentAlignmentData ComputedStyle::ResolvedJustifyContent(
+    const StyleContentAlignmentData& normal_behaviour) const {
+  // We will return the behaviour of 'normal' value if needed, which is specific
+  // of each layout model.
+  return ResolvedContentAlignment(JustifyContent(), normal_behaviour);
+}
+
 static inline ContentPosition ResolvedContentAlignmentPosition(
     const StyleContentAlignmentData& value,
     const StyleContentAlignmentData& normal_value_behavior) {
@@ -370,28 +392,28 @@ bool ComputedStyle::HasUniquePseudoStyle() const {
 
 ComputedStyle* ComputedStyle::GetCachedPseudoStyle(PseudoId pid) const {
   if (!cached_pseudo_styles_ || !cached_pseudo_styles_->size())
-    return 0;
+    return nullptr;
 
   if (StyleType() != kPseudoIdNone)
-    return 0;
+    return nullptr;
 
   for (size_t i = 0; i < cached_pseudo_styles_->size(); ++i) {
-    ComputedStyle* pseudo_style = cached_pseudo_styles_->at(i).Get();
+    ComputedStyle* pseudo_style = cached_pseudo_styles_->at(i).get();
     if (pseudo_style->StyleType() == pid)
       return pseudo_style;
   }
 
-  return 0;
+  return nullptr;
 }
 
 ComputedStyle* ComputedStyle::AddCachedPseudoStyle(
-    RefPtr<ComputedStyle> pseudo) {
+    scoped_refptr<ComputedStyle> pseudo) {
   if (!pseudo)
-    return 0;
+    return nullptr;
 
   DCHECK_GT(pseudo->StyleType(), kPseudoIdNone);
 
-  ComputedStyle* result = pseudo.Get();
+  ComputedStyle* result = pseudo.get();
 
   if (!cached_pseudo_styles_)
     cached_pseudo_styles_ = WTF::WrapUnique(new PseudoStyleCache);
@@ -405,9 +427,9 @@ void ComputedStyle::RemoveCachedPseudoStyle(PseudoId pid) {
   if (!cached_pseudo_styles_)
     return;
   for (size_t i = 0; i < cached_pseudo_styles_->size(); ++i) {
-    ComputedStyle* pseudo_style = cached_pseudo_styles_->at(i).Get();
+    ComputedStyle* pseudo_style = cached_pseudo_styles_->at(i).get();
     if (pseudo_style->StyleType() == pid) {
-      cached_pseudo_styles_->erase(i);
+      cached_pseudo_styles_->EraseAt(i);
       return;
     }
   }
@@ -686,9 +708,8 @@ void ComputedStyle::UpdatePropertySpecificDifferences(
     diff.SetTextDecorationOrColorChanged();
   }
 
-  bool has_clip = HasOutOfFlowPosition() && !HasAutoClipInternal();
-  bool other_has_clip =
-      other.HasOutOfFlowPosition() && !other.HasAutoClipInternal();
+  bool has_clip = HasOutOfFlowPosition() && !HasAutoClip();
+  bool other_has_clip = other.HasOutOfFlowPosition() && !other.HasAutoClip();
   if (has_clip != other_has_clip ||
       (has_clip && Clip() != other.Clip()))
     diff.SetCSSClipChanged();
@@ -1257,7 +1278,8 @@ bool ComputedStyle::ShouldUseTextIndent(bool is_first_line,
   bool should_use =
       is_first_line || (is_after_forced_break &&
                         GetTextIndentLine() != TextIndentLine::kFirstLine);
-  return TextIndentType() == TextIndentType::kNormal ? should_use : !should_use;
+  return GetTextIndentType() == TextIndentType::kNormal ? should_use
+                                                        : !should_use;
 }
 
 const AtomicString& ComputedStyle::TextEmphasisMarkString() const {
@@ -1402,7 +1424,7 @@ const Vector<AppliedTextDecoration>& ComputedStyle::AppliedTextDecorations()
 }
 
 StyleInheritedVariables* ComputedStyle::InheritedVariables() const {
-  return InheritedVariablesInternal().Get();
+  return InheritedVariablesInternal().get();
 }
 
 StyleNonInheritedVariables* ComputedStyle::NonInheritedVariables() const {
@@ -1410,7 +1432,7 @@ StyleNonInheritedVariables* ComputedStyle::NonInheritedVariables() const {
 }
 
 StyleInheritedVariables& ComputedStyle::MutableInheritedVariables() {
-  RefPtr<StyleInheritedVariables>& variables =
+  scoped_refptr<StyleInheritedVariables>& variables =
       MutableInheritedVariablesInternal();
   if (!variables)
     variables = StyleInheritedVariables::Create();
@@ -1429,28 +1451,29 @@ StyleNonInheritedVariables& ComputedStyle::MutableNonInheritedVariables() {
 
 void ComputedStyle::SetUnresolvedInheritedVariable(
     const AtomicString& name,
-    RefPtr<CSSVariableData> value) {
+    scoped_refptr<CSSVariableData> value) {
   DCHECK(value && value->NeedsVariableResolution());
   MutableInheritedVariables().SetVariable(name, std::move(value));
 }
 
 void ComputedStyle::SetUnresolvedNonInheritedVariable(
     const AtomicString& name,
-    RefPtr<CSSVariableData> value) {
+    scoped_refptr<CSSVariableData> value) {
   DCHECK(value && value->NeedsVariableResolution());
   MutableNonInheritedVariables().SetVariable(name, std::move(value));
 }
 
 void ComputedStyle::SetResolvedUnregisteredVariable(
     const AtomicString& name,
-    RefPtr<CSSVariableData> value) {
+    scoped_refptr<CSSVariableData> value) {
   DCHECK(value && !value->NeedsVariableResolution());
   MutableInheritedVariables().SetVariable(name, std::move(value));
 }
 
-void ComputedStyle::SetResolvedInheritedVariable(const AtomicString& name,
-                                                 RefPtr<CSSVariableData> value,
-                                                 const CSSValue* parsed_value) {
+void ComputedStyle::SetResolvedInheritedVariable(
+    const AtomicString& name,
+    scoped_refptr<CSSVariableData> value,
+    const CSSValue* parsed_value) {
   DCHECK(!!value == !!parsed_value);
   DCHECK(!(value && value->NeedsVariableResolution()));
 
@@ -1461,7 +1484,7 @@ void ComputedStyle::SetResolvedInheritedVariable(const AtomicString& name,
 
 void ComputedStyle::SetResolvedNonInheritedVariable(
     const AtomicString& name,
-    RefPtr<CSSVariableData> value,
+    scoped_refptr<CSSVariableData> value,
     const CSSValue* parsed_value) {
   DCHECK(!!value == !!parsed_value);
   DCHECK(!(value && value->NeedsVariableResolution()));
@@ -1569,10 +1592,6 @@ Length ComputedStyle::LineHeight() const {
   return lh;
 }
 
-void ComputedStyle::SetLineHeight(const Length& specified_line_height) {
-  SetLineHeightInternal(specified_line_height);
-}
-
 int ComputedStyle::ComputedLineHeight() const {
   const Length& lh = LineHeight();
 
@@ -1645,7 +1664,7 @@ void ComputedStyle::SetTextAutosizingMultiplier(float multiplier) {
 
 void ComputedStyle::AddAppliedTextDecoration(
     const AppliedTextDecoration& decoration) {
-  RefPtr<AppliedTextDecorationList>& list =
+  scoped_refptr<AppliedTextDecorationList>& list =
       MutableAppliedTextDecorationsInternal();
 
   if (!list)
@@ -1657,7 +1676,7 @@ void ComputedStyle::AddAppliedTextDecoration(
 }
 
 void ComputedStyle::OverrideTextDecorationColors(Color override_color) {
-  RefPtr<AppliedTextDecorationList>& list =
+  scoped_refptr<AppliedTextDecorationList>& list =
       MutableAppliedTextDecorationsInternal();
   DCHECK(list);
   if (!list->HasOneRef())
@@ -1719,7 +1738,7 @@ void ComputedStyle::RestoreParentTextDecorations(
   SetHasSimpleUnderlineInternal(parent_style.HasSimpleUnderlineInternal());
   if (AppliedTextDecorationsInternal() !=
       parent_style.AppliedTextDecorationsInternal()) {
-    SetAppliedTextDecorationsInternal(RefPtr<AppliedTextDecorationList>(
+    SetAppliedTextDecorationsInternal(scoped_refptr<AppliedTextDecorationList>(
         parent_style.AppliedTextDecorationsInternal()));
   }
 }
@@ -1733,10 +1752,10 @@ void ComputedStyle::ClearMultiCol() {
   SetColumnRuleColorIsCurrentColor(InitialColumnRuleColorIsCurrentColor());
   SetVisitedLinkColumnRuleColorInternal(InitialVisitedLinkColumnRuleColor());
   SetColumnCountInternal(InitialColumnCount());
-  SetColumnAutoCountInternal(InitialColumnAutoCount());
-  SetColumnAutoWidthInternal(InitialColumnAutoWidth());
+  SetHasAutoColumnCountInternal(InitialHasAutoColumnCount());
+  SetHasAutoColumnWidthInternal(InitialHasAutoColumnWidth());
   ResetColumnFill();
-  SetColumnNormalGapInternal(InitialColumnNormalGap());
+  SetHasNormalColumnGapInternal(InitialHasNormalColumnGap());
   ResetColumnSpan();
 }
 
@@ -1760,7 +1779,7 @@ StyleColor ComputedStyle::DecorationColorIncludingFallback(
   return visited_link ? VisitedLinkTextFillColor() : TextFillColor();
 }
 
-Color ComputedStyle::ColorIncludingFallback(int color_property,
+Color ComputedStyle::ColorIncludingFallback(CSSPropertyID color_property,
                                             bool visited_link) const {
   StyleColor result(StyleColor::CurrentColor());
   EBorderStyle border_style = EBorderStyle::kNone;
@@ -1847,7 +1866,7 @@ Color ComputedStyle::ColorIncludingFallback(int color_property,
   return visited_link ? VisitedLinkColor() : GetColor();
 }
 
-Color ComputedStyle::VisitedDependentColor(int color_property) const {
+Color ComputedStyle::VisitedDependentColor(CSSPropertyID color_property) const {
   Color unvisited_color = ColorIncludingFallback(color_property, false);
   if (InsideLink() != EInsideLink::kInsideVisitedLink)
     return unvisited_color;

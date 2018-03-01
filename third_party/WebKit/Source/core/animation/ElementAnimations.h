@@ -31,7 +31,6 @@
 #ifndef ElementAnimations_h
 #define ElementAnimations_h
 
-#include "core/animation/CustomCompositorAnimations.h"
 #include "core/animation/EffectStack.h"
 #include "core/animation/css/CSSAnimations.h"
 #include "platform/wtf/HashCountedSet.h"
@@ -57,14 +56,6 @@ class ElementAnimations : public GarbageCollectedFinalized<ElementAnimations> {
   // stack.
   EffectStack& GetEffectStack() { return effect_stack_; }
   const EffectStack& GetEffectStack() const { return effect_stack_; }
-  // Tracks long running animations that are responsible for applying mutations
-  // from compositor worker.
-  CustomCompositorAnimations& GetCustomCompositorAnimations() {
-    return custom_compositor_animations_;
-  }
-  const CustomCompositorAnimations& GetCustomCompositorAnimations() const {
-    return custom_compositor_animations_;
-  }
   // Tracks the state of active CSS Animations and Transitions. The individual
   // animations will also be part of the animation stack, but the mapping
   // between animation name and animation is kept here.
@@ -90,17 +81,16 @@ class ElementAnimations : public GarbageCollectedFinalized<ElementAnimations> {
   void UpdateBaseComputedStyle(const ComputedStyle*);
   void ClearBaseComputedStyle();
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   bool IsAnimationStyleChange() const;
 
   EffectStack effect_stack_;
-  CustomCompositorAnimations custom_compositor_animations_;
   CSSAnimations css_animations_;
   AnimationCountedSet animations_;
   bool animation_style_change_;
-  RefPtr<ComputedStyle> base_computed_style_;
+  scoped_refptr<ComputedStyle> base_computed_style_;
 
   // CSSAnimations checks if a style change is due to animation.
   friend class CSSAnimations;

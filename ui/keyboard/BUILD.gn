@@ -10,6 +10,11 @@ import("//tools/grit/grit_rule.gni")
 
 component("keyboard") {
   sources = [
+    "container_behavior.h",
+    "container_floating_behavior.cc",
+    "container_floating_behavior.h",
+    "container_full_width_behavior.cc",
+    "container_full_width_behavior.h",
     "keyboard_controller.cc",
     "keyboard_controller.h",
     "keyboard_controller_observer.h",
@@ -59,8 +64,6 @@ component("keyboard_with_content") {
     "content/keyboard_constants.h",
     "content/keyboard_content_util.cc",
     "content/keyboard_content_util.h",
-    "content/keyboard_ui_content.cc",
-    "content/keyboard_ui_content.h",
   ]
 
   defines = [ "KEYBOARD_IMPLEMENTATION" ]
@@ -103,6 +106,7 @@ static_library("test_support") {
     "//base",
     "//skia",
     "//ui/aura",
+    "//ui/aura:test_support",
     "//ui/base:test_support",
   ]
 }
@@ -161,7 +165,8 @@ mojom("mojom") {
 
 test("keyboard_unittests") {
   sources = [
-    "content/keyboard_ui_content_unittest.cc",
+    "container_floating_behavior_unittest.cc",
+    "container_full_width_behavior_unittest.cc",
     "keyboard_controller_unittest.cc",
     "keyboard_event_filter_unittest.cc",
     "keyboard_util_unittest.cc",
@@ -194,4 +199,8 @@ test("keyboard_unittests") {
   data_deps = [
     "//ui/resources:ui_test_pak_data",
   ]
+
+  if (use_ozone) {
+    deps += [ "//ui/ozone" ]
+  }
 }

@@ -27,7 +27,7 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.blink_public.web.WebReferrerPolicy;
-import org.chromium.chrome.browser.customtabs.CustomTabActivity;
+import org.chromium.chrome.browser.browserservices.BrowserSessionContentUtils;
 import org.chromium.chrome.browser.externalauth.ExternalAuthUtils;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationDelegateImpl;
 import org.chromium.chrome.browser.externalnav.IntentWithGesturesHandler;
@@ -446,7 +446,8 @@ public class IntentHandler {
         } else if (isValidReferrerHeader(referrerExtra)) {
             return referrerExtra.toString();
         } else if (IntentHandler.isIntentChromeOrFirstParty(intent)
-                || CustomTabActivity.canActiveContentHandlerUseReferrer(intent, referrerExtra)) {
+                || BrowserSessionContentUtils.canActiveContentHandlerUseReferrer(
+                           intent, referrerExtra)) {
             return referrerExtra.toString();
         }
         return null;
@@ -682,7 +683,17 @@ public class IntentHandler {
      * the entry point (in {@link Activity#onCreate()} for instance).
      */
     public static void addTimestampToIntent(Intent intent) {
-        intent.putExtra(EXTRA_TIMESTAMP_MS, SystemClock.elapsedRealtime());
+        addTimestampToIntent(intent, SystemClock.elapsedRealtime());
+    }
+
+    /**
+     * Adds provided timestamp to an intent.
+     *
+     * To track page load time, the value passed in should be as close as possible to
+     * the entry point (in {@link Activity#onCreate()} for instance).
+     */
+    public static void addTimestampToIntent(Intent intent, long timeStamp) {
+        intent.putExtra(EXTRA_TIMESTAMP_MS, timeStamp);
     }
 
     /**

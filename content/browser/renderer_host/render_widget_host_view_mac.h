@@ -22,6 +22,8 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
+#include "components/viz/common/surfaces/local_surface_id.h"
+#include "components/viz/common/surfaces/local_surface_id_allocator.h"
 #include "components/viz/common/surfaces/surface_id.h"
 #include "content/browser/renderer_host/browser_compositor_view_mac.h"
 #include "content/browser/renderer_host/input/mouse_wheel_phase_handler.h"
@@ -330,7 +332,7 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
       viz::mojom::CompositorFrameSinkClient* renderer_compositor_frame_sink)
       override;
   void SubmitCompositorFrame(const viz::LocalSurfaceId& local_surface_id,
-                             cc::CompositorFrame frame) override;
+                             viz::CompositorFrame frame) override;
   void OnDidNotProduceFrame(const viz::BeginFrameAck& ack) override;
   void ClearCompositorFrame() override;
   BrowserAccessibilityManager* CreateBrowserAccessibilityManager(
@@ -351,10 +353,18 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
 
   viz::FrameSinkId GetFrameSinkId() override;
   viz::FrameSinkId FrameSinkIdAtPoint(viz::SurfaceHittestDelegate* delegate,
-                                      const gfx::Point& point,
-                                      gfx::Point* transformed_point) override;
+                                      const gfx::PointF& point,
+                                      gfx::PointF* transformed_point) override;
   // Returns true when we can do SurfaceHitTesting for the event type.
   bool ShouldRouteEvent(const blink::WebInputEvent& event) const;
+  // This method checks |event| to see if a GesturePinch event can be routed
+  // according to ShouldRouteEvent, and if not, sends it directly to the view's
+  // RenderWidgetHost.
+  // By not just defaulting to sending the GesturePinch events to the mainframe,
+  // we allow the events to be targeted to an oopif subframe, in case some
+  // consumer, such as PDF or maps, wants to intercept them and implement a
+  // custom behavior.
+  void SendGesturePinchEvent(blink::WebGestureEvent* event);
   void ProcessMouseEvent(const blink::WebMouseEvent& event,
                          const ui::LatencyInfo& latency) override;
   void ProcessMouseWheelEvent(const blink::WebMouseWheelEvent& event,
@@ -363,13 +373,13 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
                          const ui::LatencyInfo& latency) override;
   void ProcessGestureEvent(const blink::WebGestureEvent& event,
                            const ui::LatencyInfo& latency) override;
-  bool TransformPointToLocalCoordSpace(const gfx::Point& point,
+  bool TransformPointToLocalCoordSpace(const gfx::PointF& point,
                                        const viz::SurfaceId& original_surface,
-                                       gfx::Point* transformed_point) override;
+                                       gfx::PointF* transformed_point) override;
   bool TransformPointToCoordSpaceForView(
-      const gfx::Point& point,
+      const gfx::PointF& point,
       RenderWidgetHostViewBase* target_view,
-      gfx::Point* transformed_point) override;
+      gfx::PointF* transformed_point) override;
 
   // TextInputManager::Observer implementation.
   void OnUpdateTextInputStateCalled(TextInputManager* text_input_manager,
@@ -482,6 +492,7 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   NSView* BrowserCompositorMacGetNSView() const override;
   SkColor BrowserCompositorMacGetGutterColor(SkColor color) const override;
   void BrowserCompositorMacOnBeginFrame() override;
+  viz::LocalSurfaceId GetLocalSurfaceId() const override;
 
   // AcceleratedWidgetMacNSView implementation.
   NSView* AcceleratedWidgetGetNSView() const override;
@@ -605,6 +616,16 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   SkColor last_frame_root_background_color_ = SK_ColorTRANSPARENT;
 
   std::unique_ptr<CursorManager> cursor_manager_;
+
+  // The size associated with the current LocalSurfaceId if any.
+  gfx::Size last_size_;
+
+  // The last device scale factor associated with the current
+  // LocalSurfaceId if any.
+  float last_device_scale_factor_ = 0.f;
+
+  viz::LocalSurfaceId local_surface_id_;
+  viz::LocalSurfaceIdAllocator local_surface_id_allocator_;
 
   // Factory used to safely scope delayed calls to ShutdownHost().
   base::WeakPtrFactory<RenderWidgetHostViewMac> weak_factory_;

@@ -13,6 +13,7 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -20,6 +21,7 @@
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/media_stream_requester.h"
+#include "content/browser/renderer_host/media/media_stream_ui_proxy.h"
 #include "content/browser/renderer_host/media/video_capture_host.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
 #include "content/common/media/media_devices.h"
@@ -70,7 +72,9 @@ void VideoInputDevicesEnumerated(base::Closure quit_closure,
 // video_capture_host. This is an arbitrary value.
 static const int kDeviceId = 555;
 
-class MockMediaStreamRequester : public MediaStreamRequester {
+class MockMediaStreamRequester
+    : public MediaStreamRequester,
+      public base::SupportsWeakPtr<MockMediaStreamRequester> {
  public:
   MockMediaStreamRequester() {}
   virtual ~MockMediaStreamRequester() {}
@@ -112,9 +116,10 @@ class VideoCaptureTest : public testing::Test,
  public:
   VideoCaptureTest()
       : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
-        audio_manager_(new media::MockAudioManager(
-            base::MakeUnique<media::TestAudioThread>())),
-        audio_system_(media::AudioSystemImpl::Create(audio_manager_.get())),
+        audio_manager_(std::make_unique<media::MockAudioManager>(
+            std::make_unique<media::TestAudioThread>())),
+        audio_system_(
+            std::make_unique<media::AudioSystemImpl>(audio_manager_.get())),
         task_runner_(base::ThreadTaskRunnerHandle::Get()),
         opened_session_id_(kInvalidMediaCaptureSessionId),
         observer_binding_(this) {}
@@ -125,10 +130,10 @@ class VideoCaptureTest : public testing::Test,
 
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kUseFakeDeviceForMediaStream);
-    base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kUseFakeUIForMediaStream);
     media_stream_manager_ = base::MakeUnique<MediaStreamManager>(
         audio_system_.get(), audio_manager_->GetTaskRunner());
+    media_stream_manager_->UseFakeUIFactoryForTests(
+        base::Bind(&VideoCaptureTest::CreateFakeUI, base::Unretained(this)));
 
     // Create a Host and connect it to a simulated IPC channel.
     host_.reset(new VideoCaptureHost(0 /* render_process_id */,
@@ -152,7 +157,8 @@ class VideoCaptureTest : public testing::Test,
     const int render_process_id = 1;
     const int render_frame_id = 1;
     const int page_request_id = 1;
-    const url::Origin security_origin(GURL("http://test.com"));
+    const url::Origin security_origin =
+        url::Origin::Create(GURL("http://test.com"));
 
     ASSERT_TRUE(opened_device_label_.empty());
 
@@ -176,7 +182,7 @@ class VideoCaptureTest : public testing::Test,
       base::RunLoop run_loop;
       MediaStreamDevice opened_device;
       media_stream_manager_->OpenDevice(
-          &stream_requester_, render_process_id, render_frame_id,
+          stream_requester_.AsWeakPtr(), render_process_id, render_frame_id,
           browser_context_.GetMediaDeviceIDSalt(), page_request_id,
           video_devices[0].device_id, MEDIA_DEVICE_VIDEO_CAPTURE,
           security_origin);
@@ -306,6 +312,11 @@ class VideoCaptureTest : public testing::Test,
   }
 
  private:
+  std::unique_ptr<FakeMediaStreamUIProxy> CreateFakeUI() {
+    return std::make_unique<FakeMediaStreamUIProxy>(
+        /*tests_use_fake_render_frame_hosts=*/true);
+  }
+
   // |media_stream_manager_| needs to outlive |thread_bundle_| because it is a
   // MessageLoop::DestructionObserver.
   StrictMock<MockMediaStreamRequester> stream_requester_;

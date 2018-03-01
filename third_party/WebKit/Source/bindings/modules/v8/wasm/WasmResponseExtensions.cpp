@@ -64,7 +64,7 @@ class FetchDataLoaderAsWasmModule final : public FetchDataLoader,
           break;
         }
         case BytesConsumer::Result::kDone: {
-          ScriptState::Scope scope(script_state_.Get());
+          ScriptState::Scope scope(script_state_.get());
           builder_.Finish();
           client_->DidFetchDataLoadedCustomFormat();
           return;
@@ -76,12 +76,14 @@ class FetchDataLoaderAsWasmModule final : public FetchDataLoader,
     }
   }
 
+  String DebugName() const override { return "FetchDataLoaderAsWasmModule"; }
+
   void Cancel() override {
     consumer_->Cancel();
     return AbortCompilation();
   }
 
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) {
     visitor->Trace(consumer_);
     visitor->Trace(client_);
     FetchDataLoader::Trace(visitor);
@@ -146,7 +148,7 @@ void CompileFromResponseCallback(
     return;
   }
 
-  Response* response = V8Response::toImpl(v8::Local<v8::Object>::Cast(args[0]));
+  Response* response = V8Response::ToImpl(v8::Local<v8::Object>::Cast(args[0]));
   if (response->MimeType() != "application/wasm") {
     V8SetReturnValue(
         args,

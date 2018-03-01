@@ -520,7 +520,8 @@ TEST(BrowserAccessibilityManagerTest, TestMoveChildUp) {
   ASSERT_EQ(0, CountedBrowserAccessibility::global_obj_count_);
 }
 
-TEST(BrowserAccessibilityManagerTest, TestFatalError) {
+// Temporarily disabled due to bug http://crbug.com/765490
+TEST(BrowserAccessibilityManagerTest, DISABLED_TestFatalError) {
   // Test that BrowserAccessibilityManager raises a fatal error
   // (which will crash the renderer) if the same id is used in
   // two places in the tree.
@@ -582,6 +583,7 @@ TEST(BrowserAccessibilityManagerTest, BoundsForRange) {
   ui::AXNodeData root;
   root.id = 1;
   root.role = ui::AX_ROLE_ROOT_WEB_AREA;
+  root.location = gfx::RectF(0, 0, 800, 600);
 
   ui::AXNodeData static_text;
   static_text.id = 2;
@@ -667,6 +669,7 @@ TEST(BrowserAccessibilityManagerTest, BoundsForRangeMultiElement) {
   ui::AXNodeData root;
   root.id = 1;
   root.role = ui::AX_ROLE_ROOT_WEB_AREA;
+  root.location = gfx::RectF(0, 0, 800, 600);
 
   ui::AXNodeData static_text;
   static_text.id = 2;
@@ -775,6 +778,7 @@ TEST(BrowserAccessibilityManagerTest, BoundsForRangeBiDi) {
   ui::AXNodeData root;
   root.id = 1;
   root.role = ui::AX_ROLE_ROOT_WEB_AREA;
+  root.location = gfx::RectF(0, 0, 800, 600);
 
   ui::AXNodeData static_text;
   static_text.id = 2;
@@ -851,6 +855,7 @@ TEST(BrowserAccessibilityManagerTest, BoundsForRangeScrolledWindow) {
   root.role = ui::AX_ROLE_ROOT_WEB_AREA;
   root.AddIntAttribute(ui::AX_ATTR_SCROLL_X, 25);
   root.AddIntAttribute(ui::AX_ATTR_SCROLL_Y, 50);
+  root.location = gfx::RectF(0, 0, 800, 600);
 
   ui::AXNodeData static_text;
   static_text.id = 2;
@@ -899,6 +904,7 @@ TEST(BrowserAccessibilityManagerTest, BoundsForRangeOnParentElement) {
   root.id = 1;
   root.role = ui::AX_ROLE_ROOT_WEB_AREA;
   root.child_ids.push_back(2);
+  root.location = gfx::RectF(0, 0, 800, 600);
 
   ui::AXNodeData div;
   div.id = 2;

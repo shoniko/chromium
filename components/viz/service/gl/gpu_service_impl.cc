@@ -48,7 +48,11 @@
 
 #if defined(OS_ANDROID)
 #include "base/android/throw_uncaught_exception.h"
-#include "media/gpu/content_video_view_overlay_allocator.h"
+#include "media/gpu/android/content_video_view_overlay_allocator.h"
+#endif
+
+#if defined(OS_WIN)
+#include "gpu/ipc/service/direct_composition_surface_win.h"
 #endif
 
 namespace viz {
@@ -94,12 +98,14 @@ GpuServiceImpl::GpuServiceImpl(
     const gpu::GPUInfo& gpu_info,
     std::unique_ptr<gpu::GpuWatchdogThread> watchdog_thread,
     scoped_refptr<base::SingleThreadTaskRunner> io_runner,
-    const gpu::GpuFeatureInfo& gpu_feature_info)
+    const gpu::GpuFeatureInfo& gpu_feature_info,
+    const gpu::GpuPreferences& gpu_preferences)
     : main_runner_(base::ThreadTaskRunnerHandle::Get()),
       io_runner_(std::move(io_runner)),
       watchdog_thread_(std::move(watchdog_thread)),
       gpu_memory_buffer_factory_(
           gpu::GpuMemoryBufferFactory::CreateNativeType()),
+      gpu_preferences_(gpu_preferences),
       gpu_info_(gpu_info),
       gpu_feature_info_(gpu_feature_info),
       bindings_(base::MakeUnique<mojo::BindingSet<mojom::GpuService>>()),
@@ -132,11 +138,9 @@ GpuServiceImpl::~GpuServiceImpl() {
     owned_shutdown_event_->Signal();
 }
 
-void GpuServiceImpl::UpdateGPUInfoFromPreferences(
-    const gpu::GpuPreferences& preferences) {
+void GpuServiceImpl::UpdateGPUInfo() {
   DCHECK(main_runner_->BelongsToCurrentThread());
   DCHECK(!gpu_host_);
-  gpu_preferences_ = preferences;
   gpu::GpuDriverBugWorkarounds gpu_workarounds(
       gpu_feature_info_.enabled_gpu_driver_bug_workarounds);
   gpu_info_.video_decode_accelerator_capabilities =
@@ -153,15 +157,15 @@ void GpuServiceImpl::UpdateGPUInfoFromPreferences(
 }
 
 void GpuServiceImpl::InitializeWithHost(
-    ui::mojom::GpuHostPtr gpu_host,
+    mojom::GpuHostPtr gpu_host,
     gpu::GpuProcessActivityFlags activity_flags,
     gpu::SyncPointManager* sync_point_manager,
     base::WaitableEvent* shutdown_event) {
   DCHECK(main_runner_->BelongsToCurrentThread());
   gpu_host->DidInitialize(gpu_info_, gpu_feature_info_);
-  gpu_host_ = ui::mojom::ThreadSafeGpuHostPtr::Create(gpu_host.PassInterface(),
-                                                      io_runner_);
-  if (!in_host_process_) {
+  gpu_host_ =
+      mojom::ThreadSafeGpuHostPtr::Create(gpu_host.PassInterface(), io_runner_);
+  if (!in_host_process()) {
     // The global callback is reset from the dtor. So Unretained() here is safe.
     // Note that the callback can be called from any thread. Consequently, the
     // callback cannot use a WeakPtr.
@@ -304,7 +308,7 @@ void GpuServiceImpl::RequestCompleteGpuInfo(
              RequestCompleteGpuInfoCallback callback) {
             std::move(callback).Run(gpu_service->gpu_info_);
 #if defined(OS_WIN)
-            if (!gpu_service->in_host_process_) {
+            if (!gpu_service->in_host_process()) {
               // The unsandboxed GPU process fulfilled its duty. Rest
               // in peace.
               base::RunLoop::QuitCurrentWhenIdleDeprecated();
@@ -312,6 +316,24 @@ void GpuServiceImpl::RequestCompleteGpuInfo(
 #endif
           },
           this, std::move(callback))));
+}
+
+void GpuServiceImpl::RequestHDRStatus(RequestHDRStatusCallback callback) {
+  DCHECK(io_runner_->BelongsToCurrentThread());
+  main_runner_->PostTask(
+      FROM_HERE, base::BindOnce(&GpuServiceImpl::RequestHDRStatusOnMainThread,
+                                weak_ptr_, std::move(callback)));
+}
+
+void GpuServiceImpl::RequestHDRStatusOnMainThread(
+    RequestHDRStatusCallback callback) {
+  DCHECK(main_runner_->BelongsToCurrentThread());
+  bool hdr_enabled = false;
+#if defined(OS_WIN)
+  hdr_enabled = gpu::DirectCompositionSurfaceWin::IsHDRSupported();
+#endif
+  io_runner_->PostTask(FROM_HERE,
+                       base::BindOnce(std::move(callback), hdr_enabled));
 }
 
 #if defined(OS_MACOSX)
@@ -322,7 +344,7 @@ void GpuServiceImpl::UpdateGpuInfoPlatform(
   // initialization (see GpuInit::InitializeAndStartSandbox()) on non-mac
   // platforms, and during in-browser gpu thread initialization on all platforms
   // (See InProcessGpuThread::Init()).
-  if (in_host_process_)
+  if (in_host_process())
     return;
 
   DCHECK_EQ(gpu::kCollectInfoNone, gpu_info_.context_info_state);
@@ -351,7 +373,7 @@ void GpuServiceImpl::UpdateGpuInfoPlatform(
   // GPU full info collection should only happen on un-sandboxed GPU process
   // or single process/in-process gpu mode on Windows.
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  DCHECK(command_line->HasSwitch("disable-gpu-sandbox") || in_host_process_);
+  DCHECK(command_line->HasSwitch("disable-gpu-sandbox") || in_host_process());
 
   // We can continue on shutdown here because we're not writing any critical
   // state in this task.
@@ -512,7 +534,7 @@ void GpuServiceImpl::WakeUpGpu() {
 
 void GpuServiceImpl::GpuSwitched() {
   DVLOG(1) << "GPU: GPU has switched";
-  if (!in_host_process_)
+  if (!in_host_process())
     ui::GpuSwitchingManager::GetInstance()->NotifyGpuSwitched();
 }
 
@@ -530,7 +552,7 @@ void GpuServiceImpl::Crash() {
   DCHECK(io_runner_->BelongsToCurrentThread());
   DVLOG(1) << "GPU: Simulating GPU crash";
   // Good bye, cruel world.
-  volatile int* it_s_the_end_of_the_world_as_we_know_it = NULL;
+  volatile int* it_s_the_end_of_the_world_as_we_know_it = nullptr;
   *it_s_the_end_of_the_world_as_we_know_it = 0xdead;
 }
 

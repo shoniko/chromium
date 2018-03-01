@@ -123,7 +123,7 @@ void ElementRuleCollector::CollectMatchingRulesForList(
   SelectorChecker::Init init;
   init.mode = mode_;
   init.is_ua_rule = matching_ua_rules_;
-  init.element_style = style_.Get();
+  init.element_style = style_.get();
   init.scrollbar = pseudo_style_request_.scrollbar;
   init.scrollbar_part = pseudo_style_request_.scrollbar_part;
   SelectorChecker checker(init);
@@ -252,7 +252,7 @@ CSSRule* ElementRuleCollector::FindStyleRule(CSSRuleCollection* css_rules,
                                              StyleRule* style_rule) {
   if (!css_rules)
     return nullptr;
-  CSSRule* result = 0;
+  CSSRule* result = nullptr;
   for (unsigned i = 0; i < css_rules->length() && !result; ++i) {
     CSSRule* css_rule = css_rules->item(i);
     CSSRule::Type css_rule_type = css_rule->type();

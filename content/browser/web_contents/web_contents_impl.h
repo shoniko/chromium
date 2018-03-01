@@ -12,6 +12,8 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
@@ -291,6 +293,7 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
   void NotifyManifestUrlChanged(const base::Optional<GURL>& manifest_url);
 
 #if defined(OS_ANDROID)
+  std::set<RenderWidgetHostImpl*> GetAllRenderWidgetHosts();
   void SetImportance(ChildProcessImportance importance);
 #endif
 
@@ -303,8 +306,7 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
   const GURL& GetURL() const override;
   const GURL& GetVisibleURL() const override;
   const GURL& GetLastCommittedURL() const override;
-  RenderProcessHost* GetRenderProcessHost() const override;
-  RenderFrameHostImpl* GetMainFrame() override;
+  RenderFrameHostImpl* GetMainFrame() const override;
   RenderFrameHostImpl* GetFocusedFrame() override;
   RenderFrameHostImpl* FindFrameByFrameTreeNodeId(int frame_tree_node_id,
                                                   int process_id) override;
@@ -320,9 +322,6 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
   void ClosePage() override;
   RenderWidgetHostView* GetFullscreenRenderWidgetHostView() const override;
   SkColor GetThemeColor() const override;
-  std::unique_ptr<WebUI> CreateSubframeWebUI(
-      const GURL& url,
-      const std::string& frame_name) override;
   WebUI* GetWebUI() const override;
   WebUI* GetCommittedWebUI() const override;
   void SetUserAgentOverride(const std::string& override) override;
@@ -455,9 +454,6 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
   bool IsFullscreenForCurrentTab() const override;
   void ExitFullscreen(bool will_cause_resize) override;
   void ResumeLoadingCreatedWebContents() override;
-  void OnPasswordInputShownOnHttp() override;
-  void OnAllPasswordInputsHiddenOnHttp() override;
-  void OnCreditCardInputShownOnHttp() override;
   void SetIsOverlayContent(bool is_overlay_content) override;
   bool IsFocusedElementEditable() override;
   void ClearFocusedElement() override;
@@ -479,9 +475,6 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
   // Implementation of PageNavigator.
   WebContents* OpenURL(const OpenURLParams& params) override;
 
-  // Implementation of IPC::Sender.
-  bool Send(IPC::Message* message) override;
-
   // RenderFrameHostDelegate ---------------------------------------------------
   bool OnMessageReceived(RenderFrameHostImpl* render_frame_host,
                          const IPC::Message& message) override;
@@ -493,6 +486,7 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
       RenderFrameHost* render_frame_host,
       const std::string& interface_name,
       mojo::ScopedMessagePipeHandle* interface_pipe) override;
+  void OnDidBlockFramebust(const GURL& url) override;
   const GURL& GetMainFrameLastCommittedURL() const override;
   void RenderFrameCreated(RenderFrameHost* render_frame_host) override;
   void RenderFrameDeleted(RenderFrameHost* render_frame_host) override;
@@ -620,7 +614,7 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
   void RequestMediaAccessPermission(
       const MediaStreamRequest& request,
       const MediaResponseCallback& callback) override;
-  bool CheckMediaAccessPermission(const GURL& security_origin,
+  bool CheckMediaAccessPermission(const url::Origin& security_origin,
                                   MediaStreamType type) override;
   std::string GetDefaultMediaDeviceID(MediaStreamType type) override;
   SessionStorageNamespace* GetSessionStorageNamespace(
@@ -630,13 +624,12 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
   double GetPendingPageZoomLevel() override;
 #endif  // !defined(OS_ANDROID)
   FrameTree* GetFrameTree() override;
-  void SetIsVirtualKeyboardRequested(bool requested) override;
-  bool IsVirtualKeyboardRequested() override;
   bool IsOverridingUserAgent() override;
   bool IsJavaScriptDialogShowing() const override;
   bool ShouldIgnoreUnresponsiveRenderer() override;
   bool HideDownloadUI() const override;
   bool HasPersistentVideo() const override;
+  RenderFrameHost* GetPendingMainFrame() override;
 
   // NavigatorDelegate ---------------------------------------------------------
 
@@ -686,7 +679,6 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
   gfx::Size GetAutoResizeSize() override;
   void ResetAutoResizeSize() override;
   void ScreenInfoChanged() override;
-  void UpdateDeviceScaleFactor(double device_scale_factor) override;
   void GetScreenInfo(ScreenInfo* screen_info) override;
   KeyboardEventProcessingResult PreHandleKeyboardEvent(
       const NativeWebKeyboardEvent& event) override;
@@ -706,8 +698,9 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
   void MoveRangeSelectionExtent(const gfx::Point& extent) override;
   void SelectRange(const gfx::Point& base, const gfx::Point& extent) override;
   void MoveCaret(const gfx::Point& extent) override;
-  void AdjustSelectionByCharacterOffset(int start_adjust, int end_adjust)
-      override;
+  void AdjustSelectionByCharacterOffset(int start_adjust,
+                                        int end_adjust,
+                                        bool show_selection_menu) override;
   RenderWidgetHostInputEventRouter* GetInputEventRouter() override;
   void ReplicatePageFocus(bool is_focused) override;
   RenderWidgetHostImpl* GetFocusedRenderWidgetHost(
@@ -747,6 +740,7 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
       RenderViewHost* render_view_host,
       int opener_frame_routing_id,
       int proxy_routing_id,
+      const base::UnguessableToken& devtools_frame_token,
       const FrameReplicationState& replicated_frame_state) override;
   void CreateRenderWidgetHostViewForRenderManager(
       RenderViewHost* render_view_host) override;
@@ -851,6 +845,7 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
   // GetCurrentlyPlayingVideoCount if you need this when playback starts.
   void MediaResized(const gfx::Size& size,
                     const WebContentsObserver::MediaPlayerId& id);
+  void MediaEffectivelyFullscreenChanged(bool is_fullscreen);
 
   int GetCurrentlyPlayingVideoCount() override;
   base::Optional<gfx::Size> GetFullscreenVideoSize() override;
@@ -947,6 +942,9 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
   FRIEND_TEST_ALL_PREFIXES(DevToolsProtocolTest, JavaScriptDialogNotifications);
   FRIEND_TEST_ALL_PREFIXES(DevToolsProtocolTest, JavaScriptDialogInterop);
   FRIEND_TEST_ALL_PREFIXES(DevToolsProtocolTest, BeforeUnloadDialog);
+  FRIEND_TEST_ALL_PREFIXES(DevToolsProtocolTest, PageDisableWithOpenedDialog);
+  FRIEND_TEST_ALL_PREFIXES(DevToolsProtocolTest,
+                           PageDisableWithNoDialogManager);
 
   // So |find_request_manager_| can be accessed for testing.
   friend class FindRequestManagerTest;
@@ -1016,7 +1014,7 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
   };
 
   // See WebContents::Create for a description of these parameters.
-  WebContentsImpl(BrowserContext* browser_context);
+  explicit WebContentsImpl(BrowserContext* browser_context);
 
   // Add and remove observers for page navigation notifications. The order in
   // which notifications are sent to observers is undefined. Clients must be
@@ -1128,10 +1126,6 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
   void OnSetSelectedColorInColorChooser(RenderFrameHostImpl* source,
                                         int color_chooser_id,
                                         SkColor color);
-  void OnWebUISend(RenderViewHostImpl* source,
-                   const GURL& source_url,
-                   const std::string& name,
-                   const base::ListValue& args);
   void OnUpdatePageImportanceSignals(RenderFrameHostImpl* source,
                                      const PageImportanceSignals& signals);
 #if BUILDFLAG(ENABLE_PLUGINS)
@@ -1287,11 +1281,8 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
   void OnPreferredSizeChanged(const gfx::Size& old_size);
 
   // Internal helper to create WebUI objects associated with |this|. |url| is
-  // used to determine which WebUI should be created (if any). |frame_name|
-  // corresponds to the name of a frame that the WebUI should be created for (or
-  // the main frame if empty).
-  std::unique_ptr<WebUIImpl> CreateWebUI(const GURL& url,
-                                         const std::string& frame_name);
+  // used to determine which WebUI should be created (if any).
+  std::unique_ptr<WebUIImpl> CreateWebUI(const GURL& url);
 
   void SetJavaScriptDialogManagerForTesting(
       JavaScriptDialogManager* dialog_manager);
@@ -1322,6 +1313,9 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
   // Sets the visibility of immediate child views, i.e. views whose parent view
   // is that of the main frame.
   void SetVisibilityForChildViews(bool visible);
+
+  // Reattaches this inner WebContents to its outer WebContents.
+  void ReattachToOuterWebContentsFrame();
 
   // Data for core operation ---------------------------------------------------
 
@@ -1627,8 +1621,6 @@ class CONTENT_EXPORT WebContentsImpl : public WebContents,
   std::unique_ptr<WebContentsAudioMuter> audio_muter_;
 
   size_t bluetooth_connected_device_count_;
-
-  bool virtual_keyboard_requested_;
 
   // Notifies ResourceDispatcherHostImpl of various events related to loading.
   std::unique_ptr<LoaderIOThreadNotifier> loader_io_thread_notifier_;

@@ -6,9 +6,9 @@
 
 #include <stddef.h>
 
-#include <queue>
 #include <utility>
 
+#include "base/containers/queue.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
@@ -41,15 +41,8 @@ int GetUniqueIDInConstructor() {
 
 void RecursivelyGenerateFrameEntries(
     const ExplodedFrameState& state,
-    const std::vector<base::NullableString16>& referenced_files,
+    const std::vector<base::Optional<base::string16>>& referenced_files,
     NavigationEntryImpl::TreeNode* node) {
-  node->frame_entry = new FrameNavigationEntry(
-      UTF16ToUTF8(state.target.string()), state.item_sequence_number,
-      state.document_sequence_number, nullptr, nullptr,
-      GURL(state.url_string.string()),
-      Referrer(GURL(state.referrer.string()), state.referrer_policy), "GET",
-      -1);
-
   // Set a single-frame PageState on the entry.
   ExplodedPageState page_state;
 
@@ -65,12 +58,19 @@ void RecursivelyGenerateFrameEntries(
   std::string data;
   EncodePageState(page_state, &data);
   DCHECK(!data.empty()) << "Shouldn't generate an empty PageState.";
-  node->frame_entry->SetPageState(PageState::CreateFromEncodedData(data));
+
+  node->frame_entry = new FrameNavigationEntry(
+      UTF16ToUTF8(state.target.value_or(base::string16())),
+      state.item_sequence_number, state.document_sequence_number, nullptr,
+      nullptr, GURL(state.url_string.value_or(base::string16())),
+      Referrer(GURL(state.referrer.value_or(base::string16())),
+               state.referrer_policy),
+      std::vector<GURL>(), PageState::CreateFromEncodedData(data), "GET", -1);
 
   // Don't pass the file list to subframes, since that would result in multiple
   // copies of it ending up in the combined list in GetPageState (via
   // RecursivelyGenerateFrameState).
-  std::vector<base::NullableString16> empty_file_list;
+  std::vector<base::Optional<base::string16>> empty_file_list;
 
   for (const ExplodedFrameState& child_state : state.children) {
     node->children.push_back(
@@ -83,7 +83,7 @@ void RecursivelyGenerateFrameEntries(
 void RecursivelyGenerateFrameState(
     NavigationEntryImpl::TreeNode* node,
     ExplodedFrameState* state,
-    std::vector<base::NullableString16>* referenced_files) {
+    std::vector<base::Optional<base::string16>>* referenced_files) {
   // The FrameNavigationEntry's PageState contains just the ExplodedFrameState
   // for that particular frame.
   ExplodedPageState exploded_page_state;
@@ -101,7 +101,7 @@ void RecursivelyGenerateFrameState(
   referenced_files->reserve(referenced_files->size() +
                             exploded_page_state.referenced_files.size());
   for (auto& file : exploded_page_state.referenced_files)
-    referenced_files->push_back(file);
+    referenced_files->emplace_back(file);
 
   state->children.resize(node->children.size());
   for (size_t i = 0; i < node->children.size(); ++i) {
@@ -251,6 +251,8 @@ NavigationEntryImpl::NavigationEntryImpl(
                                                         nullptr,
                                                         url,
                                                         referrer,
+                                                        std::vector<GURL>(),
+                                                        PageState(),
                                                         "GET",
                                                         -1))),
       unique_id_(GetUniqueIDInConstructor()),
@@ -311,10 +313,10 @@ void NavigationEntryImpl::SetDataURLAsString(
     DCHECK(base::StartsWith(data_url->front_as<char>(), url::kDataScheme,
                             base::CompareCase::SENSITIVE));
   }
-  data_url_as_string_ = data_url;
+  data_url_as_string_ = std::move(data_url);
 }
 
-const scoped_refptr<const base::RefCountedString>
+const scoped_refptr<const base::RefCountedString>&
 NavigationEntryImpl::GetDataURLAsString() const {
   return data_url_as_string_;
 }
@@ -777,6 +779,24 @@ void NavigationEntryImpl::ResetForCommit(FrameNavigationEntry* frame_entry) {
 #endif
 }
 
+NavigationEntryImpl::TreeNode* NavigationEntryImpl::GetTreeNode(
+    FrameTreeNode* frame_tree_node) const {
+  NavigationEntryImpl::TreeNode* node = nullptr;
+  base::queue<NavigationEntryImpl::TreeNode*> work_queue;
+  work_queue.push(root_node());
+  while (!work_queue.empty()) {
+    node = work_queue.front();
+    work_queue.pop();
+    if (node->MatchesFrame(frame_tree_node))
+      return node;
+
+    // Enqueue any children and keep looking.
+    for (const auto& child : node->children)
+      work_queue.push(child.get());
+  }
+  return nullptr;
+}
+
 void NavigationEntryImpl::AddOrUpdateFrameEntry(
     FrameTreeNode* frame_tree_node,
     int64_t item_sequence_number,
@@ -809,7 +829,7 @@ void NavigationEntryImpl::AddOrUpdateFrameEntry(
   // We should already have a TreeNode for the parent node by the time this node
   // commits.  Find it first.
   NavigationEntryImpl::TreeNode* parent_node =
-      FindFrameEntry(frame_tree_node->parent());
+      GetTreeNode(frame_tree_node->parent());
   if (!parent_node) {
     // The renderer should not send a commit for a subframe before its parent.
     // TODO(creis): Kill the renderer if we get here.
@@ -840,10 +860,8 @@ void NavigationEntryImpl::AddOrUpdateFrameEntry(
   // or unique name.
   FrameNavigationEntry* frame_entry = new FrameNavigationEntry(
       unique_name, item_sequence_number, document_sequence_number,
-      site_instance, std::move(source_site_instance), url, referrer, method,
-      post_id);
-  frame_entry->SetPageState(page_state);
-  frame_entry->set_redirect_chain(redirect_chain);
+      site_instance, std::move(source_site_instance), url, referrer,
+      redirect_chain, page_state, method, post_id);
   parent_node->children.push_back(
       base::MakeUnique<NavigationEntryImpl::TreeNode>(parent_node,
                                                       frame_entry));
@@ -851,14 +869,14 @@ void NavigationEntryImpl::AddOrUpdateFrameEntry(
 
 FrameNavigationEntry* NavigationEntryImpl::GetFrameEntry(
     FrameTreeNode* frame_tree_node) const {
-  NavigationEntryImpl::TreeNode* tree_node = FindFrameEntry(frame_tree_node);
+  NavigationEntryImpl::TreeNode* tree_node = GetTreeNode(frame_tree_node);
   return tree_node ? tree_node->frame_entry.get() : nullptr;
 }
 
 std::map<std::string, bool> NavigationEntryImpl::GetSubframeUniqueNames(
     FrameTreeNode* frame_tree_node) const {
   std::map<std::string, bool> names;
-  NavigationEntryImpl::TreeNode* tree_node = FindFrameEntry(frame_tree_node);
+  NavigationEntryImpl::TreeNode* tree_node = GetTreeNode(frame_tree_node);
   if (tree_node) {
     // Return the names of all immediate children.
     for (const auto& child : tree_node->children) {
@@ -877,7 +895,8 @@ std::map<std::string, bool> NavigationEntryImpl::GetSubframeUniqueNames(
       if (DecodePageState(child->frame_entry->page_state().ToEncodedData(),
                           &exploded_page_state)) {
         ExplodedFrameState frame_state = exploded_page_state.top;
-        if (UTF16ToUTF8(frame_state.url_string.string()) == url::kAboutBlankURL)
+        if (UTF16ToUTF8(frame_state.url_string.value_or(base::string16())) ==
+            url::kAboutBlankURL)
           is_about_blank = true;
       }
 
@@ -892,7 +911,7 @@ void NavigationEntryImpl::ClearStaleFrameEntriesForNewFrame(
   DCHECK(!frame_tree_node->IsMainFrame());
 
   NavigationEntryImpl::TreeNode* node = nullptr;
-  std::queue<NavigationEntryImpl::TreeNode*> work_queue;
+  base::queue<NavigationEntryImpl::TreeNode*> work_queue;
   int count = 0;
 
   work_queue.push(root_node());
@@ -936,24 +955,6 @@ void NavigationEntryImpl::SetScreenshotPNGData(
 
 GURL NavigationEntryImpl::GetHistoryURLForDataURL() const {
   return GetBaseURLForDataURL().is_empty() ? GURL() : GetVirtualURL();
-}
-
-NavigationEntryImpl::TreeNode* NavigationEntryImpl::FindFrameEntry(
-    FrameTreeNode* frame_tree_node) const {
-  NavigationEntryImpl::TreeNode* node = nullptr;
-  std::queue<NavigationEntryImpl::TreeNode*> work_queue;
-  work_queue.push(root_node());
-  while (!work_queue.empty()) {
-    node = work_queue.front();
-    work_queue.pop();
-    if (node->MatchesFrame(frame_tree_node))
-      return node;
-
-    // Enqueue any children and keep looking.
-    for (const auto& child : node->children)
-      work_queue.push(child.get());
-  }
-  return nullptr;
 }
 
 }  // namespace content

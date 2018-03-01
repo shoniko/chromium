@@ -26,13 +26,7 @@ namespace views {
 class Widget;
 }
 
-namespace viz {
-struct ReturnedResource;
-}
-
 namespace ash {
-class FastInkLayerTreeFrameSinkHolder;
-struct FastInkResource;
 
 // FastInkView is a view supporting low-latency rendering.
 class FastInkView : public views::View {
@@ -53,30 +47,27 @@ class FastInkView : public views::View {
   virtual void OnRedraw(gfx::Canvas& canvas) = 0;
 
  private:
-  friend class FastInkLayerTreeFrameSinkHolder;
+  class LayerTreeFrameSinkHolder;
+  struct Resource;
 
-  // Call this to indicate that the previous frame has been processed.
-  void DidReceiveCompositorFrameAck();
-
-  // Call this to return resources so they can be reused or freed.
-  void ReclaimResources(const std::vector<viz::ReturnedResource>& resources);
-
+  void Redraw();
   void UpdateBuffer();
   void UpdateSurface();
+  void ReclaimResource(std::unique_ptr<Resource> resource);
+  void DidReceiveCompositorFrameAck();
   void OnDidDrawSurface();
 
   std::unique_ptr<views::Widget> widget_;
   gfx::Transform screen_to_buffer_transform_;
   std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer_;
   gfx::Rect buffer_damage_rect_;
-  bool pending_update_buffer_ = false;
+  bool pending_redraw_ = false;
   gfx::Rect surface_damage_rect_;
-  bool needs_update_surface_ = false;
   bool pending_draw_surface_ = false;
-  std::unique_ptr<FastInkLayerTreeFrameSinkHolder> frame_sink_holder_;
+  gfx::Rect pending_draw_surface_rect_;
   int next_resource_id_ = 1;
-  base::flat_map<viz::ResourceId, std::unique_ptr<FastInkResource>> resources_;
-  std::vector<std::unique_ptr<FastInkResource>> returned_resources_;
+  std::vector<std::unique_ptr<Resource>> returned_resources_;
+  std::unique_ptr<LayerTreeFrameSinkHolder> frame_sink_holder_;
   base::WeakPtrFactory<FastInkView> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(FastInkView);

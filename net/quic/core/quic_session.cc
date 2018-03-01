@@ -20,6 +20,14 @@ using std::string;
 
 namespace net {
 
+namespace {
+
+// Stateless reset token used in IETF public reset packet.
+// TODO(fayang): use a real stateless reset token instead of a hard code one.
+const uint128 kStatelessResetToken = 1010101;
+
+}  // namespace
+
 #define ENDPOINT \
   (perspective() == Perspective::IS_SERVER ? "Server: " : "Client: ")
 
@@ -39,29 +47,19 @@ QuicSession::QuicSession(QuicConnection* connection,
       num_locally_closed_incoming_streams_highest_offset_(0),
       error_(QUIC_NO_ERROR),
       flow_controller_(connection_,
-                       0,
+                       kConnectionLevelId,
                        perspective(),
                        kMinimumFlowControlSendWindow,
                        config_.GetInitialSessionFlowControlWindowToSend(),
                        perspective() == Perspective::IS_SERVER,
                        nullptr),
       currently_writing_stream_id_(0),
-      use_stream_notifier_(
-          FLAGS_quic_reloadable_flag_quic_use_stream_notifier2),
-      save_data_before_consumption_(
-          use_stream_notifier_ &&
-          FLAGS_quic_reloadable_flag_quic_save_data_before_consumption2),
-      can_use_slices_(save_data_before_consumption_ &&
-                      FLAGS_quic_reloadable_flag_quic_use_mem_slices) {}
+      can_use_slices_(FLAGS_quic_reloadable_flag_quic_use_mem_slices) {}
 
 void QuicSession::Initialize() {
   connection_->set_visitor(this);
-  if (use_stream_notifier_) {
-    connection_->SetStreamNotifier(this);
-  }
-  if (save_data_before_consumption_) {
-    connection_->SetDataProducer(this);
-  }
+  connection_->SetStreamNotifier(this);
+  connection_->SetDataProducer(this);
   connection_->SetFromConfig(config_);
 
   DCHECK_EQ(kCryptoStreamId, GetMutableCryptoStream()->id());
@@ -163,9 +161,13 @@ void QuicSession::OnWriteBlocked() {
 }
 
 void QuicSession::OnSuccessfulVersionNegotiation(
-    const QuicVersion& /*version*/) {}
+    const QuicTransportVersion& /*version*/) {}
 
 void QuicSession::OnPathDegrading() {}
+
+bool QuicSession::AllowSelfAddressChange() const {
+  return false;
+}
 
 void QuicSession::OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) {
   // Stream may be closed by the time we receive a WINDOW_UPDATE, so we can't
@@ -305,13 +307,11 @@ void QuicSession::ProcessUdpPacket(const QuicSocketAddress& self_address,
   connection_->ProcessUdpPacket(self_address, peer_address, packet);
 }
 
-QuicConsumedData QuicSession::WritevData(
-    QuicStream* stream,
-    QuicStreamId id,
-    QuicIOVector iov,
-    QuicStreamOffset offset,
-    StreamSendingState state,
-    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
+QuicConsumedData QuicSession::WritevData(QuicStream* stream,
+                                         QuicStreamId id,
+                                         QuicIOVector iov,
+                                         QuicStreamOffset offset,
+                                         StreamSendingState state) {
   // This check is an attempt to deal with potential memory corruption
   // in which |id| ends up set to 1 (the crypto stream id). If this happen
   // it might end up resulting in unencrypted stream data being sent.
@@ -330,8 +330,7 @@ QuicConsumedData QuicSession::WritevData(
     // up write blocked until OnCanWrite is next called.
     return QuicConsumedData(0, false);
   }
-  QuicConsumedData data = connection_->SendStreamData(id, iov, offset, state,
-                                                      std::move(ack_listener));
+  QuicConsumedData data = connection_->SendStreamData(id, iov, offset, state);
   write_blocked_streams_.UpdateBytesForStream(id, data.bytes_consumed);
   return data;
 }
@@ -390,7 +389,7 @@ void QuicSession::CloseStreamInner(QuicStreamId stream_id, bool locally_reset) {
     stream->set_rst_sent(true);
   }
 
-  if (use_stream_notifier_ && stream->IsWaitingForAcks()) {
+  if (stream->IsWaitingForAcks()) {
     zombie_streams_[stream->id()] = std::move(it->second);
   } else {
     closed_streams_.push_back(std::move(it->second));
@@ -488,6 +487,11 @@ void QuicSession::OnConfigNegotiated() {
       if (ContainsQuicTag(config_.ReceivedConnectionOptions(), kIFWA)) {
         AdjustInitialFlowControlWindows(1024 * 1024);
       }
+    }
+
+    if (FLAGS_quic_reloadable_flag_quic_send_reset_token_in_shlo) {
+      QUIC_FLAG_COUNT(quic_reloadable_flag_quic_send_reset_token_in_shlo);
+      config_.SetStatelessResetTokenToSend(GetStatelessResetToken());
     }
   }
 
@@ -950,7 +954,6 @@ void QuicSession::OnStreamFrameDiscarded(const QuicStreamFrame& frame) {
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     return;
   }
-  QUIC_FLAG_COUNT_N(quic_reloadable_flag_quic_use_stream_notifier2, 3, 3);
   stream->OnStreamFrameDiscarded(frame);
 }
 
@@ -966,6 +969,10 @@ bool QuicSession::WriteStreamData(QuicStreamId id,
     return false;
   }
   return stream->WriteStreamData(offset, data_length, writer);
+}
+
+uint128 QuicSession::GetStatelessResetToken() const {
+  return kStatelessResetToken;
 }
 
 }  // namespace net

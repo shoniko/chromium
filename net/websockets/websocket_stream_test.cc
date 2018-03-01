@@ -62,7 +62,7 @@ std::unique_ptr<SequencedSocketData> BuildSocketData(
 // Builder for a SequencedSocketData that expects nothing. This does not
 // set the connect data, so the calling code must do that explicitly.
 std::unique_ptr<SequencedSocketData> BuildNullSocketData() {
-  return base::WrapUnique(new SequencedSocketData(NULL, 0, NULL, 0));
+  return std::make_unique<SequencedSocketData>(nullptr, 0, nullptr, 0);
 }
 
 class MockWeakTimer : public base::MockTimer,
@@ -73,7 +73,7 @@ class MockWeakTimer : public base::MockTimer,
 };
 
 static url::Origin LocalhostOrigin() {
-  return url::Origin(GURL("http://localhost/"));
+  return url::Origin::Create(GURL("http://localhost/"));
 }
 
 static GURL LocalhostUrl() {
@@ -81,7 +81,7 @@ static GURL LocalhostUrl() {
 }
 
 static url::Origin GoogleOrigin() {
-  return url::Origin(GURL("http://google.com/"));
+  return url::Origin::Create(GURL("http://google.com/"));
 }
 
 static GURL GoogleUrl() {

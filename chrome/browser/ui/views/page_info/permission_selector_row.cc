@@ -12,7 +12,9 @@
 #include "chrome/browser/ui/views/harmony/chrome_typography.h"
 #include "chrome/browser/ui/views/page_info/non_accessible_image_view.h"
 #include "chrome/browser/ui/views/page_info/page_info_bubble_view.h"
+#include "components/strings/grit/components_strings.h"
 #include "ui/accessibility/ax_node_data.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/models/combobox_model.h"
 #include "ui/gfx/image/image.h"
@@ -183,9 +185,6 @@ class PermissionCombobox : public views::Combobox,
   void UpdateSelectedIndex(bool use_default);
 
  private:
-  // views::Combobox:
-  void OnPaintBorder(gfx::Canvas* canvas) override;
-
   // views::ComboboxListener:
   void OnPerformAction(Combobox* combobox) override;
 
@@ -213,14 +212,6 @@ void PermissionCombobox::UpdateSelectedIndex(bool use_default) {
     index = 0;
   }
   SetSelectedIndex(index);
-}
-
-void PermissionCombobox::OnPaintBorder(gfx::Canvas* canvas) {
-  // No border except a focus indicator for MD mode.
-  if (ui::MaterialDesignController::IsSecondaryUiMaterial() && !HasFocus()) {
-    return;
-  }
-  Combobox::OnPaintBorder(canvas);
 }
 
 void PermissionCombobox::OnPerformAction(Combobox* combobox) {
@@ -319,8 +310,9 @@ void PermissionSelectorRow::InitializeMenuButtonView(
           permission.default_setting, permission.source),
       menu_model_.get(), button_enabled);
   menu_button_->SetEnabled(button_enabled);
-  menu_button_->SetAccessibleName(
-      PageInfoUI::PermissionTypeToUIString(permission.type));
+  menu_button_->SetTooltipText(l10n_util::GetStringFUTF16(
+      IDS_PAGE_INFO_SELECTOR_TOOLTIP,
+      PageInfoUI::PermissionTypeToUIString(permission.type)));
   layout->AddView(menu_button_);
 }
 
@@ -334,8 +326,9 @@ void PermissionSelectorRow::InitializeComboboxView(
   combobox_ = new internal::PermissionCombobox(combobox_model_adapter_.get(),
                                                button_enabled, true);
   combobox_->SetEnabled(button_enabled);
-  combobox_->SetAccessibleName(
-      PageInfoUI::PermissionTypeToUIString(permission.type));
+  combobox_->SetTooltipText(l10n_util::GetStringFUTF16(
+      IDS_PAGE_INFO_SELECTOR_TOOLTIP,
+      PageInfoUI::PermissionTypeToUIString(permission.type)));
   layout->AddView(combobox_);
 }
 

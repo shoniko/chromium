@@ -22,6 +22,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/nacl/browser/nacl_browser.h"
+#include "components/nacl/common/features.h"
 #include "components/nacl/common/nacl_switches.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "content/public/common/result_codes.h"
@@ -47,6 +48,7 @@ const int64_t kRefreshTimeMS = 1000;
 // only once per group.
 bool IsSharedByGroup(int column_id) {
   switch (column_id) {
+    case IDS_TASK_MANAGER_MEM_FOOTPRINT_COLUMN:
     case IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN:
     case IDS_TASK_MANAGER_SHARED_MEM_COLUMN:
     case IDS_TASK_MANAGER_PHYSICAL_MEM_COLUMN:
@@ -309,20 +311,20 @@ TableSortDescriptor::TableSortDescriptor(int col_id, bool ascending)
 // TaskManagerTableModel:
 ////////////////////////////////////////////////////////////////////////////////
 
-TaskManagerTableModel::TaskManagerTableModel(int64_t refresh_flags,
-                                             TableViewDelegate* delegate)
+TaskManagerTableModel::TaskManagerTableModel(TableViewDelegate* delegate)
     : TaskManagerObserver(base::TimeDelta::FromMilliseconds(kRefreshTimeMS),
-                          refresh_flags),
+                          REFRESH_TYPE_NONE),
       table_view_delegate_(delegate),
       columns_settings_(new base::DictionaryValue),
       table_model_observer_(nullptr),
       stringifier_(new TaskManagerValuesStringifier),
-#if !defined(DISABLE_NACL)
-      is_nacl_debugging_flag_enabled_(base::CommandLine::ForCurrentProcess()->
-          HasSwitch(switches::kEnableNaClDebug)) {
+#if BUILDFLAG(ENABLE_NACL)
+      is_nacl_debugging_flag_enabled_(
+          base::CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kEnableNaClDebug)) {
 #else
       is_nacl_debugging_flag_enabled_(false) {
-#endif  // !defined(DISABLE_NACL)
+#endif  // BUILDFLAG(ENABLE_NACL)
   DCHECK(delegate);
   StartUpdating();
 }
@@ -352,7 +354,7 @@ base::string16 TaskManagerTableModel::GetText(int row, int column) {
 
     case IDS_TASK_MANAGER_CPU_COLUMN:
       return stringifier_->GetCpuUsageText(
-          observed_task_manager()->GetCpuUsage(tasks_[row]));
+          observed_task_manager()->GetPlatformIndependentCPUUsage(tasks_[row]));
 
     case IDS_TASK_MANAGER_CPU_TIME_COLUMN:
       return stringifier_->GetCpuTimeText(
@@ -361,6 +363,10 @@ base::string16 TaskManagerTableModel::GetText(int row, int column) {
     case IDS_TASK_MANAGER_START_TIME_COLUMN:
       return stringifier_->GetStartTimeText(
           observed_task_manager()->GetStartTime(tasks_[row]));
+
+    case IDS_TASK_MANAGER_MEM_FOOTPRINT_COLUMN:
+      return stringifier_->GetMemoryUsageText(
+          observed_task_manager()->GetMemoryFootprintUsage(tasks_[row]), false);
 
     case IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN:
       return stringifier_->GetMemoryUsageText(
@@ -502,8 +508,10 @@ int TaskManagerTableModel::CompareValues(int row1,
           observed_task_manager()->GetNetworkUsage(tasks_[row2]));
 
     case IDS_TASK_MANAGER_CPU_COLUMN:
-      return ValueCompare(observed_task_manager()->GetCpuUsage(tasks_[row1]),
-                          observed_task_manager()->GetCpuUsage(tasks_[row2]));
+      return ValueCompare(
+          observed_task_manager()->GetPlatformIndependentCPUUsage(tasks_[row1]),
+          observed_task_manager()->GetPlatformIndependentCPUUsage(
+              tasks_[row2]));
 
     case IDS_TASK_MANAGER_CPU_TIME_COLUMN:
       return ValueCompare(observed_task_manager()->GetCpuTime(tasks_[row1]),
@@ -512,6 +520,11 @@ int TaskManagerTableModel::CompareValues(int row1,
     case IDS_TASK_MANAGER_START_TIME_COLUMN:
       return ValueCompare(observed_task_manager()->GetStartTime(tasks_[row1]),
                           observed_task_manager()->GetStartTime(tasks_[row2]));
+
+    case IDS_TASK_MANAGER_MEM_FOOTPRINT_COLUMN:
+      return ValueCompare(
+          observed_task_manager()->GetMemoryFootprintUsage(tasks_[row1]),
+          observed_task_manager()->GetMemoryFootprintUsage(tasks_[row2]));
 
     case IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN:
       return ValueCompare(
@@ -723,15 +736,20 @@ void TaskManagerTableModel::UpdateRefreshTypes(int column_id, bool visibility) {
       type = REFRESH_TYPE_CPU_TIME;
       break;
 
+    case IDS_TASK_MANAGER_MEM_FOOTPRINT_COLUMN:
+      type = REFRESH_TYPE_MEMORY_FOOTPRINT;
+      break;
+
     case IDS_TASK_MANAGER_PHYSICAL_MEM_COLUMN:
       type = REFRESH_TYPE_PHYSICAL_MEMORY;
       break;
-
     case IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN:
     case IDS_TASK_MANAGER_SHARED_MEM_COLUMN:
     case IDS_TASK_MANAGER_SWAPPED_MEM_COLUMN:
       type = REFRESH_TYPE_MEMORY_DETAILS;
       if (table_view_delegate_->IsColumnVisible(
+              IDS_TASK_MANAGER_PHYSICAL_MEM_COLUMN) ||
+          table_view_delegate_->IsColumnVisible(
               IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN) ||
           table_view_delegate_->IsColumnVisible(
               IDS_TASK_MANAGER_SHARED_MEM_COLUMN) ||

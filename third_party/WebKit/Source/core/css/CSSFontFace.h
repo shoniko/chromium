@@ -49,7 +49,7 @@ class CORE_EXPORT CSSFontFace final
 
  public:
   CSSFontFace(FontFace* font_face, Vector<UnicodeRange>& ranges)
-      : ranges_(AdoptRef(new UnicodeRangeSet(ranges))),
+      : ranges_(WTF::AdoptRef(new UnicodeRangeSet(ranges))),
         segmented_font_face_(nullptr),
         font_face_(font_face) {
     DCHECK(font_face_);
@@ -57,7 +57,7 @@ class CORE_EXPORT CSSFontFace final
 
   FontFace* GetFontFace() const { return font_face_; }
 
-  RefPtr<UnicodeRangeSet> Ranges() { return ranges_; }
+  scoped_refptr<UnicodeRangeSet> Ranges() { return ranges_; }
 
   void SetSegmentedFontFace(CSSSegmentedFontFace*);
   void ClearSegmentedFontFace() { segmented_font_face_ = nullptr; }
@@ -68,10 +68,11 @@ class CORE_EXPORT CSSFontFace final
   void AddSource(CSSFontFaceSource*);
 
   void DidBeginLoad();
-  void FontLoaded(RemoteFontFaceSource*);
-  void DidBecomeVisibleFallback(RemoteFontFaceSource*);
+  enum class LoadFinishReason { WasCancelled, NormalFinish };
+  bool FontLoaded(RemoteFontFaceSource*, LoadFinishReason);
+  bool DidBecomeVisibleFallback(RemoteFontFaceSource*);
 
-  RefPtr<SimpleFontData> GetFontData(const FontDescription&);
+  scoped_refptr<SimpleFontData> GetFontData(const FontDescription&);
 
   FontFace::LoadStatusType LoadStatus() const {
     return font_face_->LoadStatus();
@@ -83,12 +84,12 @@ class CORE_EXPORT CSSFontFace final
 
   bool HadBlankText() { return IsValid() && sources_.front()->HadBlankText(); }
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   void SetLoadStatus(FontFace::LoadStatusType);
 
-  RefPtr<UnicodeRangeSet> ranges_;
+  scoped_refptr<UnicodeRangeSet> ranges_;
   Member<CSSSegmentedFontFace> segmented_font_face_;
   HeapDeque<Member<CSSFontFaceSource>> sources_;
   Member<FontFace> font_face_;

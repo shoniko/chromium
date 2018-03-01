@@ -23,7 +23,8 @@
 #include "content/public/common/url_loader_factory.mojom.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "net/log/net_log_with_source.h"
-#include "storage/public/interfaces/blobs.mojom.h"
+#include "third_party/WebKit/common/blob/blob.mojom.h"
+#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_event_status.mojom.h"
 
 namespace net {
 class URLRequest;
@@ -42,7 +43,7 @@ class CONTENT_EXPORT ServiceWorkerFetchDispatcher {
                           ServiceWorkerFetchEventResult,
                           const ServiceWorkerResponse&,
                           blink::mojom::ServiceWorkerStreamHandlePtr,
-                          storage::mojom::BlobPtr,
+                          blink::mojom::BlobPtr,
                           const scoped_refptr<ServiceWorkerVersion>&)>;
 
   ServiceWorkerFetchDispatcher(
@@ -89,18 +90,18 @@ class CONTENT_EXPORT ServiceWorkerFetchDispatcher {
                  ServiceWorkerFetchEventResult fetch_result,
                  const ServiceWorkerResponse& response,
                  blink::mojom::ServiceWorkerStreamHandlePtr body_as_stream,
-                 storage::mojom::BlobPtr body_as_blob);
+                 blink::mojom::BlobPtr body_as_blob);
   void Complete(ServiceWorkerStatusCode status,
                 ServiceWorkerFetchEventResult fetch_result,
                 const ServiceWorkerResponse& response,
                 blink::mojom::ServiceWorkerStreamHandlePtr body_as_stream,
-                storage::mojom::BlobPtr body_as_blob);
+                blink::mojom::BlobPtr body_as_blob);
 
   static void OnFetchEventFinished(
       ServiceWorkerVersion* version,
       int event_finish_id,
       scoped_refptr<URLLoaderAssets> url_loader_assets,
-      ServiceWorkerStatusCode status,
+      blink::mojom::ServiceWorkerEventStatus status,
       base::Time dispatch_event_time);
 
   ServiceWorkerMetrics::EventType GetEventType() const;

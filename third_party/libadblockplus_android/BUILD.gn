@@ -180,6 +180,9 @@ android_aar_prebuilt("aar_java") {
 
 _settings_aar_path = rebase_path("${_build_dir}/libadblockplus-android-settings/outputs/aar/libadblockplus-android-settings-release.aar")
 android_aar_prebuilt("settings_aar_java") {
+  deps = [
+    ":aar_java"
+  ]
   unpack_deps = [
     ":make"
   ]

@@ -22,7 +22,6 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/system/timezone_resolver_manager.h"
@@ -32,6 +31,7 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/settings/timezone_settings.h"
 #include "chromeos/timezone/timezone_request.h"
+#include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
@@ -242,10 +242,21 @@ void ApplyTimeZone(const TimeZoneResponseData* timezone) {
 
     if (primary_user) {
       Profile* profile = ProfileHelper::Get()->GetProfileByUser(primary_user);
+      // profile can be NULL only if user has logged in, but profile has not
+      // been initialized yet. Ignore delayed time zone update until user
+      // preferences are initialized.
+      if (!profile)
+        return;
+
       profile->GetPrefs()->SetString(prefs::kUserTimezone,
                                      timezone->timeZoneId);
-      // chromeos::Preferences::ApplyPreferences() will automatically change
-      // system timezone because user is primary.
+      // For non-enterprise device, chromeos::Preferences::ApplyPreferences()
+      // will automatically change system timezone because user is primary.
+      // But it may not happen for enterprise device, as policy may prevent
+      // user from changing device time zone manually.
+      // That is the reason we always update system time zone here.
+      TimezoneSettings::GetInstance()->SetTimezoneFromID(
+          base::UTF8ToUTF16(timezone->timeZoneId));
     } else {
       SetSystemAndSigninScreenTimezone(timezone->timeZoneId);
     }

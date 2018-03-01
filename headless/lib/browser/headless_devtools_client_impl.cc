@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "headless/lib/browser/headless_devtools_client_impl.h"
+#include "headless/public/internal/headless_devtools_client_impl.h"
 
 #include <memory>
 
@@ -50,6 +50,7 @@ HeadlessDevToolsClientImpl::HeadlessDevToolsClientImpl()
       dom_snapshot_domain_(this),
       dom_storage_domain_(this),
       emulation_domain_(this),
+      headless_experimental_domain_(this),
       heap_profiler_domain_(this),
       indexeddb_domain_(this),
       input_domain_(this),
@@ -60,6 +61,7 @@ HeadlessDevToolsClientImpl::HeadlessDevToolsClientImpl()
       memory_domain_(this),
       network_domain_(this),
       page_domain_(this),
+      performance_domain_(this),
       profiler_domain_(this),
       runtime_domain_(this),
       security_domain_(this),
@@ -114,14 +116,13 @@ void HeadlessDevToolsClientImpl::SendRawDevToolsMessage(
 #ifndef NDEBUG
   std::unique_ptr<base::Value> message =
       base::JSONReader::Read(json_message, base::JSON_PARSE_RFC);
-  const base::DictionaryValue* message_dict;
-  int id = 0;
-  if (!message || !message->GetAsDictionary(&message_dict) ||
-      !message_dict->GetInteger("id", &id)) {
-    NOTREACHED() << "Badly formed message";
+  const base::Value* id_value = message->FindKey("id");
+  if (!id_value) {
+    NOTREACHED() << "Badly formed message " << json_message;
     return;
   }
-  DCHECK_EQ((id % 2), 1) << "Raw devtools messages must have an odd ID.";
+  DCHECK_EQ((id_value->GetInt() % 2), 1)
+      << "Raw devtools messages must have an odd ID.";
 #endif
 
   agent_host_->DispatchProtocolMessage(this, json_message);
@@ -161,10 +162,10 @@ void HeadlessDevToolsClientImpl::DispatchProtocolMessage(
 
 bool HeadlessDevToolsClientImpl::DispatchMessageReply(
     const base::DictionaryValue& message_dict) {
-  int id = 0;
-  if (!message_dict.GetInteger("id", &id))
+  const base::Value* id_value = message_dict.FindKey("id");
+  if (!id_value)
     return false;
-  auto it = pending_messages_.find(id);
+  auto it = pending_messages_.find(id_value->GetInt());
   if (it == pending_messages_.end()) {
     NOTREACHED() << "Unexpected reply";
     return false;
@@ -192,9 +193,10 @@ bool HeadlessDevToolsClientImpl::DispatchMessageReply(
 bool HeadlessDevToolsClientImpl::DispatchEvent(
     std::unique_ptr<base::Value> owning_message,
     const base::DictionaryValue& message_dict) {
-  std::string method;
-  if (!message_dict.GetString("method", &method))
+  const base::Value* method_value = message_dict.FindKey("method");
+  if (!method_value)
     return false;
+  const std::string& method = method_value->GetString();
   if (method == "Inspector.targetCrashed")
     renderer_crashed_ = true;
   EventHandlerMap::const_iterator it = event_handlers_.find(method);
@@ -294,6 +296,11 @@ emulation::Domain* HeadlessDevToolsClientImpl::GetEmulation() {
   return &emulation_domain_;
 }
 
+headless_experimental::Domain*
+HeadlessDevToolsClientImpl::GetHeadlessExperimental() {
+  return &headless_experimental_domain_;
+}
+
 heap_profiler::Domain* HeadlessDevToolsClientImpl::GetHeapProfiler() {
   return &heap_profiler_domain_;
 }
@@ -332,6 +339,10 @@ network::Domain* HeadlessDevToolsClientImpl::GetNetwork() {
 
 page::Domain* HeadlessDevToolsClientImpl::GetPage() {
   return &page_domain_;
+}
+
+performance::Domain* HeadlessDevToolsClientImpl::GetPerformance() {
+  return &performance_domain_;
 }
 
 profiler::Domain* HeadlessDevToolsClientImpl::GetProfiler() {

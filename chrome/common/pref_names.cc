@@ -17,62 +17,6 @@ namespace prefs {
 // *************** PROFILE PREFS ***************
 // These are attached to the user profile
 
-#if defined(OS_CHROMEOS) && BUILDFLAG(ENABLE_APP_LIST)
-// Stores the user id received from DM Server when enrolling a Play user on an
-// Active Directory managed device. Used to report to DM Server that the account
-// is still used.
-const char kArcActiveDirectoryPlayUserId[] =
-    "arc.active_directory_play_user_id";
-// A preference to keep list of Android apps and their state.
-const char kArcApps[] = "arc.apps";
-// A preference to store backup and restore state for Android apps.
-const char kArcBackupRestoreEnabled[] = "arc.backup_restore.enabled";
-// A preference to indicate that Android's data directory should be removed.
-const char kArcDataRemoveRequested[] = "arc.data.remove_requested";
-// A preference representing whether a user has opted in to use Google Play
-// Store on ARC.
-// TODO(hidehiko): For historical reason, now the preference name does not
-// directly reflect "Google Play Store". We should get and set the values via
-// utility methods (IsArcPlayStoreEnabledForProfile() and
-// SetArcPlayStoreEnabledForProfile()) in chrome/browser/chromeos/arc/arc_util.
-const char kArcEnabled[] = "arc.enabled";
-// A preference that indicated whether Android reported it's compliance status
-// with provided policies. This is used only as a signal to start Android kiosk.
-const char kArcPolicyComplianceReported[] = "arc.policy_compliance_reported";
-// A preference that indicates that user accepted PlayStore terms.
-const char kArcTermsAccepted[] = "arc.terms.accepted";
-// A preference to keep user's consent to use location service.
-const char kArcLocationServiceEnabled[] = "arc.location_service.enabled";
-// A preference to keep list of Android packages and their infomation.
-const char kArcPackages[] = "arc.packages";
-// A preference that indicates that Play Auto Install flow was already started.
-const char kArcPaiStarted[] = "arc.pai.started";
-// A preference to keep deferred requests of setting notifications enabled flag.
-const char kArcSetNotificationsEnabledDeferred[] =
-    "arc.set_notifications_enabled_deferred";
-// A preference that indicates status of Android sign-in.
-const char kArcSignedIn[] = "arc.signedin";
-// A preference that indicates an ARC comaptible filesystem was chosen for
-// the user directory (i.e., the user finished required migration.)
-extern const char kArcCompatibleFilesystemChosen[] =
-    "arc.compatible_filesystem.chosen";
-// A preference that indicates that user accepted Voice Interaction Value Prop.
-const char kArcVoiceInteractionValuePropAccepted[] =
-    "arc.voice_interaction_value_prop.accepted";
-// A preference that indicates the user has enabled voice interaction services.
-const char kVoiceInteractionEnabled[] = "settings.voice_interaction.enabled";
-// A preference that indicates the user has allowed voice interaction services
-// to access the "context" (text and graphic content that is currently on
-// screen).
-const char kVoiceInteractionContextEnabled[] =
-    "settings.voice_interaction.context.enabled";
-// A preference indicating whether voice interaction settings have been read
-// from ARC. This synchronization only happens when user goes through the flow
-// to set up voice interaction.
-const char kVoiceInteractionPrefSynced[] =
-    "settings.voice_interaction.context.synced";
-#endif
-
 // A bool pref that keeps whether the child status for this profile was already
 // successfully checked via ChildAccountService.
 const char kChildAccountStatusKnown[] = "child_account_status_known";
@@ -486,9 +430,6 @@ const char kDnsPrefetchingHostReferralList[] =
 // Controls if the QUIC protocol is allowed.
 const char kQuicAllowed[] = "net.quic_allowed";
 
-// Prefs for persisting HttpServerProperties.
-const char kHttpServerProperties[] = "net.http_server_properties";
-
 // Prefs for persisting network qualities.
 const char kNetworkQualities[] = "net.network_qualities";
 
@@ -650,14 +591,6 @@ const char kSecondaryDisplays[] = "settings.display.secondary_displays";
 // display orientation, for the internal display.
 const char kDisplayRotationLock[] = "settings.display.rotation_lock";
 
-// A boolean pref that specifies if the stylus tools should be enabled/disabled.
-const char kEnableStylusTools[] = "settings.enable_stylus_tools";
-
-// A boolean pref that specifies if the ash palette should be launched after an
-// eject input event has been received.
-const char kLaunchPaletteOnEjectEvent[] =
-    "settings.launch_palette_on_eject_event";
-
 // A string pref that contains either a Chrome app ID (see
 // extensions::ExtensionId) or an Android package name (using Java package
 // naming conventions) of the preferred note-taking app. An empty value
@@ -675,6 +608,12 @@ const char kNoteTakingAppEnabledOnLockScreen[] =
 // to run on lock screen, not to actually enable the apps to run on lock screen.
 const char kNoteTakingAppsLockScreenWhitelist[] =
     "settings.note_taking_apps_lock_screen_whitelist";
+
+// Dictionary pref that maps lock screen app ID to a boolean indicating whether
+// the toast dialog has been show and dismissed as the app was being launched
+// on the lock screen.
+const char kNoteTakingAppsLockScreenToastShown[] =
+    "settings.note_taking_apps_lock_screen_toast_shown";
 
 // Whether the preferred note taking app should be requested to restore the last
 // note created on lock screen when launched on lock screen.
@@ -843,10 +782,6 @@ const char kFileSystemProviderMounted[] = "file_system_provider.mounted";
 // A boolean pref set to true if the virtual keyboard should be enabled.
 const char kTouchVirtualKeyboardEnabled[] = "ui.touch_virtual_keyboard_enabled";
 
-// Boolean prefs for the status of the touchscreen and the touchpad.
-const char kTouchscreenEnabled[] = "events.touch_screen.enabled";
-const char kTouchpadEnabled[] = "events.touch_pad.enabled";
-
 // A boolean pref that controls whether the dark connect feature is enabled.
 // The dark connect feature allows a Chrome OS device to periodically wake
 // from suspend in a low-power state to maintain WiFi connectivity.
@@ -900,8 +835,7 @@ const char kPinUnlockFeatureNotificationShown[] =
 const char kFingerprintUnlockFeatureNotificationShown[] =
     "fingerprint_unlock_feature_notification_shown";
 
-// The salt and hash for the pin quick unlock mechanism.
-const char kQuickUnlockPinSalt[] = "quick_unlock.pin.salt";
+// The hash for the pin quick unlock mechanism.
 const char kQuickUnlockPinSecret[] = "quick_unlock.pin.secret";
 
 // An integer pref. Indicates the number of fingerprint records registered.
@@ -958,9 +892,6 @@ const char kCastReceiverEnabled[] = "cast_receiver.enabled";
 // If the string is empty or blank the system name will be used.
 const char kCastReceiverName[] = "cast_receiver.name";
 
-// Integer pref indicating the ecryptfs to ext4 migration strategy. One of
-// options: forbidden = 0, migrate = 1, wipe = 2 or ask the user = 3.
-const char kEcryptfsMigrationStrategy[] = "ecryptfs_migration_strategy";
 #endif  // defined(OS_CHROMEOS)
 
 // A boolean pref set to true if a Home button to open the Home pages should be
@@ -1057,6 +988,11 @@ const char kPluginsAllowOutdated[] = "plugins.allow_outdated";
 // Boolean that indicates whether plugins that require authorization should
 // be always allowed or not.
 const char kPluginsAlwaysAuthorize[] = "plugins.always_authorize";
+
+// Boolean that indicates whether all Flash content (including cross-origin and
+// small content) is allowed to run when it is explicitly allowed via content
+// settings.
+const char kRunAllFlashInAllowMode[] = "plugins.run_all_flash_in_allow_mode";
 
 #if BUILDFLAG(ENABLE_PLUGINS)
 // Dictionary holding plugins metadata.
@@ -1274,26 +1210,6 @@ const char kMessageCenterDisabledExtensionIds[] =
 // notifications to the message center.
 const char kMessageCenterDisabledSystemComponentIds[] =
     "message_center.disabled_system_component_ids";
-
-// Boolean pref indicating the Chrome Now welcome notification was dismissed
-// by the user. Syncable.
-// Note: This is now read-only. The welcome notification writes the _local
-// version, below.
-const char kWelcomeNotificationDismissed[] =
-    "message_center.welcome_notification_dismissed";
-
-// Boolean pref indicating the Chrome Now welcome notification was dismissed
-// by the user on this machine.
-const char kWelcomeNotificationDismissedLocal[] =
-    "message_center.welcome_notification_dismissed_local";
-
-// Boolean pref indicating the welcome notification was previously popped up.
-const char kWelcomeNotificationPreviouslyPoppedUp[] =
-    "message_center.welcome_notification_previously_popped_up";
-
-// Integer pref containing the expiration timestamp of the welcome notification.
-const char kWelcomeNotificationExpirationTimestamp[] =
-    "message_center.welcome_notification_expiration_timestamp";
 
 // Boolean pref that determines whether the user can enter fullscreen mode.
 // Disabling fullscreen mode also makes kiosk mode unavailable on desktop
@@ -1580,9 +1496,9 @@ const char kContentSuggestionsConsecutiveIgnoredPrefName[] =
 // as an integer YYYYMMDD, in wall time in the local timezone.
 // If sent_day changes, sent_count is reset to 0. Allows limiting per-day
 // notification count.
-extern const char kContentSuggestionsNotificationsSentDay[] =
+const char kContentSuggestionsNotificationsSentDay[] =
     "ntp.content_suggestions.notifications.sent_day";
-extern const char kContentSuggestionsNotificationsSentCount[] =
+const char kContentSuggestionsNotificationsSentCount[] =
     "ntp.content_suggestions.notifications.sent_count";
 #endif  // defined(OS_ANDROID)
 
@@ -1690,10 +1606,6 @@ const char kWebAppCreateInQuickLaunchBar[] =
 // corresponding access token.
 const char kGeolocationAccessToken[] = "geolocation.access_token";
 
-// Boolean that specifies whether to enable the Google Now Launcher extension.
-// Note: This is not the notifications component gated by ENABLE_GOOGLE_NOW.
-const char kGoogleNowLauncherEnabled[] = "google_now_launcher.enabled";
-
 // The default audio capture device used by the Media content setting.
 const char kDefaultAudioCaptureDevice[] = "media.default_audio_capture_device";
 
@@ -1702,6 +1614,11 @@ const char kDefaultVideoCaptureDevice[] = "media.default_video_capture_Device";
 
 // The salt used for creating random MediaSource IDs.
 const char kMediaDeviceIdSalt[] = "media.device_id_salt";
+
+// The salt used for creating Storage IDs. The Storage ID is used by encrypted
+// media to bind persistent licenses to the device which is authorized to play
+// the content.
+const char kMediaStorageIdSalt[] = "media.storage_id_salt";
 
 // The last used printer and its settings.
 const char kPrintPreviewStickySettings[] =
@@ -1753,6 +1670,11 @@ const char kAuthAndroidNegotiateAccountType[] =
 // Boolean that specifies whether to allow basic auth prompting on cross-
 // domain sub-content requests.
 const char kAllowCrossOriginAuthPrompt[] = "auth.allow_cross_origin_prompt";
+
+#if defined(OS_POSIX)
+// Boolean that specifies whether NTLMv2 is enabled.
+const char kNtlmV2Enabled[] = "auth.ntlm_v2_enabled";
+#endif  // defined(OS_POSIX)
 
 // Boolean that specifies whether the built-in asynchronous DNS client is used.
 const char kBuiltInDnsClientEnabled[] = "async_dns.enabled";
@@ -1981,6 +1903,11 @@ const char kTabStripStackedLayout[] = "tab-strip-stacked-layout";
 
 // Indicates that factory reset was requested from options page or reset screen.
 const char kFactoryResetRequested[] = "FactoryResetRequested";
+
+// Indicates that a TPM firmware update should be requested when triggering a
+// factory reset.
+const char kFactoryResetTPMFirmwareUpdateRequested[] =
+    "FactoryResetTPMFirmwareUpdateRequested";
 
 // Indicates that debugging features were requested from oobe screen.
 const char kDebuggingFeaturesRequested[] = "DebuggingFeaturesRequested";
@@ -2535,6 +2462,15 @@ const char kOfflinePrefetchBackoff[] = "offline_prefetch.backoff";
 const char kOfflineUsageStartObserved[] = "offline_pages.start_observed";
 const char kOfflineUsageOnlineObserved[] = "offline_pages.online_observed";
 const char kOfflineUsageOfflineObserved[] = "offline_pages.offline_observed";
+// Boolean flags indicating state of a prefetch subsystem during a day.
+const char kPrefetchUsageEnabledObserved[] =
+    "offline_pages.prefetch_enabled_observed";
+const char kPrefetchUsageHasPagesObserved[] =
+    "offline_pages.prefetch_has_pages_observed";
+const char kPrefetchUsageFetchObserved[] =
+    "offline_pages.prefetch_fetch_observed";
+const char kPrefetchUsageOpenObserved[] =
+    "offline_pages.prefetch_open_observed";
 // A time corresponding to a midnight that starts the day for which
 // OfflineMetricsCollector tracks the Chrome usage. Once current time passes
 // 24hrs from this point, the further tracking is attributed to the next day.
@@ -2546,6 +2482,17 @@ const char kOfflineUsageStartedCount[] = "offline_pages.started_count";
 const char kOfflineUsageOfflineCount[] = "offline_pages.offline_count";
 const char kOfflineUsageOnlineCount[] = "offline_pages.online_count";
 const char kOfflineUsageMixedCount[] = "offline_pages.mixed_count";
+// Accumulated counters of days with specified Prefetch usage. When there is
+// likely a network connection, these counters are reported via UMA and reset.
+const char kPrefetchUsageEnabledCount[] =
+    "offline_pages.prefetch_enabled_count";
+const char kPrefetchUsageHasPagesCount[] =
+    "offline_pages.prefetch_has_pages_count";
+const char kPrefetchUsageFetchedCount[] =
+    "offline_pages.prefetch_fetched_count";
+const char kPrefetchUsageOpenedCount[] = "offline_pages.prefetch_opened_count";
+const char kPrefetchUsageMixedCount[] = "offline_pages.prefetch_mixed_count";
+
 #endif
 
 // Stores the Media Engagement Index schema version. If the stored value

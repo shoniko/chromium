@@ -113,8 +113,10 @@ void InstallAttributes::Init(const base::FilePath& cache_file) {
       base::Bind(&InstallAttributes::OnCryptohomeServiceInitiallyAvailable,
                  weak_ptr_factory_.GetWeakPtr()));
 
-  if (!base::PathExists(cache_file))
+  if (!base::PathExists(cache_file)) {
+    LOG(WARNING) << "Install attributes missing, first sign in";
     return;
+  }
 
   device_locked_ = true;
 
@@ -158,9 +160,8 @@ void InstallAttributes::ReadImmutableAttributes(const base::Closure& callback) {
 }
 
 void InstallAttributes::ReadAttributesIfReady(const base::Closure& callback,
-                                              DBusMethodCallStatus call_status,
-                                              bool result) {
-  if (call_status == DBUS_METHOD_CALL_SUCCESS && result) {
+                                              base::Optional<bool> is_ready) {
+  if (is_ready.value_or(false)) {
     registration_mode_ = policy::DEVICE_MODE_NOT_SET;
     if (!cu::InstallAttributesIsInvalid() &&
         !cu::InstallAttributesIsFirstInstall()) {
@@ -190,7 +191,7 @@ void InstallAttributes::ReadAttributesIfReady(const base::Closure& callback,
 
 void InstallAttributes::SetBlockDevmodeInTpm(
     bool block_devmode,
-    const CryptohomeClient::ProtobufMethodCallback& callback) {
+    DBusMethodCallback<cryptohome::BaseReply> callback) {
   DCHECK(!callback.is_null());
   DCHECK(!device_locked_);
 
@@ -203,7 +204,8 @@ void InstallAttributes::SetBlockDevmodeInTpm(
         cryptohome::DEVELOPER_DISABLE_CASE_CLOSED_DEBUGGING_UNLOCK);
   }
 
-  cryptohome_client_->SetFirmwareManagementParametersInTpm(request, callback);
+  cryptohome_client_->SetFirmwareManagementParametersInTpm(request,
+                                                           std::move(callback));
 }
 
 void InstallAttributes::LockDevice(policy::DeviceMode device_mode,
@@ -223,7 +225,9 @@ void InstallAttributes::LockDevice(policy::DeviceMode device_mode,
   // Check for existing lock first.
   if (device_locked_) {
     if (device_mode != registration_mode_) {
-      LOG(ERROR) << "Trying to re-lock with wrong mode.";
+      LOG(ERROR) << "Trying to re-lock with wrong mode: device_mode: "
+                 << device_mode
+                 << ", registration_mode: " << registration_mode_;
       callback.Run(LOCK_WRONG_MODE);
       return;
     }
@@ -258,13 +262,9 @@ void InstallAttributes::LockDevice(policy::DeviceMode device_mode,
 
   device_lock_running_ = true;
   cryptohome_client_->InstallAttributesIsReady(
-      base::Bind(&InstallAttributes::LockDeviceIfAttributesIsReady,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 device_mode,
-                 domain,
-                 realm,
-                 device_id,
-                 callback));
+      base::BindOnce(&InstallAttributes::LockDeviceIfAttributesIsReady,
+                     weak_ptr_factory_.GetWeakPtr(), device_mode, domain, realm,
+                     device_id, callback));
 }
 
 void InstallAttributes::LockDeviceIfAttributesIsReady(
@@ -273,9 +273,8 @@ void InstallAttributes::LockDeviceIfAttributesIsReady(
     const std::string& realm,
     const std::string& device_id,
     const LockResultCallback& callback,
-    DBusMethodCallStatus call_status,
-    bool result) {
-  if (call_status != DBUS_METHOD_CALL_SUCCESS || !result) {
+    base::Optional<bool> is_ready) {
+  if (!is_ready.has_value() || !is_ready.value()) {
     device_lock_running_ = false;
     callback.Run(LOCK_NOT_READY);
     return;
@@ -387,17 +386,15 @@ bool InstallAttributes::IsConsumerKioskDeviceWithAutoLaunch() {
 }
 
 void InstallAttributes::TriggerConsistencyCheck(int dbus_retries) {
-  cryptohome_client_->TpmIsOwned(
-      base::Bind(&InstallAttributes::OnTpmOwnerCheckCompleted,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 dbus_retries));
+  cryptohome_client_->TpmGetPassword(
+      base::Bind(&InstallAttributes::OnTpmGetPasswordCompleted,
+                 weak_ptr_factory_.GetWeakPtr(), dbus_retries));
 }
 
-void InstallAttributes::OnTpmOwnerCheckCompleted(
+void InstallAttributes::OnTpmGetPasswordCompleted(
     int dbus_retries_remaining,
-    DBusMethodCallStatus call_status,
-    bool result) {
-  if (call_status != DBUS_METHOD_CALL_SUCCESS && dbus_retries_remaining) {
+    base::Optional<std::string> result) {
+  if (!result.has_value() && dbus_retries_remaining) {
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&InstallAttributes::TriggerConsistencyCheck,
@@ -406,12 +403,18 @@ void InstallAttributes::OnTpmOwnerCheckCompleted(
     return;
   }
 
-  base::HistogramBase::Sample state = device_locked_;
-  state |= 0x2 * (registration_mode_ == policy::DEVICE_MODE_ENTERPRISE);
-  if (call_status == DBUS_METHOD_CALL_SUCCESS)
-    state |= 0x4 * result;
-  else
-    state = 0x8;  // This case is not a bit mask.
+  base::HistogramBase::Sample state;
+  // If the result has a value, we are interested if install attributes file
+  // exists (device_locked_), if the device is enrolled (registration_mode_) and
+  // if the TPM is locked, meaning the TPM password is deleted so
+  // the value from result is empty.
+  if (result.has_value()) {
+    state = (device_locked_ ? 1 : 0) |
+            (registration_mode_ == policy::DEVICE_MODE_ENTERPRISE ? 2 : 0) |
+            (result->empty() ? 4 : 0);
+  } else {
+    state = 8;
+  }
   UMA_HISTOGRAM_ENUMERATION("Enterprise.AttributesTPMConsistency", state, 9);
 
   // Run any action (LockDevice call) that might have queued behind the

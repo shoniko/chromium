@@ -12,12 +12,12 @@
 #include "core/paint/BlockPainter.h"
 #include "core/paint/BoxModelObjectPainter.h"
 #include "core/paint/BoxPainter.h"
-#include "core/paint/LayoutObjectDrawingRecorder.h"
 #include "core/paint/PaintInfo.h"
 #include "core/paint/PaintLayer.h"
 #include "core/paint/ScrollRecorder.h"
 #include "core/paint/compositing/CompositedLayerMapping.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/graphics/paint/DrawingRecorder.h"
+#include "platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -63,8 +63,12 @@ void ViewPainter::PaintBoxDecorationBackground(const PaintInfo& paint_info) {
   IntRect background_rect(
       IntRect(layout_view_.OverflowClipRect(LayoutPoint())));
 
-  if (!RuntimeEnabledFeatures::RootLayerScrollingEnabled())
+  // When printing with root layer scrolling, we will paint the entire
+  // unclipped scrolling content area.
+  if (!RuntimeEnabledFeatures::RootLayerScrollingEnabled() ||
+      paint_info.IsPrinting()) {
     background_rect.Unite(layout_view_.DocumentRect());
+  }
 
   const DisplayItemClient* display_item_client = &layout_view_;
 

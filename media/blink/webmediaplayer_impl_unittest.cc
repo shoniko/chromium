@@ -21,8 +21,10 @@
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "cc/blink/web_layer_impl.h"
+#include "cc/test/test_context_provider.h"
 #include "media/base/media_log.h"
 #include "media/base/media_switches.h"
+#include "media/base/mock_media_log.h"
 #include "media/base/test_helpers.h"
 #include "media/blink/webmediaplayer_delegate.h"
 #include "media/blink/webmediaplayer_params.h"
@@ -44,6 +46,7 @@
 
 using ::testing::AnyNumber;
 using ::testing::InSequence;
+using ::testing::NiceMock;
 using ::testing::Return;
 using ::testing::ReturnRef;
 using ::testing::StrictMock;
@@ -59,6 +62,16 @@ const base::TimeDelta kMaxKeyframeDistanceToDisableBackgroundVideoMSE =
 
 int64_t OnAdjustAllocatedMemory(int64_t delta) {
   return 0;
+}
+
+MATCHER(WmpiDestroyed, "") {
+  return CONTAINS_STRING(arg, "WEBMEDIAPLAYER_DESTROYED {}");
+}
+
+MATCHER_P2(PlaybackRateChanged, old_rate_string, new_rate_string, "") {
+  return CONTAINS_STRING(arg, "Effective playback rate changed from " +
+                                  std::string(old_rate_string) + " to " +
+                                  std::string(new_rate_string));
 }
 
 mojom::VideoDecodeStatsRecorderPtr CreateCapabilitiesRecorder() {
@@ -240,12 +253,19 @@ class WebMediaPlayerImplTest : public testing::Test {
                                                   &web_frame_client_,
                                                   nullptr,
                                                   nullptr)),
+        context_provider_(cc::TestContextProvider::Create()),
         audio_parameters_(TestAudioParameters::Normal()) {
     media_thread_.StartAndWaitForTesting();
   }
 
   void InitializeWebMediaPlayerImpl() {
-    std::unique_ptr<MediaLog> media_log(new MediaLog());
+    auto media_log = std::make_unique<NiceMock<MockMediaLog>>();
+
+    // Retain a raw pointer to |media_log| for use by tests. Meanwhile, give its
+    // ownership to |wmpi_|. Reject attempts to reinitialize to prevent orphaned
+    // expectations on previous |media_log_|.
+    ASSERT_FALSE(media_log_) << "Reinitialization of media_log_ is disallowed";
+    media_log_ = media_log.get();
 
     auto factory_selector = base::MakeUnique<RendererFactorySelector>();
     factory_selector->AddFactory(
@@ -266,15 +286,16 @@ class WebMediaPlayerImplTest : public testing::Test {
             std::move(media_log), WebMediaPlayerParams::DeferLoadCB(),
             scoped_refptr<SwitchableAudioRendererSink>(),
             media_thread_.task_runner(), message_loop_.task_runner(),
-            message_loop_.task_runner(), WebMediaPlayerParams::Context3DCB(),
-            base::Bind(&OnAdjustAllocatedMemory), nullptr, nullptr,
-            RequestRoutingTokenCallback(), nullptr,
+            message_loop_.task_runner(), base::Bind(&OnAdjustAllocatedMemory),
+            nullptr, nullptr, RequestRoutingTokenCallback(), nullptr,
             kMaxKeyframeDistanceToDisableBackgroundVideo,
             kMaxKeyframeDistanceToDisableBackgroundVideoMSE, false, false,
-            provider_.get(),
-            base::Bind(&CreateCapabilitiesRecorder),
+            provider_.get(), base::Bind(&CreateCapabilitiesRecorder),
             base::Bind(&WebMediaPlayerImplTest::CreateMockSurfaceLayerBridge,
-                       base::Unretained(this))));
+                       base::Unretained(this)),
+            base::BindRepeating(&WebMediaPlayerImplTest::ProvideContext,
+                                base::Unretained(this)),
+            cc::TestContextProvider::Create()));
 }
 
   ~WebMediaPlayerImplTest() override {
@@ -288,6 +309,13 @@ class WebMediaPlayerImplTest : public testing::Test {
     base::RunLoop().RunUntilIdle();
 
     web_view_->Close();
+  }
+
+  void ProvideContext(
+      base::OnceCallback<void(viz::ContextProvider*)> callback) {
+    media_thread_.task_runner()->PostTask(
+        FROM_HERE, base::BindOnce(std::move(callback),
+                                  base::Unretained(context_provider_.get())));
   }
 
  protected:
@@ -445,6 +473,8 @@ class WebMediaPlayerImplTest : public testing::Test {
   blink::WebView* web_view_;
   blink::WebLocalFrame* web_local_frame_;
 
+  scoped_refptr<cc::TestContextProvider> context_provider_;
+
   std::unique_ptr<media::UrlIndex> url_index_;
 
   // Audio hardware configuration.
@@ -454,11 +484,15 @@ class WebMediaPlayerImplTest : public testing::Test {
   // may want a mock or intelligent fake.
   DummyWebMediaPlayerClient client_;
 
-  testing::NiceMock<MockWebMediaPlayerDelegate> delegate_;
+  NiceMock<MockWebMediaPlayerDelegate> delegate_;
 
   mojom::WatchTimeRecorderProviderPtr provider_;
 
   StrictMock<MockSurfaceLayerBridge>* surface_layer_bridge_ = nullptr;
+
+  // Only valid once set by InitializeWebMediaPlayerImpl(), this is for
+  // verifying a subset of potential media logs.
+  NiceMock<MockMediaLog>* media_log_ = nullptr;
 
   // The WebMediaPlayerImpl instance under test.
   std::unique_ptr<WebMediaPlayerImpl> wmpi_;
@@ -849,9 +883,9 @@ TEST_F(WebMediaPlayerImplTest, NaturalSizeChange_Rotated) {
   InitializeWebMediaPlayerImpl();
   PipelineMetadata metadata;
   metadata.has_video = true;
-  metadata.video_decoder_config = TestVideoConfig::Normal();
+  metadata.video_decoder_config =
+      TestVideoConfig::NormalRotated(VIDEO_ROTATION_90);
   metadata.natural_size = gfx::Size(320, 240);
-  metadata.video_rotation = VIDEO_ROTATION_90;
 
   OnMetadata(metadata);
   ASSERT_EQ(blink::WebSize(320, 240), wmpi_->NaturalSize());
@@ -966,6 +1000,22 @@ TEST_F(WebMediaPlayerImplTest, OnWebLayerReplacedGetsWebLayerFromBridge) {
   EXPECT_CALL(*surface_layer_bridge_, GetWebLayer())
       .WillRepeatedly(Return(web_layer.get()));
   wmpi_->OnWebLayerReplaced();
+}
+
+TEST_F(WebMediaPlayerImplTest, PlaybackRateChangeMediaLogs) {
+  InitializeWebMediaPlayerImpl();
+
+  {
+    InSequence s;
+
+    // Expect precisely one rate change log from this test case.
+    EXPECT_MEDIA_LOG_ON(*media_log_, PlaybackRateChanged("0", "0.8"));
+    EXPECT_MEDIA_LOG_ON(*media_log_, WmpiDestroyed());
+
+    wmpi_->SetRate(0.0);  // No change from initial rate, so no log.
+    wmpi_->SetRate(0.8);  // This should log change from 0 -> 0.8
+    wmpi_->SetRate(0.8);  // No change from previous rate, so no log.
+  }
 }
 
 class WebMediaPlayerImplBackgroundBehaviorTest
@@ -1101,17 +1151,12 @@ TEST_P(WebMediaPlayerImplBackgroundBehaviorTest, VideoOnly) {
   // Never disable video track for a video only stream.
   EXPECT_FALSE(ShouldDisableVideoWhenHidden());
 
-  // There's no optimization criteria for video only on Android.
-  bool matches_requirements =
-      IsAndroid() ||
-      ((GetDurationSec() < GetMaxKeyframeDistanceSec()) ||
-       (GetAverageKeyframeDistanceSec() < GetMaxKeyframeDistanceSec()));
-  EXPECT_EQ(matches_requirements, IsBackgroundOptimizationCandidate());
+  // Video only is always optimized.
+  EXPECT_TRUE(IsBackgroundOptimizationCandidate());
 
   // Video is always paused when suspension is on and only if matches the
   // optimization criteria if the optimization is on.
-  bool should_pause =
-      IsMediaSuspendOn() || (IsBackgroundPauseOn() && matches_requirements);
+  bool should_pause = IsMediaSuspendOn() || IsBackgroundPauseOn();
   EXPECT_EQ(should_pause, ShouldPauseVideoWhenHidden());
 }
 

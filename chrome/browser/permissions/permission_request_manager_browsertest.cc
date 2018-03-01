@@ -51,7 +51,6 @@ class PermissionRequestManagerBrowserTest : public InProcessBrowserTest {
     PermissionRequestManager* manager = GetPermissionRequestManager();
     mock_permission_prompt_factory_.reset(
         new MockPermissionPromptFactory(manager));
-    manager->DisplayPendingRequests();
   }
 
   void TearDownOnMainThread() override {
@@ -138,8 +137,8 @@ PermissionRequest* PermissionDialogTest::MakePermissionRequest(
   auto decided = [](bool, ContentSetting) {};
   auto cleanup = [] {};  // Leave cleanup to test harness destructor.
   owned_requests_.push_back(base::MakeUnique<PermissionRequestImpl>(
-      GetUrl(), permission, browser()->profile(), user_gesture,
-      base::Bind(decided), base::Bind(cleanup)));
+      GetUrl(), permission, user_gesture, base::Bind(decided),
+      base::Bind(cleanup)));
   return owned_requests_.back().get();
 }
 
@@ -203,7 +202,7 @@ void PermissionDialogTest::ShowDialog(const std::string& name) {
       ADD_FAILURE() << "Not a permission type, or one that doesn't prompt.";
       return;
   }
-  manager->DisplayPendingRequests();
+  base::RunLoop().RunUntilIdle();
 }
 
 // Requests before the load event should be bundled into one bubble.

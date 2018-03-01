@@ -306,8 +306,9 @@ class WebContentsAccessibilityAndroid::Connector
  public:
   Connector(WebContents* web_contents,
             WebContentsAccessibilityAndroid* accessibility);
+  ~Connector() override;
 
-  // RendetWidgetHostConnector implementation.
+  // RenderWidgetHostConnector:
   void UpdateRenderProcessConnection(
       RenderWidgetHostViewAndroid* old_rwhva,
       RenderWidgetHostViewAndroid* new_rhwva) override;
@@ -321,6 +322,10 @@ WebContentsAccessibilityAndroid::Connector::Connector(
     WebContentsAccessibilityAndroid* accessibility)
     : RenderWidgetHostConnector(web_contents), accessibility_(accessibility) {
   Initialize();
+}
+
+WebContentsAccessibilityAndroid::Connector::~Connector() {
+  accessibility_->UpdateEnabledState(false);
 }
 
 void WebContentsAccessibilityAndroid::Connector::UpdateRenderProcessConnection(
@@ -370,9 +375,10 @@ void WebContentsAccessibilityAndroid::Enable(JNIEnv* env,
 void WebContentsAccessibilityAndroid::UpdateEnabledState(bool enabled) {
   BrowserAccessibilityStateImpl* accessibility_state =
       BrowserAccessibilityStateImpl::GetInstance();
+  auto* manager = static_cast<BrowserAccessibilityManagerAndroid*>(
+      web_contents_->GetRootBrowserAccessibilityManager());
+
   if (enabled) {
-    auto* manager = static_cast<BrowserAccessibilityManagerAndroid*>(
-        web_contents_->GetRootBrowserAccessibilityManager());
     // First check if we already have a BrowserAccessibilityManager that
     // that needs to be connected to this instance. This can happen if
     // BAM creation precedes render view updates for the associated
@@ -390,6 +396,11 @@ void WebContentsAccessibilityAndroid::UpdateEnabledState(bool enabled) {
     if (accessibility_state->IsAccessibleBrowser())
       web_contents_->AddAccessibilityMode(ui::kAXModeComplete);
   } else {
+    // Remove accessibility from the BrowserAccessibilityManager or it may
+    // continue to reference this object which is no longer active (and may be
+    // about to be destroyed).
+    if (manager)
+      manager->set_web_contents_accessibility(nullptr);
     // Note that disabling part is not useful at this moment since the mode will
     // be enabled again almost immediately for the renderer process that just
     // got swapped in. This boolean enable/disable logic will be expanded
@@ -698,6 +709,7 @@ jboolean WebContentsAccessibilityAndroid::PopulateAccessibilityNodeInfo(
 
   Java_WebContentsAccessibility_setAccessibilityNodeInfoKitKatAttributes(
       env, obj, info, is_root, node->IsEditableText(),
+      base::android::ConvertUTF8ToJavaString(env, node->GetRoleString()),
       base::android::ConvertUTF16ToJavaString(env, node->GetRoleDescription()),
       base::android::ConvertUTF16ToJavaString(env, node->GetHint()),
       node->GetIntAttribute(ui::AX_ATTR_TEXT_SEL_START),
@@ -886,9 +898,11 @@ jboolean WebContentsAccessibilityAndroid::AdjustSlider(
     return false;
 
   // To behave similarly to an Android SeekBar, move by an increment of
-  // approximately 20%.
+  // approximately 5%.
   float original_value = value;
-  float delta = (max - min) / 5.0f;
+  float delta = (max - min) / 20.0f;
+  // Slider does not move if the delta value is less than 1.
+  delta = ((delta < 1) ? 1 : delta);
   value += (increment ? delta : -delta);
   value = std::max(std::min(value, max), min);
   if (value != original_value) {
@@ -986,6 +1000,17 @@ jboolean WebContentsAccessibilityAndroid::NextAtGranularity(
     return true;
   }
   return false;
+}
+
+jint WebContentsAccessibilityAndroid::GetTextLength(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jint unique_id) {
+  BrowserAccessibilityAndroid* node = GetAXFromUniqueID(unique_id);
+  if (!node)
+    return -1;
+  base::string16 text = node->GetText();
+  return text.size();
 }
 
 jboolean WebContentsAccessibilityAndroid::PreviousAtGranularity(

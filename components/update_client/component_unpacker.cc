@@ -12,7 +12,6 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
-#include "base/json/json_file_value_serializer.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
@@ -20,7 +19,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/sequenced_task_runner_handle.h"
-#include "base/values.h"
 #include "components/crx_file/crx_verifier.h"
 #include "components/update_client/component_patcher.h"
 #include "components/update_client/update_client.h"
@@ -28,26 +26,6 @@
 #include "third_party/zlib/google/zip.h"
 
 namespace update_client {
-
-// TODO(cpu): add a specific attribute check to a component json that the
-// extension unpacker will reject, so that a component cannot be installed
-// as an extension.
-std::unique_ptr<base::DictionaryValue> ReadManifest(
-    const base::FilePath& unpack_path) {
-  base::FilePath manifest =
-      unpack_path.Append(FILE_PATH_LITERAL("manifest.json"));
-  if (!base::PathExists(manifest))
-    return std::unique_ptr<base::DictionaryValue>();
-  JSONFileValueDeserializer deserializer(manifest);
-  std::string error;
-  std::unique_ptr<base::Value> root = deserializer.Deserialize(NULL, &error);
-  if (!root.get())
-    return std::unique_ptr<base::DictionaryValue>();
-  if (!root->IsType(base::Value::Type::DICTIONARY))
-    return std::unique_ptr<base::DictionaryValue>();
-  return std::unique_ptr<base::DictionaryValue>(
-      static_cast<base::DictionaryValue*>(root.release()));
-}
 
 ComponentUnpacker::Result::Result() {}
 
@@ -83,9 +61,9 @@ bool ComponentUnpacker::Verify() {
     return false;
   }
   const std::vector<std::vector<uint8_t>> required_keys = {pk_hash_};
-  const crx_file::VerifierResult result =
-      crx_file::Verify(path_, crx_file::VerifierFormat::CRX2_OR_CRX3,
-                       required_keys, std::vector<uint8_t>(), nullptr, nullptr);
+  const crx_file::VerifierResult result = crx_file::Verify(
+      path_, crx_file::VerifierFormat::CRX2_OR_CRX3, required_keys,
+      std::vector<uint8_t>(), &public_key_, nullptr);
   if (result != crx_file::VerifierResult::OK_FULL &&
       result != crx_file::VerifierResult::OK_DELTA) {
     error_ = UnpackerError::kInvalidFile;
@@ -143,7 +121,7 @@ bool ComponentUnpacker::BeginPatching() {
 void ComponentUnpacker::EndPatching(UnpackerError error, int extended_error) {
   error_ = error;
   extended_error_ = extended_error;
-  patcher_ = NULL;
+  patcher_ = nullptr;
 
   EndUnpacking();
 }
@@ -157,8 +135,10 @@ void ComponentUnpacker::EndUnpacking() {
   Result result;
   result.error = error_;
   result.extended_error = extended_error_;
-  if (error_ == UnpackerError::kNone)
+  if (error_ == UnpackerError::kNone) {
     result.unpack_path = unpack_path_;
+    result.public_key = public_key_;
+  }
 
   base::SequencedTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(callback_, result));

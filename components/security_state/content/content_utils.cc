@@ -64,8 +64,8 @@ void ExplainHTTPSecurity(
             l10n_util::GetStringUTF8(IDS_EDITED_NONSECURE),
             l10n_util::GetStringUTF8(IDS_EDITED_NONSECURE_DESCRIPTION)));
   }
-  if (security_info.displayed_password_field_on_http ||
-      security_info.displayed_credit_card_field_on_http) {
+  if (security_info.insecure_input_events.password_field_shown ||
+      security_info.insecure_input_events.credit_card_field_edited) {
     security_style_explanations->neutral_explanations.push_back(
         content::SecurityStyleExplanation(
             l10n_util::GetStringUTF8(IDS_PRIVATE_USER_DATA_INPUT),
@@ -93,12 +93,18 @@ void ExplainCertificateSecurity(
     const security_state::SecurityInfo& security_info,
     content::SecurityStyleExplanations* security_style_explanations) {
   if (security_info.sha1_in_chain) {
-    security_style_explanations->neutral_explanations.push_back(
-        content::SecurityStyleExplanation(
-            l10n_util::GetStringUTF8(IDS_SHA1),
-            l10n_util::GetStringUTF8(IDS_SHA1_DESCRIPTION),
-            security_info.certificate,
-            blink::WebMixedContentContextType::kNotMixedContent));
+    content::SecurityStyleExplanation explanation(
+        l10n_util::GetStringUTF8(IDS_SHA1),
+        l10n_util::GetStringUTF8(IDS_SHA1_DESCRIPTION),
+        security_info.certificate,
+        blink::WebMixedContentContextType::kNotMixedContent);
+    // The impact of SHA1 on the certificate status depends on
+    // the EnableSHA1ForLocalAnchors policy.
+    if (security_info.cert_status & net::CERT_STATUS_WEAK_SIGNATURE_ALGORITHM) {
+      security_style_explanations->insecure_explanations.push_back(explanation);
+    } else {
+      security_style_explanations->neutral_explanations.push_back(explanation);
+    }
   }
 
   if (security_info.cert_missing_subject_alt_name) {
@@ -193,10 +199,10 @@ void ExplainConnectionSecurity(
                                &is_tls13, cipher_suite);
   base::string16 protocol_name = base::ASCIIToUTF16(protocol);
   const base::string16 cipher_name =
-      (mac == NULL) ? base::ASCIIToUTF16(cipher)
-                    : l10n_util::GetStringFUTF16(IDS_CIPHER_WITH_MAC,
-                                                 base::ASCIIToUTF16(cipher),
-                                                 base::ASCIIToUTF16(mac));
+      (mac == nullptr) ? base::ASCIIToUTF16(cipher)
+                       : l10n_util::GetStringFUTF16(IDS_CIPHER_WITH_MAC,
+                                                    base::ASCIIToUTF16(cipher),
+                                                    base::ASCIIToUTF16(mac));
 
   // Include the key exchange group (previously known as curve) if specified.
   base::string16 key_exchange_name;
@@ -356,6 +362,8 @@ std::unique_ptr<security_state::VisibleSecurityState> GetVisibleSecurityState(
 
   content::NavigationEntry* entry =
       web_contents->GetController().GetVisibleEntry();
+  state->is_error_page =
+      entry && (entry->GetPageType() == content::PAGE_TYPE_ERROR);
   if (!entry || !entry->GetSSL().initialized)
     return state;
 
@@ -380,12 +388,6 @@ std::unique_ptr<security_state::VisibleSecurityState> GetVisibleSecurityState(
   state->contained_mixed_form =
       !!(ssl.content_status &
          content::SSLStatus::DISPLAYED_FORM_WITH_INSECURE_ACTION);
-  state->displayed_password_field_on_http =
-      !!(ssl.content_status &
-         content::SSLStatus::DISPLAYED_PASSWORD_FIELD_ON_HTTP);
-  state->displayed_credit_card_field_on_http =
-      !!(ssl.content_status &
-         content::SSLStatus::DISPLAYED_CREDIT_CARD_FIELD_ON_HTTP);
 
   SSLStatusInputEventData* input_events =
       static_cast<SSLStatusInputEventData*>(ssl.user_data.get());

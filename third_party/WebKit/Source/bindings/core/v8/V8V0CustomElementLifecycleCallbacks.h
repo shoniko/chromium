@@ -36,7 +36,7 @@
 #include "core/html/custom/V0CustomElementLifecycleCallbacks.h"
 #include "platform/bindings/ScopedPersistent.h"
 #include "platform/bindings/ScriptState.h"
-#include "platform/wtf/PassRefPtr.h"
+#include "platform/wtf/RefPtr.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -60,7 +60,7 @@ class V8V0CustomElementLifecycleCallbacks final
 
   bool SetBinding(std::unique_ptr<V0CustomElementBinding>);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   V8V0CustomElementLifecycleCallbacks(

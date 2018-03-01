@@ -42,6 +42,7 @@
 #include "content/shell/common/shell_messages.h"
 #include "content/shell/common/shell_switches.h"
 #include "media/media_features.h"
+#include "third_party/WebKit/public/web/WebPresentationReceiverFlags.h"
 
 namespace content {
 
@@ -80,11 +81,17 @@ Shell::Shell(WebContents* web_contents)
 #if defined(OS_MACOSX)
       url_edit_view_(NULL),
 #endif
-      headless_(false) {
+      headless_(false),
+      hide_toolbar_(false) {
   web_contents_->SetDelegate(this);
 
   if (switches::IsRunLayoutTestSwitchPresent())
     headless_ = true;
+
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kContentShellHideToolbar))
+    hide_toolbar_ = true;
+
   windows_.push_back(this);
 
   if (!shell_created_callback_.is_null()) {
@@ -184,6 +191,11 @@ Shell* Shell::CreateNewWindow(BrowserContext* browser_context,
                               const scoped_refptr<SiteInstance>& site_instance,
                               const gfx::Size& initial_size) {
   WebContents::CreateParams create_params(browser_context, site_instance);
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kForcePresentationReceiverForTesting)) {
+    create_params.starting_sandbox_flags =
+        blink::kPresentationReceiverSandboxFlags;
+  }
   create_params.initial_size = AdjustWindowSize(initial_size);
   WebContents* web_contents = WebContents::Create(create_params);
   Shell* shell = CreateShell(web_contents, create_params.initial_size);
@@ -523,7 +535,7 @@ gfx::Size Shell::GetShellDefaultSize() {
   return default_shell_size;
 }
 
-void Shell::TitleWasSet(NavigationEntry* entry, bool explicit_set) {
+void Shell::TitleWasSet(NavigationEntry* entry) {
   if (entry)
     PlatformSetTitle(entry->GetTitle());
 }

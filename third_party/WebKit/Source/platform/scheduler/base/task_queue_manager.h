@@ -11,6 +11,7 @@
 #include "base/cancelable_callback.h"
 #include "base/debug/task_annotator.h"
 #include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/pending_task.h"
@@ -30,6 +31,9 @@ class ConvertableToTraceFormat;
 
 namespace blink {
 namespace scheduler {
+namespace task_queue_manager_unittest {
+class TaskQueueManagerTest;
+}
 namespace internal {
 class TaskQueueImpl;
 }  // namespace internal
@@ -67,12 +71,12 @@ class PLATFORM_EXPORT TaskQueueManager
   // These tasks are de-duplicated in two buckets: main-thread and all other
   // threads.  This distinction is done to reduce the overehead from locks, we
   // assume the main-thread path will be hot.
-  void MaybeScheduleImmediateWork(const tracked_objects::Location& from_here);
+  void MaybeScheduleImmediateWork(const base::Location& from_here);
 
   // Requests that a delayed task to process work is posted on the main task
   // runner. These delayed tasks are de-duplicated. Must be called on the thread
   // this class was created on.
-  void MaybeScheduleDelayedWork(const tracked_objects::Location& from_here,
+  void MaybeScheduleDelayedWork(const base::Location& from_here,
                                 TimeDomain* requesting_time_domain,
                                 base::TimeTicks now,
                                 base::TimeTicks run_time);
@@ -106,7 +110,6 @@ class PLATFORM_EXPORT TaskQueueManager
                                                Args&&... args) {
     scoped_refptr<TaskQueueType> task_queue(new TaskQueueType(
         CreateTaskQueueImpl(spec), std::forward<Args>(args)...));
-    RegisterTaskQueue(task_queue);
     return task_queue;
   }
 
@@ -117,6 +120,8 @@ class PLATFORM_EXPORT TaskQueueManager
     virtual void OnTriedToExecuteBlockedTask() = 0;
 
     virtual void OnBeginNestedRunLoop() = 0;
+
+    virtual void OnExitNestedRunLoop() = 0;
   };
 
   // Called once to set the Observer. This function is called on the main
@@ -151,10 +156,17 @@ class PLATFORM_EXPORT TaskQueueManager
   // Removes all canceled delayed tasks.
   void SweepCanceledDelayedTasks();
 
+  // Unregisters a TaskQueue previously created by |NewTaskQueue()|.
+  // No tasks will run on this queue after this call.
+  void UnregisterTaskQueueImpl(
+      std::unique_ptr<internal::TaskQueueImpl> task_queue);
+
+  base::WeakPtr<TaskQueueManager> GetWeakPtr();
+
  protected:
   friend class LazyNow;
   friend class internal::TaskQueueImpl;
-  friend class TaskQueueManagerTest;
+  friend class task_queue_manager_unittest::TaskQueueManagerTest;
 
   // Intermediate data structure, used to compute NextDelayedDoWork.
   class NextTaskDelay {
@@ -218,15 +230,6 @@ class PLATFORM_EXPORT TaskQueueManager
     TimeDomain* time_domain_;
   };
 
-  class DeletionSentinel : public base::RefCounted<DeletionSentinel> {
-   private:
-    friend class base::RefCounted<DeletionSentinel>;
-    ~DeletionSentinel() {}
-  };
-
-  // Unregisters a TaskQueue previously created by |NewTaskQueue()|.
-  void UnregisterTaskQueue(scoped_refptr<TaskQueue> task_queue);
-
   // TaskQueueSelector::Observer implementation:
   void OnTaskQueueEnabled(internal::TaskQueueImpl* queue) override;
   void OnTriedToSelectBlockedWorkQueue(
@@ -272,7 +275,7 @@ class PLATFORM_EXPORT TaskQueueManager
                                              base::TimeTicks* time_after_task);
 
   bool RunsTasksInCurrentSequence() const;
-  bool PostNonNestableDelayedTask(const tracked_objects::Location& from_here,
+  bool PostNonNestableDelayedTask(const base::Location& from_here,
                                   const base::Closure& task,
                                   base::TimeDelta delay);
 
@@ -287,9 +290,8 @@ class PLATFORM_EXPORT TaskQueueManager
   AsValueWithSelectorResult(bool should_run,
                             internal::WorkQueue* selected_work_queue) const;
 
-  void MaybeScheduleImmediateWorkLocked(
-      const tracked_objects::Location& from_here,
-      MoveableAutoLock lock);
+  void MaybeScheduleImmediateWorkLocked(const base::Location& from_here,
+                                        MoveableAutoLock lock);
 
   // Adds |queue| to |any_thread().has_incoming_immediate_work_| and if
   // |queue_is_blocked| is false it makes sure a DoWork is posted.
@@ -308,16 +310,22 @@ class PLATFORM_EXPORT TaskQueueManager
 
   std::unique_ptr<internal::TaskQueueImpl> CreateTaskQueueImpl(
       const TaskQueue::Spec& spec);
-  void RegisterTaskQueue(scoped_refptr<TaskQueue> task_queue);
+
+  // Deletes queues marked for deletion and empty queues marked for shutdown.
+  void CleanUpQueues();
 
   std::set<TimeDomain*> time_domains_;
   std::unique_ptr<RealTimeDomain> real_time_domain_;
 
-  std::set<scoped_refptr<TaskQueue>> queues_;
+  // List of task queues managed by this TaskQueueManager.
+  // - active_queues contains queues owned by relevant TaskQueues.
+  // - queues_to_delete contains soon-to-be-deleted queues, because some
+  // internal
+  //   scheduling code does not expect queues to be pulled from underneath.
 
-  // We have to be careful when deleting a queue because some of the code uses
-  // raw pointers and doesn't expect the rug to be pulled out from underneath.
-  std::set<scoped_refptr<TaskQueue>> queues_to_delete_;
+  std::set<internal::TaskQueueImpl*> active_queues_;
+  std::map<internal::TaskQueueImpl*, std::unique_ptr<internal::TaskQueueImpl>>
+      queues_to_delete_;
 
   internal::EnqueueOrderGenerator enqueue_order_generator_;
   base::debug::TaskAnnotator task_annotator_;
@@ -369,7 +377,6 @@ class PLATFORM_EXPORT TaskQueueManager
   internal::TaskQueueImpl* currently_executing_task_queue_;  // NOT OWNED
 
   Observer* observer_;  // NOT OWNED
-  scoped_refptr<DeletionSentinel> deletion_sentinel_;
   base::WeakPtrFactory<TaskQueueManager> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskQueueManager);

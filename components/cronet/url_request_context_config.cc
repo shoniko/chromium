@@ -48,7 +48,6 @@ const char kQuicMaxServerConfigsStoredInProperties[] =
     "max_server_configs_stored_in_properties";
 const char kQuicIdleConnectionTimeoutSeconds[] =
     "idle_connection_timeout_seconds";
-const char kQuicCloseSessionsOnIpChange[] = "close_sessions_on_ip_change";
 const char kQuicMigrateSessionsOnNetworkChange[] =
     "migrate_sessions_on_network_change";
 const char kQuicUserAgentId[] = "user_agent_id";
@@ -92,9 +91,6 @@ const char kHostResolverRules[] = "host_resolver_rules";
 
 // NetworkQualityEstimator (NQE) experiment dictionary name.
 const char kNetworkQualityEstimatorFieldTrialName[] = "NetworkQualityEstimator";
-// Name of the boolean to enable reading of the persistent prefs in NQE.
-const char kNQEPersistentCacheReadingEnabled[] =
-    "persistent_cache_reading_enabled";
 
 // Disable IPv6 when on WiFi. This is a workaround for a known issue on certain
 // Android phones, and should not be necessary when not on one of those devices.
@@ -139,7 +135,6 @@ URLRequestContextConfig::URLRequestContextConfig(
     bool enable_quic,
     const std::string& quic_user_agent_id,
     bool enable_spdy,
-    bool enable_sdch,
     bool enable_brotli,
     HttpCacheType http_cache,
     int http_cache_max_size,
@@ -154,7 +149,6 @@ URLRequestContextConfig::URLRequestContextConfig(
     : enable_quic(enable_quic),
       quic_user_agent_id(quic_user_agent_id),
       enable_spdy(enable_spdy),
-      enable_sdch(enable_sdch),
       enable_brotli(enable_brotli),
       http_cache(http_cache),
       http_cache_max_size(http_cache_max_size),
@@ -166,7 +160,6 @@ URLRequestContextConfig::URLRequestContextConfig(
       bypass_public_key_pinning_for_local_trust_anchors(
           bypass_public_key_pinning_for_local_trust_anchors),
       cert_verifier_data(cert_verifier_data),
-      nqe_persistent_caching_enabled(false),
       experimental_options(experimental_options) {}
 
 URLRequestContextConfig::~URLRequestContextConfig() {}
@@ -247,13 +240,6 @@ void URLRequestContextConfig::ParseAndSetExperimentalOptions(
                                 &quic_idle_connection_timeout_seconds)) {
         session_params->quic_idle_connection_timeout_seconds =
             quic_idle_connection_timeout_seconds;
-      }
-
-      bool quic_close_sessions_on_ip_change = false;
-      if (quic_args->GetBoolean(kQuicCloseSessionsOnIpChange,
-                                &quic_close_sessions_on_ip_change)) {
-        session_params->quic_close_sessions_on_ip_change =
-            quic_close_sessions_on_ip_change;
       }
 
       bool quic_migrate_sessions_on_network_change = false;
@@ -371,12 +357,6 @@ void URLRequestContextConfig::ParseAndSetExperimentalOptions(
         continue;
       }
 
-      bool persistent_caching_enabled;
-      if (nqe_args->GetBoolean(kNQEPersistentCacheReadingEnabled,
-                               &persistent_caching_enabled)) {
-        nqe_persistent_caching_enabled = persistent_caching_enabled;
-      }
-
       std::string nqe_option;
       if (nqe_args->GetString(net::kForceEffectiveConnectionType,
                               &nqe_option)) {
@@ -444,7 +424,6 @@ void URLRequestContextConfig::ConfigureURLRequestContextBuilder(
     context_builder->DisableHttpCache();
   }
   context_builder->set_user_agent(user_agent);
-  context_builder->set_sdch_enabled(enable_sdch);
   net::HttpNetworkSession::Params session_params;
   session_params.enable_http2 = enable_spdy;
   session_params.enable_quic = enable_quic;
@@ -480,9 +459,9 @@ URLRequestContextConfigBuilder::~URLRequestContextConfigBuilder() {}
 std::unique_ptr<URLRequestContextConfig>
 URLRequestContextConfigBuilder::Build() {
   return base::MakeUnique<URLRequestContextConfig>(
-      enable_quic, quic_user_agent_id, enable_spdy, enable_sdch, enable_brotli,
-      http_cache, http_cache_max_size, load_disable_cache, storage_path,
-      user_agent, experimental_options, std::move(mock_cert_verifier),
+      enable_quic, quic_user_agent_id, enable_spdy, enable_brotli, http_cache,
+      http_cache_max_size, load_disable_cache, storage_path, user_agent,
+      experimental_options, std::move(mock_cert_verifier),
       enable_network_quality_estimator,
       bypass_public_key_pinning_for_local_trust_anchors, cert_verifier_data);
 }

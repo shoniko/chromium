@@ -43,14 +43,15 @@ class VIZ_COMMON_EXPORT InProcessContextProvider : public ContextProvider {
       const gpu::SharedMemoryLimits& limits,
       InProcessContextProvider* shared_context);
 
-  bool BindToCurrentThread() override;
+  gpu::ContextResult BindToCurrentThread() override;
   gpu::gles2::GLES2Interface* ContextGL() override;
   gpu::ContextSupport* ContextSupport() override;
   class GrContext* GrContext() override;
   ContextCacheController* CacheController() override;
   void InvalidateGrContext(uint32_t state) override;
   base::Lock* GetLock() override;
-  gpu::Capabilities ContextCapabilities() override;
+  const gpu::Capabilities& ContextCapabilities() const override;
+  const gpu::GpuFeatureInfo& GetGpuFeatureInfo() const override;
   void SetLostContextCallback(
       const LostContextCallback& lost_context_callback) override;
 
@@ -73,6 +74,7 @@ class VIZ_COMMON_EXPORT InProcessContextProvider : public ContextProvider {
 
   base::Lock context_lock_;
   std::unique_ptr<gpu::GLInProcessContext> context_;
+  gpu::ContextResult context_result_;
   std::unique_ptr<skia_bindings::GrContextForGLES2Interface> gr_context_;
   std::unique_ptr<ContextCacheController> cache_controller_;
 };

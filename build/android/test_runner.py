@@ -36,10 +36,13 @@ from devil.utils import run_tests_helper
 from pylib import constants
 from pylib.base import base_test_result
 from pylib.base import environment_factory
+from pylib.base import output_manager
+from pylib.base import output_manager_factory
 from pylib.base import test_instance_factory
 from pylib.base import test_run_factory
 from pylib.results import json_results
 from pylib.results import report_results
+from pylib.results.presentation import test_results_presentation
 from pylib.utils import logdog_helper
 from pylib.utils import logging_utils
 
@@ -76,8 +79,9 @@ def AddTestLauncherOptions(parser):
       '--test-launcher-summary-output',
       '--json-results-file',
       dest='json_results_file', type=os.path.realpath,
-      help='If set, will dump results in JSON form '
-           'to specified file.')
+      help='If set, will dump results in JSON form to the specified file. '
+           'Note that this will also trigger saving per-test logcats to '
+           'logdog.')
   parser.add_argument(
       '--test-launcher-shard-index',
       type=int, default=os.environ.get('GTEST_SHARD_INDEX', 0),
@@ -152,6 +156,12 @@ def AddCommonOptions(parser):
       '-e', '--environment',
       default='local', choices=constants.VALID_ENVIRONMENTS,
       help='Test environment to run in (default: %(default)s).')
+
+  parser.add_argument(
+      '--local-output',
+      action='store_true',
+      help='Whether to archive test output locally and generate '
+           'a local results detail page.')
 
   class FastLocalDevAction(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
@@ -247,12 +257,6 @@ def AddDeviceOptions(parser):
            'speed up local development and never on bots '
                      '(increases flakiness)')
   parser.add_argument(
-      '--target-devices-file',
-      type=os.path.realpath,
-      help='Path to file with json list of device serials to '
-           'run tests on. When not specified, all available '
-           'devices are used.')
-  parser.add_argument(
       '--tool',
       dest='tool',
       help='Run the test under a tool '
@@ -333,6 +337,10 @@ def AddGTestOptions(parser):
       '--test-apk-incremental-install-json',
       type=os.path.realpath,
       help='Path to install json for the test apk.')
+  parser.add_argument(
+      '-w', '--wait-for-java-debugger', action='store_true',
+      help='Wait for java debugger to attach before running any application '
+           'code. Also disables test timeouts and sets retries=0.')
 
   filter_group = parser.add_mutually_exclusive_group()
   filter_group.add_argument(
@@ -344,6 +352,11 @@ def AddGTestOptions(parser):
       dest='test_filter_file', type=os.path.realpath,
       help='Path to file that contains googletest-style filter strings. '
            'See also //testing/buildbot/filters/README.md.')
+
+  parser.add_argument(
+      '--gs-test-artifacts-bucket',
+      help=('If present, test artifacts will be uploaded to this Google '
+            'Storage bucket.'))
 
 
 def AddInstrumentationTestOptions(parser):
@@ -475,6 +488,10 @@ def AddInstrumentationTestOptions(parser):
       '--ui-screenshot-directory',
       dest='ui_screenshot_dir', type=os.path.realpath,
       help='Destination for screenshots captured by the tests')
+  parser.add_argument(
+      '-w', '--wait-for-java-debugger', action='store_true',
+      help='Wait for java debugger to attach before running any application '
+           'code. Also disables test timeouts and sets retries=0.')
 
   # These arguments are suppressed from the help text because they should
   # only ever be specified by an intermediate script.
@@ -607,18 +624,9 @@ def AddPerfTestOptions(parser):
       action='store_true',
       help='Cache the telemetry chartjson output from each step for later use.')
   parser.add_argument(
-      '--collect-json-data',
-      action='store_true',
-      help='Cache the telemetry JSON output from each step for later use.')
-  parser.add_argument(
       '--dry-run',
       action='store_true',
       help='Just print the steps without executing.')
-  parser.add_argument(
-      '--flaky-steps',
-      type=os.path.realpath,
-      help='A JSON file containing steps that are flaky '
-           'and will have its exit code ignored.')
   # TODO(rnephew): Remove this when everything moves to new option in platform
   # mode.
   parser.add_argument(
@@ -654,10 +662,6 @@ def AddPerfTestOptions(parser):
       metavar='FILENAME', type=os.path.realpath,
       help='Write the cached output directory archived by a step into the'
       ' given ZIP file.')
-  parser.add_argument(
-      '--output-json-data',
-      type=os.path.realpath,
-      help='Writes telemetry JSON formatted output into the given file.')
   parser.add_argument(
       '--output-json-list',
       type=os.path.realpath,
@@ -833,69 +837,85 @@ def RunTestsInPlatformMode(args):
 
   ### Set up test objects.
 
-  env = environment_factory.CreateEnvironment(args, infra_error)
+  out_manager = output_manager_factory.CreateOutputManager(args)
+  env = environment_factory.CreateEnvironment(
+      args, out_manager, infra_error)
   test_instance = test_instance_factory.CreateTestInstance(args, infra_error)
   test_run = test_run_factory.CreateTestRun(
       args, env, test_instance, infra_error)
 
   ### Run.
+  with out_manager:
+    with json_writer, logcats_uploader, env, test_instance, test_run:
 
-  with json_writer, logcats_uploader, env, test_instance, test_run:
+      repetitions = (xrange(args.repeat + 1) if args.repeat >= 0
+                     else itertools.count())
+      result_counts = collections.defaultdict(
+          lambda: collections.defaultdict(int))
+      iteration_count = 0
+      for _ in repetitions:
+        raw_results = test_run.RunTests()
+        if not raw_results:
+          continue
 
-    repetitions = (xrange(args.repeat + 1) if args.repeat >= 0
-                   else itertools.count())
-    result_counts = collections.defaultdict(
-        lambda: collections.defaultdict(int))
-    iteration_count = 0
-    for _ in repetitions:
-      raw_results = test_run.RunTests()
-      if not raw_results:
-        continue
+        all_raw_results.append(raw_results)
 
-      all_raw_results.append(raw_results)
+        iteration_results = base_test_result.TestRunResults()
+        for r in reversed(raw_results):
+          iteration_results.AddTestRunResults(r)
+        all_iteration_results.append(iteration_results)
 
-      iteration_results = base_test_result.TestRunResults()
-      for r in reversed(raw_results):
-        iteration_results.AddTestRunResults(r)
-      all_iteration_results.append(iteration_results)
+        iteration_count += 1
+        for r in iteration_results.GetAll():
+          result_counts[r.GetName()][r.GetType()] += 1
+        report_results.LogFull(
+            results=iteration_results,
+            test_type=test_instance.TestType(),
+            test_package=test_run.TestPackage(),
+            annotation=getattr(args, 'annotations', None),
+            flakiness_server=getattr(args, 'flakiness_dashboard_server',
+                                     None))
+        if args.break_on_failure and not iteration_results.DidRunPass():
+          break
 
-      iteration_count += 1
-      for r in iteration_results.GetAll():
-        result_counts[r.GetName()][r.GetType()] += 1
-      report_results.LogFull(
-          results=iteration_results,
-          test_type=test_instance.TestType(),
-          test_package=test_run.TestPackage(),
-          annotation=getattr(args, 'annotations', None),
-          flakiness_server=getattr(args, 'flakiness_dashboard_server',
-                                   None))
-      if args.break_on_failure and not iteration_results.DidRunPass():
-        break
+      if iteration_count > 1:
+        # display summary results
+        # only display results for a test if at least one test did not pass
+        all_pass = 0
+        tot_tests = 0
+        for test_name in result_counts:
+          tot_tests += 1
+          if any(result_counts[test_name][x] for x in (
+              base_test_result.ResultType.FAIL,
+              base_test_result.ResultType.CRASH,
+              base_test_result.ResultType.TIMEOUT,
+              base_test_result.ResultType.UNKNOWN)):
+            logging.critical(
+                '%s: %s',
+                test_name,
+                ', '.join('%s %s' % (str(result_counts[test_name][i]), i)
+                          for i in base_test_result.ResultType.GetTypes()))
+          else:
+            all_pass += 1
 
-    if iteration_count > 1:
-      # display summary results
-      # only display results for a test if at least one test did not pass
-      all_pass = 0
-      tot_tests = 0
-      for test_name in result_counts:
-        tot_tests += 1
-        if any(result_counts[test_name][x] for x in (
-            base_test_result.ResultType.FAIL,
-            base_test_result.ResultType.CRASH,
-            base_test_result.ResultType.TIMEOUT,
-            base_test_result.ResultType.UNKNOWN)):
-          logging.critical(
-              '%s: %s',
-              test_name,
-              ', '.join('%s %s' % (str(result_counts[test_name][i]), i)
-                        for i in base_test_result.ResultType.GetTypes()))
-        else:
-          all_pass += 1
+        logging.critical('%s of %s tests passed in all %s runs',
+                         str(all_pass),
+                         str(tot_tests),
+                         str(iteration_count))
 
-      logging.critical('%s of %s tests passed in all %s runs',
-                       str(all_pass),
-                       str(tot_tests),
-                       str(iteration_count))
+    if args.local_output and args.json_results_file:
+      with out_manager.ArchivedTempfile(
+          'test_results_presentation.html',
+          'test_results_presentation',
+          output_manager.Datatype.HTML) as results_detail_file:
+        result_html_string, _, _ = test_results_presentation.result_details(
+            json_path=args.json_results_file,
+            test_name=args.command,
+            cs_base_url='http://cs.chromium.org',
+            local_output=True)
+        results_detail_file.write(result_html_string)
+        results_detail_file.flush()
+      logging.critical('TEST RESULTS: %s', results_detail_file.Link())
 
   if args.command == 'perf' and (args.steps or args.single_step):
     return 0
@@ -982,6 +1002,9 @@ def main():
       args.enable_concurrent_adb):
     parser.error('--replace-system-package and --enable-concurrent-adb cannot '
                  'be used together')
+
+  if hasattr(args, 'wait_for_java_debugger') and args.wait_for_java_debugger:
+    args.num_retries = 0
 
   try:
     return RunTestsCommand(args)

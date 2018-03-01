@@ -21,7 +21,6 @@
 #ifndef StylePropertySet_h
 #define StylePropertySet_h
 
-#include <algorithm>
 #include "core/CSSPropertyNames.h"
 #include "core/CoreExport.h"
 #include "core/css/CSSPrimitiveValue.h"
@@ -135,8 +134,8 @@ class CORE_EXPORT StylePropertySet
 
   bool PropertyMatches(CSSPropertyID, const CSSValue&) const;
 
-  DECLARE_TRACE();
-  DEFINE_INLINE_TRACE_AFTER_DISPATCH() {}
+  void Trace(blink::Visitor*);
+  void TraceAfterDispatch(blink::Visitor* visitor) {}
 
  protected:
   enum { kMaxArraySize = (1 << 28) - 1 };
@@ -145,9 +144,14 @@ class CORE_EXPORT StylePropertySet
       : css_parser_mode_(css_parser_mode), is_mutable_(true), array_size_(0) {}
 
   StylePropertySet(CSSParserMode css_parser_mode, unsigned immutable_array_size)
-      : css_parser_mode_(css_parser_mode),
-        is_mutable_(false),
-        array_size_(std::min(immutable_array_size, unsigned(kMaxArraySize))) {}
+      : css_parser_mode_(css_parser_mode), is_mutable_(false) {
+    // Avoid min()/max() from std here in the header, because that would require
+    // inclusion of <algorithm>, which is slow to compile.
+    if (immutable_array_size < unsigned(kMaxArraySize))
+      array_size_ = immutable_array_size;
+    else
+      array_size_ = unsigned(kMaxArraySize);
+  }
 
   unsigned css_parser_mode_ : 3;
   mutable unsigned is_mutable_ : 1;
@@ -165,7 +169,7 @@ class CSSLazyPropertyParser
   CSSLazyPropertyParser() {}
   virtual ~CSSLazyPropertyParser() {}
   virtual StylePropertySet* ParseProperties() = 0;
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 };
 
 class CORE_EXPORT ImmutableStylePropertySet : public StylePropertySet {
@@ -183,7 +187,7 @@ class CORE_EXPORT ImmutableStylePropertySet : public StylePropertySet {
   template <typename T>  // CSSPropertyID or AtomicString
   int FindPropertyIndex(T property) const;
 
-  DECLARE_TRACE_AFTER_DISPATCH();
+  void TraceAfterDispatch(blink::Visitor*);
 
   void* operator new(std::size_t, void* location) { return location; }
 
@@ -265,7 +269,7 @@ class CORE_EXPORT MutableStylePropertySet : public StylePropertySet {
   template <typename T>  // CSSPropertyID or AtomicString
   int FindPropertyIndex(T property) const;
 
-  DECLARE_TRACE_AFTER_DISPATCH();
+  void TraceAfterDispatch(blink::Visitor*);
 
  private:
   explicit MutableStylePropertySet(CSSParserMode);

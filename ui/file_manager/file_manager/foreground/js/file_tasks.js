@@ -100,6 +100,22 @@ FileTasks.VIDEO_PLAYER_ID = 'jcgeabjmjgoblfofpppfkcoakmfobdko';
 FileTasks.ZIP_UNPACKER_TASK_ID = 'oedeeodfidgoollimchfdnbmhcpnklnd|app|zip';
 
 /**
+ * The task id of unzip action of Zip Archiver app.
+ * @const
+ * @type {string}
+ */
+FileTasks.ZIP_ARCHIVER_UNZIP_TASK_ID =
+    'dmboannefpncccogfdikhmhpmdnddgoe|app|open';
+
+/**
+ * The task id of zip action of Zip Archiver app.
+ * @const
+ * @type {string}
+ */
+FileTasks.ZIP_ARCHIVER_ZIP_TASK_ID =
+    'dmboannefpncccogfdikhmhpmdnddgoe|app|pack';
+
+/**
  * Available tasks in task menu button.
  * @enum {string}
  */
@@ -118,6 +134,13 @@ FileTasks.TaskPickerType = {
   OpenWith: 'OpenWith',
   MoreActions: 'MoreActions'
 };
+
+/**
+ * A promise to obtain 'enable-zip-archiver-unpacker' switch.
+ * @type {Promise<boolean>}
+ * @private
+ */
+FileTasks.zipArchiverUnpackerEnabledPromise_ = null;
 
 /**
  * Creates an instance of FileTasks for the specified list of entries with mime
@@ -147,7 +170,35 @@ FileTasks.create = function(
         Promise.reject();
         return;
       }
-      fulfill(FileTasks.annotateTasks_(assert(taskItems), entries));
+
+      // Filters out Pack with Zip Archiver task because it will be accessible
+      // via 'Zip selection' context menu button
+      taskItems = taskItems.filter(function(item) {
+        return item.taskId !== FileTasks.ZIP_ARCHIVER_ZIP_TASK_ID;
+      });
+
+      // Filters out Unpack with Zip Archiver task if switch is not enabled.
+      // TODO(klemenko): Remove this when http://crbug/359837 is finished.
+      if (!FileTasks.zipArchiverUnpackerEnabledPromise_) {
+        FileTasks.zipArchiverUnpackerEnabledPromise_ =
+            new Promise(function(resolve, reject) {
+              chrome.commandLinePrivate.hasSwitch(
+                  'enable-zip-archiver-unpacker', function(enabled) {
+                    resolve(enabled);
+                  });
+            });
+      }
+
+      FileTasks.zipArchiverUnpackerEnabledPromise_.then(function(
+          zipArchiverUnpackerEnabled) {
+        if (!zipArchiverUnpackerEnabled) {
+          taskItems = taskItems.filter(function(item) {
+            return item.taskId !== FileTasks.ZIP_ARCHIVER_UNZIP_TASK_ID;
+          });
+        }
+
+        fulfill(FileTasks.annotateTasks_(assert(taskItems), entries));
+      });
     });
   });
 

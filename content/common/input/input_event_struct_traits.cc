@@ -119,6 +119,9 @@ bool StructTraits<content::mojom::EventDataView, InputEventUniquePtr>::Read(
     gesture_event->y = gesture_data->widget_position.y();
     gesture_event->global_x = gesture_data->screen_position.x();
     gesture_event->global_y = gesture_data->screen_position.y();
+    gesture_event->is_source_touch_event_set_non_blocking =
+        gesture_data->is_source_touch_event_set_non_blocking;
+    gesture_event->primary_pointer_type = gesture_data->primary_pointer_type;
     gesture_event->source_device = gesture_data->source_device;
     gesture_event->unique_touch_event_id = gesture_data->unique_touch_event_id;
     gesture_event->resending_plugin_id = gesture_data->resending_plugin_id;
@@ -200,8 +203,6 @@ bool StructTraits<content::mojom::EventDataView, InputEventUniquePtr>::Read(
                 .previous_update_in_sequence_prevented =
                 gesture_data->scroll_data->update_details
                     ->previous_update_in_sequence_prevented;
-            gesture_event->data.scroll_update.prevent_propagation =
-                gesture_data->scroll_data->update_details->prevent_propagation;
           }
           break;
       }
@@ -253,8 +254,6 @@ bool StructTraits<content::mojom::EventDataView, InputEventUniquePtr>::Read(
                 .previous_update_in_sequence_prevented =
                 gesture_data->scroll_data->update_details
                     ->previous_update_in_sequence_prevented;
-            gesture_event->data.scroll_update.prevent_propagation =
-                gesture_data->scroll_data->update_details->prevent_propagation;
           }
           break;
       }
@@ -428,6 +427,9 @@ StructTraits<content::mojom::EventDataView, InputEventUniquePtr>::gesture_data(
   gesture_data->screen_position = gesture_event->PositionInScreen();
   gesture_data->widget_position = gesture_event->PositionInWidget();
   gesture_data->source_device = gesture_event->source_device;
+  gesture_data->is_source_touch_event_set_non_blocking =
+      gesture_event->is_source_touch_event_set_non_blocking;
+  gesture_data->primary_pointer_type = gesture_event->primary_pointer_type;
   gesture_data->unique_touch_event_id = gesture_event->unique_touch_event_id;
   gesture_data->resending_plugin_id = gesture_event->resending_plugin_id;
   switch (gesture_event->GetType()) {
@@ -488,8 +490,7 @@ StructTraits<content::mojom::EventDataView, InputEventUniquePtr>::gesture_data(
               gesture_event->data.scroll_update.velocity_x,
               gesture_event->data.scroll_update.velocity_y,
               gesture_event->data.scroll_update
-                  .previous_update_in_sequence_prevented,
-              gesture_event->data.scroll_update.prevent_propagation));
+                  .previous_update_in_sequence_prevented));
       break;
     case blink::WebInputEvent::Type::kGestureFlingStart:
       gesture_data->fling_data = content::mojom::FlingData::New(

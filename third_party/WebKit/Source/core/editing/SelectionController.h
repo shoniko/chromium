@@ -28,8 +28,9 @@
 #define SelectionController_h
 
 #include "core/CoreExport.h"
-#include "core/dom/SynchronousMutationObserver.h"
+#include "core/dom/DocumentShutdownObserver.h"
 #include "core/editing/FrameSelection.h"
+#include "core/editing/PositionWithAffinity.h"
 #include "core/editing/TextGranularity.h"
 #include "core/page/EventWithHitTestResults.h"
 #include "platform/heap/Handle.h"
@@ -41,20 +42,19 @@ class LocalFrame;
 
 class CORE_EXPORT SelectionController final
     : public GarbageCollectedFinalized<SelectionController>,
-      public SynchronousMutationObserver {
+      public DocumentShutdownObserver {
   WTF_MAKE_NONCOPYABLE(SelectionController);
   USING_GARBAGE_COLLECTED_MIXIN(SelectionController);
 
  public:
   static SelectionController* Create(LocalFrame&);
   virtual ~SelectionController();
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   bool HandleMousePressEvent(const MouseEventWithHitTestResults&);
   void HandleMouseDraggedEvent(const MouseEventWithHitTestResults&,
                                const IntPoint&,
                                const LayoutPoint&,
-                               Node*,
                                const IntPoint&);
   bool HandleMouseReleaseEvent(const MouseEventWithHitTestResults&,
                                const LayoutPoint&);
@@ -63,9 +63,8 @@ class CORE_EXPORT SelectionController final
   void HandleGestureTwoFingerTap(const GestureEventWithHitTestResults&);
   void HandleGestureLongTap(const GestureEventWithHitTestResults&);
 
-  void UpdateSelectionForMouseDrag(Node*, const LayoutPoint&, const IntPoint&);
+  void UpdateSelectionForMouseDrag(const LayoutPoint&, const IntPoint&);
   void UpdateSelectionForMouseDrag(const HitTestResult&,
-                                   Node*,
                                    const LayoutPoint&,
                                    const IntPoint&);
   void SendContextMenuEvent(const MouseEventWithHitTestResults&,
@@ -120,7 +119,7 @@ class CORE_EXPORT SelectionController final
 
   FrameSelection& Selection() const;
 
-  // Implements |SynchronousMutationObserver|.
+  // Implements |DocumentShutdownObserver|.
   // TODO(yosin): We should relocate |m_originalBaseInFlatTree| when DOM tree
   // changed.
   void ContextDestroyed(Document*) final;
@@ -128,6 +127,9 @@ class CORE_EXPORT SelectionController final
   bool HandleSingleClick(const MouseEventWithHitTestResults&);
   bool HandleDoubleClick(const MouseEventWithHitTestResults&);
   bool HandleTripleClick(const MouseEventWithHitTestResults&);
+
+  bool HandleTapInsideSelection(const MouseEventWithHitTestResults&,
+                                const SelectionInFlatTree&);
 
   Member<LocalFrame> const frame_;
   // Used to store base before the adjustment at bidi boundary

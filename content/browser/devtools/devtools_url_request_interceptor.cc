@@ -82,6 +82,17 @@ net::URLRequestJob* DevToolsURLRequestInterceptor::MaybeInterceptResponse(
   return nullptr;
 }
 
+DevToolsURLRequestInterceptor::Pattern::Pattern() = default;
+
+DevToolsURLRequestInterceptor::Pattern::~Pattern() = default;
+
+DevToolsURLRequestInterceptor::Pattern::Pattern(const Pattern& other) = default;
+
+DevToolsURLRequestInterceptor::Pattern::Pattern(
+    const std::string& url_pattern,
+    base::flat_set<ResourceType> resource_types)
+    : url_pattern(url_pattern), resource_types(std::move(resource_types)) {}
+
 DevToolsURLRequestInterceptor::State::State() : next_id_(0) {}
 
 DevToolsURLRequestInterceptor::State::~State() {}
@@ -176,8 +187,15 @@ DevToolsURLInterceptorRequestJob* DevToolsURLRequestInterceptor::State::
     return nullptr;
 
   bool matchFound = false;
-  for (const std::string& pattern : intercepted_page.patterns) {
-    if (base::MatchPattern(request->url().spec(), pattern)) {
+  const std::string url =
+      protocol::NetworkHandler::ClearUrlRef(request->url()).spec();
+  for (const Pattern& pattern : intercepted_page.intercepted_patterns) {
+    if (!pattern.resource_types.empty() &&
+        pattern.resource_types.find(resource_request_info->GetResourceType()) ==
+            pattern.resource_types.end()) {
+      continue;
+    }
+    if (base::MatchPattern(url, pattern.url_pattern)) {
       matchFound = true;
       break;
     }
@@ -289,7 +307,7 @@ void DevToolsURLRequestInterceptor::State::
 void DevToolsURLRequestInterceptor::State::StartInterceptingRequests(
     WebContents* web_contents,
     base::WeakPtr<protocol::NetworkHandler> network_handler,
-    std::vector<std::string> patterns) {
+    std::vector<Pattern> intercepted_patterns) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   std::vector<RenderFrameHostInfo> host_info_list;
@@ -297,7 +315,7 @@ void DevToolsURLRequestInterceptor::State::StartInterceptingRequests(
     host_info_list.push_back(RenderFrameHostInfo(render_frame_host));
 
   std::unique_ptr<InterceptedPage> intercepted_page(
-      new InterceptedPage(network_handler, std::move(patterns)));
+      new InterceptedPage(network_handler, std::move(intercepted_patterns)));
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::BindOnce(
@@ -428,21 +446,24 @@ DevToolsURLRequestInterceptor::Modifications::Modifications(
     protocol::Maybe<std::string> modified_post_data,
     protocol::Maybe<protocol::Network::Headers> modified_headers,
     protocol::Maybe<protocol::Network::AuthChallengeResponse>
-        auth_challenge_response)
+        auth_challenge_response,
+    bool mark_as_canceled)
     : error_reason(std::move(error_reason)),
       raw_response(std::move(raw_response)),
       modified_url(std::move(modified_url)),
       modified_method(std::move(modified_method)),
       modified_post_data(std::move(modified_post_data)),
       modified_headers(std::move(modified_headers)),
-      auth_challenge_response(std::move(auth_challenge_response)) {}
+      auth_challenge_response(std::move(auth_challenge_response)),
+      mark_as_canceled(mark_as_canceled) {}
 
 DevToolsURLRequestInterceptor::Modifications::~Modifications() {}
 
 DevToolsURLRequestInterceptor::State::InterceptedPage::InterceptedPage(
     base::WeakPtr<protocol::NetworkHandler> network_handler,
-    std::vector<std::string> patterns)
-    : network_handler(network_handler), patterns(std::move(patterns)) {}
+    std::vector<Pattern> intercepted_patterns)
+    : network_handler(network_handler),
+      intercepted_patterns(std::move(intercepted_patterns)) {}
 
 DevToolsURLRequestInterceptor::State::InterceptedPage::~InterceptedPage() =
     default;

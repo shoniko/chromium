@@ -37,10 +37,10 @@ class HeapProfilerSerializationState;
 
 enum HeapProfilingMode {
   kHeapProfilingModeDisabled,
-  kHeapProfilingModePseudo,
-  kHeapProfilingModeNative,
-  kHeapProfilingModeNoStack,
-  kHeapProfilingModeTaskProfiler,
+  kHeapProfilingModeTaskProfiler,  // Per task counters for allocs and frees.
+  kHeapProfilingModeBackground,    // Pseudo stacks without default filtering.
+  kHeapProfilingModePseudo,  // Pseudo stacks with default filtering categories.
+  kHeapProfilingModeNative,  // Native stacks
   kHeapProfilingModeInvalid  // Disabled permanently or unsupported.
 };
 
@@ -215,7 +215,7 @@ class BASE_EXPORT MemoryDumpManager {
     // Callback passed to the initial call to CreateProcessDump().
     ProcessMemoryDumpCallback callback;
 
-    // The thread on which FinalizeDumpAndAddToTrace() (and hence |callback|)
+    // The thread on which FinishAsyncProcessDump() (and hence |callback|)
     // should be invoked. This is the thread on which the initial
     // CreateProcessDump() request was called.
     const scoped_refptr<SingleThreadTaskRunner> callback_task_runner;
@@ -240,7 +240,7 @@ class BASE_EXPORT MemoryDumpManager {
   static void SetInstanceForTesting(MemoryDumpManager* instance);
   static uint32_t GetDumpsSumKb(const std::string&, const ProcessMemoryDump*);
 
-  void FinalizeDumpAndAddToTrace(
+  void FinishAsyncProcessDump(
       std::unique_ptr<ProcessMemoryDumpAsyncState> pmd_async_state);
 
   // Lazily initializes dump_thread_ and returns its TaskRunner.
@@ -273,8 +273,19 @@ class BASE_EXPORT MemoryDumpManager {
   void GetDumpProvidersForPolling(
       std::vector<scoped_refptr<MemoryDumpProviderInfo>>*);
 
-  // Returns true if Initialize() has been called, false otherwise.
-  bool is_initialized() const { return !request_dump_function_.is_null(); }
+  // Initialize |heap_profiler_serialization_state_| when tracing and heap
+  // profiler are enabled.
+  void InitializeHeapProfilerStateIfNeededLocked();
+
+  // Sends OnHeapProfilingEnabled() notifcation to mdp ensuring OnMemoryDump()
+  // is not called at the same time.
+  void NotifyHeapProfilingEnabledLocked(
+      scoped_refptr<MemoryDumpProviderInfo> mdpinfo,
+      bool enabled);
+
+  bool can_request_global_dumps() const {
+    return !request_dump_function_.is_null();
+  }
 
   // An ordered set of registered MemoryDumpProviderInfo(s), sorted by task
   // runner affinity (MDPs belonging to the same task runners are adjacent).

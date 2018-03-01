@@ -27,7 +27,7 @@
 #include <libxslt/transform.h>
 #include "core/css/StyleSheet.h"
 #include "core/dom/ProcessingInstruction.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/RefPtr.h"
 
 namespace blink {
@@ -105,7 +105,7 @@ class XSLStyleSheet final : public StyleSheet {
   KURL BaseURL() const override { return final_url_; }
   bool IsLoading() const override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   XSLStyleSheet(Node* parent_node,

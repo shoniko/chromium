@@ -41,7 +41,9 @@ MESSAGE_CENTER_EXPORT NotifierSettingsDelegate* ShowSettings(
     NotifierSettingsProvider* provider,
     gfx::NativeView context);
 
-// The struct to distinguish the notifiers.
+// A struct that identifies the source of notifications. For example, a web page
+// might send multiple notifications but they'd all have the same NotifierId.
+// TODO(estade): rename to Notifier.
 struct MESSAGE_CENTER_EXPORT NotifierId {
   // This enum is being used for histogram reporting and the elements should not
   // be re-ordered.
@@ -96,8 +98,8 @@ struct MESSAGE_CENTER_EXPORT NotifierId {
   NotifierId();
 };
 
-// The struct to hold the information of notifiers. The information will be
-// used by NotifierSettingsView.
+// A struct to hold UI information about notifiers. The data is used by
+// NotifierSettingsView. TODO(estade): rename to NotifierUiData.
 struct MESSAGE_CENTER_EXPORT Notifier {
   Notifier(const NotifierId& notifier_id,
            const base::string16& name,
@@ -120,34 +122,17 @@ struct MESSAGE_CENTER_EXPORT Notifier {
   DISALLOW_COPY_AND_ASSIGN(Notifier);
 };
 
-struct MESSAGE_CENTER_EXPORT NotifierGroup {
-  NotifierGroup(const base::string16& name, const base::string16& login_info);
-  ~NotifierGroup();
-
-  // Display name of a notifier group.
-  const base::string16 name;
-
-  // More display information about the notifier group.
-  base::string16 login_info;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(NotifierGroup);
-};
-
 // An observer class implemented by the view of the NotifierSettings to get
 // notified when the controller has changed data.
 class MESSAGE_CENTER_EXPORT NotifierSettingsObserver {
  public:
   // Called when an icon in the controller has been updated.
   virtual void UpdateIconImage(const NotifierId& notifier_id,
-                               const gfx::Image& icon) = 0;
-
-  // Called when any change happens to the set of notifier groups.
-  virtual void NotifierGroupChanged() = 0;
+                               const gfx::Image& icon){};
 
   // Called when a notifier is enabled or disabled.
   virtual void NotifierEnabledChanged(const NotifierId& notifier_id,
-                                      bool enabled) = 0;
+                                      bool enabled){};
 };
 
 // A class used by NotifierSettingsView to integrate with a setting system
@@ -160,31 +145,14 @@ class MESSAGE_CENTER_EXPORT NotifierSettingsProvider {
   virtual void AddObserver(NotifierSettingsObserver* observer) = 0;
   virtual void RemoveObserver(NotifierSettingsObserver* observer) = 0;
 
-  // Returns the number of notifier groups available.
-  virtual size_t GetNotifierGroupCount() const = 0;
-
-  // Requests the model for a particular notifier group.
-  virtual const message_center::NotifierGroup& GetNotifierGroupAt(
-      size_t index) const = 0;
-
-  // Returns true if the notifier group at |index| is active.
-  virtual bool IsNotifierGroupActiveAt(size_t index) const = 0;
-
-  // Informs the settings provider that further requests to GetNotifierList
-  // should return notifiers for the specified notifier group.
-  virtual void SwitchToNotifierGroup(size_t index) = 0;
-
-  // Requests the currently active notifier group.
-  virtual const message_center::NotifierGroup& GetActiveNotifierGroup()
-      const = 0;
-
   // Provides the current notifier list in |notifiers|.
   virtual void GetNotifierList(
       std::vector<std::unique_ptr<Notifier>>* notifiers) = 0;
 
-  // Called when the |enabled| for the |notifier| has been changed by user
+  // Called when the |enabled| for the given notifier has been changed by user
   // operation.
-  virtual void SetNotifierEnabled(const Notifier& notifier, bool enabled) = 0;
+  virtual void SetNotifierEnabled(const NotifierId& notifier_id,
+                                  bool enabled) = 0;
 
   // Called when the settings window is closed.
   virtual void OnNotifierSettingsClosing() = 0;

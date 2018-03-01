@@ -42,26 +42,21 @@ GURL GetShortcutUrl(const content::WebContents* web_contents) {
 }
 
 InstallableParams ParamsToPerformManifestAndIconFetch(
-    int ideal_icon_size_in_px,
-    int minimum_icon_size_in_px,
-    int badge_size_in_px,
     bool check_webapk_compatibility) {
   InstallableParams params;
-  params.ideal_primary_icon_size_in_px = ideal_icon_size_in_px;
-  params.minimum_primary_icon_size_in_px = minimum_icon_size_in_px;
-  params.fetch_valid_primary_icon = true;
-  if (check_webapk_compatibility) {
-    params.fetch_valid_badge_icon = true;
-    params.ideal_badge_icon_size_in_px = badge_size_in_px;
-    params.minimum_badge_icon_size_in_px = badge_size_in_px;
-  }
+  params.valid_primary_icon = true;
+  params.valid_badge_icon = check_webapk_compatibility;
+  params.wait_for_worker = true;
   return params;
 }
 
 InstallableParams ParamsToPerformInstallableCheck(
     bool check_webapk_compatibility) {
   InstallableParams params;
-  params.check_installable = check_webapk_compatibility;
+  params.valid_manifest = check_webapk_compatibility;
+  params.has_worker = check_webapk_compatibility;
+  params.valid_primary_icon = check_webapk_compatibility;
+  params.wait_for_worker = true;
   return params;
 }
 
@@ -71,7 +66,7 @@ InstallableParams ParamsToPerformInstallableCheck(
 // - whether |icon| was used in generating the launcher icon
 std::pair<SkBitmap, bool> CreateLauncherIconInBackground(const GURL& start_url,
                                                          const SkBitmap& icon) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   bool is_generated = false;
   SkBitmap primary_icon = ShortcutHelper::FinalizeLauncherIconInBackground(
@@ -88,7 +83,7 @@ std::pair<SkBitmap, bool> CreateLauncherIconInBackground(const GURL& start_url,
 std::pair<SkBitmap, bool> CreateLauncherIconFromFaviconInBackground(
     const GURL& start_url,
     const favicon_base::FaviconRawBitmapResult& bitmap_result) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   SkBitmap decoded;
   if (bitmap_result.is_valid()) {
@@ -102,11 +97,6 @@ std::pair<SkBitmap, bool> CreateLauncherIconFromFaviconInBackground(
 
 AddToHomescreenDataFetcher::AddToHomescreenDataFetcher(
     content::WebContents* web_contents,
-    int ideal_icon_size_in_px,
-    int minimum_icon_size_in_px,
-    int ideal_splash_image_size_in_px,
-    int minimum_splash_image_size_in_px,
-    int badge_size_in_px,
     int data_timeout_ms,
     bool check_webapk_compatibility,
     Observer* observer)
@@ -114,17 +104,11 @@ AddToHomescreenDataFetcher::AddToHomescreenDataFetcher(
       installable_manager_(InstallableManager::FromWebContents(web_contents)),
       observer_(observer),
       shortcut_info_(GetShortcutUrl(web_contents)),
-      ideal_icon_size_in_px_(ideal_icon_size_in_px),
-      minimum_icon_size_in_px_(minimum_icon_size_in_px),
-      ideal_splash_image_size_in_px_(ideal_splash_image_size_in_px),
-      minimum_splash_image_size_in_px_(minimum_splash_image_size_in_px),
-      badge_size_in_px_(badge_size_in_px),
       data_timeout_ms_(data_timeout_ms),
       check_webapk_compatibility_(check_webapk_compatibility),
       is_waiting_for_web_application_info_(true),
+      is_waiting_for_manifest_(true),
       weak_ptr_factory_(this) {
-  DCHECK(minimum_icon_size_in_px <= ideal_icon_size_in_px);
-  DCHECK(minimum_splash_image_size_in_px <= ideal_splash_image_size_in_px);
   DCHECK(shortcut_info_.url.is_valid());
 
   // Send a message to the renderer to retrieve information about the page.
@@ -184,9 +168,7 @@ void AddToHomescreenDataFetcher::OnDidGetWebApplicationInfo(
                  weak_ptr_factory_.GetWeakPtr()));
 
   installable_manager_->GetData(
-      ParamsToPerformManifestAndIconFetch(
-          ideal_icon_size_in_px_, minimum_icon_size_in_px_, badge_size_in_px_,
-          check_webapk_compatibility_),
+      ParamsToPerformManifestAndIconFetch(check_webapk_compatibility_),
       base::Bind(&AddToHomescreenDataFetcher::OnDidGetManifestAndIcons,
                  weak_ptr_factory_.GetWeakPtr()));
 }
@@ -214,6 +196,11 @@ void AddToHomescreenDataFetcher::OnDataTimedout() {
   if (!web_contents())
     return;
 
+  if (is_waiting_for_manifest_)
+    installable_manager_->RecordAddToHomescreenManifestAndIconTimeout();
+  else
+    installable_manager_->RecordAddToHomescreenInstallabilityTimeout();
+
   if (check_webapk_compatibility_)
     observer_->OnDidDetermineWebApkCompatibility(false);
   observer_->OnUserTitleAvailable(shortcut_info_.user_title,
@@ -226,6 +213,8 @@ void AddToHomescreenDataFetcher::OnDidGetManifestAndIcons(
     const InstallableData& data) {
   if (!web_contents())
     return;
+
+  is_waiting_for_manifest_ = false;
 
   if (!data.manifest.IsEmpty()) {
     base::RecordAction(base::UserMetricsAction("webapps.AddShortcut.Manifest"));
@@ -241,6 +230,7 @@ void AddToHomescreenDataFetcher::OnDidGetManifestAndIcons(
     observer_->OnUserTitleAvailable(shortcut_info_.user_title,
                                     shortcut_info_.url);
     data_timeout_timer_.Stop();
+    installable_manager_->RecordAddToHomescreenNoTimeout();
     FetchFavicon();
     return;
   }
@@ -249,14 +239,15 @@ void AddToHomescreenDataFetcher::OnDidGetManifestAndIcons(
   shortcut_info_.best_primary_icon_url = data.primary_icon_url;
 
   // Save the splash screen URL for the later download.
+  shortcut_info_.ideal_splash_image_size_in_px =
+      ShortcutHelper::GetIdealSplashImageSizeInPx();
+  shortcut_info_.minimum_splash_image_size_in_px =
+      ShortcutHelper::GetMinimumSplashImageSizeInPx();
   shortcut_info_.splash_image_url =
       content::ManifestIconSelector::FindBestMatchingIcon(
-          data.manifest.icons, ideal_splash_image_size_in_px_,
-          minimum_splash_image_size_in_px_,
+          data.manifest.icons, shortcut_info_.ideal_splash_image_size_in_px,
+          shortcut_info_.minimum_splash_image_size_in_px,
           content::Manifest::Icon::IconPurpose::ANY);
-  shortcut_info_.ideal_splash_image_size_in_px = ideal_splash_image_size_in_px_;
-  shortcut_info_.minimum_splash_image_size_in_px =
-      minimum_splash_image_size_in_px_;
   if (data.badge_icon) {
     shortcut_info_.best_badge_icon_url = data.badge_icon_url;
     badge_icon_ = *data.badge_icon;
@@ -275,11 +266,13 @@ void AddToHomescreenDataFetcher::OnDidPerformInstallableCheck(
   if (!web_contents())
     return;
 
+  installable_manager_->RecordAddToHomescreenNoTimeout();
+
   bool webapk_compatible = false;
   if (check_webapk_compatibility_) {
     webapk_compatible =
-        (data.error_code == NO_ERROR_DETECTED && data.is_installable &&
-         AreWebManifestUrlsWebApkCompatible(data.manifest));
+        (data.error_code == NO_ERROR_DETECTED && data.valid_manifest &&
+         data.has_worker && AreWebManifestUrlsWebApkCompatible(data.manifest));
     observer_->OnDidDetermineWebApkCompatibility(webapk_compatible);
   }
 
@@ -311,8 +304,9 @@ void AddToHomescreenDataFetcher::FetchFavicon() {
           ServiceAccessType::EXPLICIT_ACCESS);
 
   // Using favicon if its size is not smaller than platform required size,
-  // otherwise using the largest icon among all avaliable icons.
-  int threshold_to_get_any_largest_icon = ideal_icon_size_in_px_ - 1;
+  // otherwise using the largest icon among all available icons.
+  int threshold_to_get_any_largest_icon =
+      ShortcutHelper::GetIdealHomescreenIconSizeInPx() - 1;
   favicon_service->GetLargestRawFaviconForPageURL(
       shortcut_info_.url, icon_types, threshold_to_get_any_largest_icon,
       base::Bind(&AddToHomescreenDataFetcher::OnFaviconFetched,

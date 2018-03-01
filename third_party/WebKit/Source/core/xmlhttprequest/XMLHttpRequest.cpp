@@ -42,10 +42,12 @@
 #include "core/fileapi/FileReaderLoader.h"
 #include "core/fileapi/FileReaderLoaderClient.h"
 #include "core/frame/Deprecation.h"
+#include "core/frame/Frame.h"
 #include "core/frame/Settings.h"
+#include "core/frame/UseCounter.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
-#include "core/html/FormData.h"
 #include "core/html/HTMLDocument.h"
+#include "core/html/forms/FormData.h"
 #include "core/html/parser/TextResourceDecoder.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/InspectorTraceEvents.h"
@@ -59,22 +61,24 @@
 #include "core/url/URLSearchParams.h"
 #include "core/xmlhttprequest/XMLHttpRequestUpload.h"
 #include "platform/FileMetadata.h"
-#include "platform/HTTPNames.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/Histogram.h"
 #include "platform/SharedBuffer.h"
 #include "platform/bindings/DOMWrapperWorld.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/blob/BlobData.h"
 #include "platform/exported/WrappedResourceResponse.h"
-#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
+#include "platform/feature_policy/FeaturePolicy.h"
 #include "platform/loader/fetch/FetchUtils.h"
 #include "platform/loader/fetch/ResourceError.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
 #include "platform/loader/fetch/ResourceRequest.h"
 #include "platform/loader/fetch/TextResourceDecoderOptions.h"
+#include "platform/loader/fetch/fetch_initiator_type_names.h"
 #include "platform/network/HTTPParsers.h"
 #include "platform/network/NetworkLog.h"
 #include "platform/network/ParsedContentType.h"
+#include "platform/network/http_names.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/weborigin/SecurityPolicy.h"
 #include "platform/wtf/Assertions.h"
@@ -82,6 +86,7 @@
 #include "platform/wtf/StdLibExtras.h"
 #include "platform/wtf/text/CString.h"
 #include "public/platform/WebCORS.h"
+#include "public/platform/WebFeaturePolicyFeature.h"
 #include "public/platform/WebURLRequest.h"
 
 namespace blink {
@@ -228,7 +233,7 @@ class XMLHttpRequest::BlobLoader final
       public FileReaderLoaderClient {
  public:
   static BlobLoader* Create(XMLHttpRequest* xhr,
-                            RefPtr<BlobDataHandle> handle) {
+                            scoped_refptr<BlobDataHandle> handle) {
     return new BlobLoader(xhr, std::move(handle));
   }
 
@@ -245,10 +250,10 @@ class XMLHttpRequest::BlobLoader final
 
   void Cancel() { loader_->Cancel(); }
 
-  DEFINE_INLINE_TRACE() { visitor->Trace(xhr_); }
+  void Trace(blink::Visitor* visitor) { visitor->Trace(xhr_); }
 
  private:
-  BlobLoader(XMLHttpRequest* xhr, RefPtr<BlobDataHandle> handle)
+  BlobLoader(XMLHttpRequest* xhr, scoped_refptr<BlobDataHandle> handle)
       : xhr_(xhr),
         loader_(
             FileReaderLoader::Create(FileReaderLoader::kReadByClient, this)) {
@@ -287,7 +292,7 @@ XMLHttpRequest::XMLHttpRequest(
     ExecutionContext* context,
     v8::Isolate* isolate,
     bool is_isolated_world,
-    RefPtr<SecurityOrigin> isolated_world_security_origin)
+    scoped_refptr<SecurityOrigin> isolated_world_security_origin)
     : SuspendableObject(context),
       timeout_milliseconds_(0),
       state_(kUnsent),
@@ -315,7 +320,7 @@ XMLHttpRequest::XMLHttpRequest(
       response_array_buffer_failure_(false) {}
 
 XMLHttpRequest::~XMLHttpRequest() {
-  binary_response_builder_.Clear();
+  binary_response_builder_ = nullptr;
   length_downloaded_to_file_ = 0;
   ReportMemoryUsageToV8();
 }
@@ -327,7 +332,7 @@ Document* XMLHttpRequest::GetDocument() const {
 
 SecurityOrigin* XMLHttpRequest::GetSecurityOrigin() const {
   return isolated_world_security_origin_
-             ? isolated_world_security_origin_.Get()
+             ? isolated_world_security_origin_.get()
              : GetExecutionContext()->GetSecurityOrigin();
 }
 
@@ -442,7 +447,7 @@ Blob* XMLHttpRequest::ResponseBlob() {
         size = binary_response_builder_->size();
         blob_data->SetContentType(
             FinalResponseMIMETypeWithFallback().LowerASCII());
-        binary_response_builder_.Clear();
+        binary_response_builder_ = nullptr;
         ReportMemoryUsageToV8();
       }
       response_blob_ =
@@ -472,7 +477,7 @@ DOMArrayBuffer* XMLHttpRequest::ResponseArrayBuffer() {
       // https://xhr.spec.whatwg.org/#arraybuffer-response allows clearing
       // of the 'received bytes' payload when the response buffer allocation
       // fails.
-      binary_response_builder_.Clear();
+      binary_response_builder_ = nullptr;
       ReportMemoryUsageToV8();
       // Mark allocation as failed; subsequent calls to the accessor must
       // continue to report |null|.
@@ -690,6 +695,14 @@ void XMLHttpRequest::open(const AtomicString& method,
   upload_complete_ = false;
 
   if (!async && GetExecutionContext()->IsDocument()) {
+    if (IsSupportedInFeaturePolicy(WebFeaturePolicyFeature::kSyncXHR) &&
+        !GetDocument()->GetFrame()->IsFeatureEnabled(
+            WebFeaturePolicyFeature::kSyncXHR)) {
+      exception_state.ThrowDOMException(
+          kInvalidAccessError,
+          "Synchronous requests are disabled by Feature Policy.");
+      return;
+    }
     if (GetDocument()->GetSettings() &&
         !GetDocument()->GetSettings()->GetSyncXHRInDocumentsEnabled()) {
       exception_state.ThrowDOMException(
@@ -779,43 +792,43 @@ void XMLHttpRequest::send(
     ExceptionState& exception_state) {
   probe::willSendXMLHttpOrFetchNetworkRequest(GetExecutionContext(), Url());
 
-  if (body.isNull()) {
+  if (body.IsNull()) {
     send(String(), exception_state);
     return;
   }
 
-  if (body.isArrayBuffer()) {
-    send(body.getAsArrayBuffer(), exception_state);
+  if (body.IsArrayBuffer()) {
+    send(body.GetAsArrayBuffer(), exception_state);
     return;
   }
 
-  if (body.isArrayBufferView()) {
-    send(body.getAsArrayBufferView().View(), exception_state);
+  if (body.IsArrayBufferView()) {
+    send(body.GetAsArrayBufferView().View(), exception_state);
     return;
   }
 
-  if (body.isBlob()) {
-    send(body.getAsBlob(), exception_state);
+  if (body.IsBlob()) {
+    send(body.GetAsBlob(), exception_state);
     return;
   }
 
-  if (body.isDocument()) {
-    send(body.getAsDocument(), exception_state);
+  if (body.IsDocument()) {
+    send(body.GetAsDocument(), exception_state);
     return;
   }
 
-  if (body.isFormData()) {
-    send(body.getAsFormData(), exception_state);
+  if (body.IsFormData()) {
+    send(body.GetAsFormData(), exception_state);
     return;
   }
 
-  if (body.isURLSearchParams()) {
-    send(body.getAsURLSearchParams(), exception_state);
+  if (body.IsURLSearchParams()) {
+    send(body.GetAsURLSearchParams(), exception_state);
     return;
   }
 
-  DCHECK(body.isString());
-  send(body.getAsString(), exception_state);
+  DCHECK(body.IsString());
+  send(body.GetAsString(), exception_state);
 }
 
 bool XMLHttpRequest::AreMethodAndURLValidForSend() {
@@ -832,7 +845,7 @@ void XMLHttpRequest::send(Document* document, ExceptionState& exception_state) {
   if (!InitSend(exception_state))
     return;
 
-  RefPtr<EncodedFormData> http_body;
+  scoped_refptr<EncodedFormData> http_body;
 
   if (AreMethodAndURLValidForSend()) {
     // FIXME: Per https://xhr.spec.whatwg.org/#dom-xmlhttprequest-send the
@@ -857,7 +870,7 @@ void XMLHttpRequest::send(const String& body, ExceptionState& exception_state) {
   if (!InitSend(exception_state))
     return;
 
-  RefPtr<EncodedFormData> http_body;
+  scoped_refptr<EncodedFormData> http_body;
 
   if (!body.IsNull() && AreMethodAndURLValidForSend()) {
     http_body = EncodedFormData::Create(
@@ -874,7 +887,7 @@ void XMLHttpRequest::send(Blob* body, ExceptionState& exception_state) {
   if (!InitSend(exception_state))
     return;
 
-  RefPtr<EncodedFormData> http_body;
+  scoped_refptr<EncodedFormData> http_body;
 
   if (AreMethodAndURLValidForSend()) {
     if (!HasContentTypeRequestHeader()) {
@@ -909,7 +922,7 @@ void XMLHttpRequest::send(FormData* body, ExceptionState& exception_state) {
   if (!InitSend(exception_state))
     return;
 
-  RefPtr<EncodedFormData> http_body;
+  scoped_refptr<EncodedFormData> http_body;
 
   if (AreMethodAndURLValidForSend()) {
     http_body = body->EncodeMultiPartFormData();
@@ -934,7 +947,7 @@ void XMLHttpRequest::send(URLSearchParams* body,
   if (!InitSend(exception_state))
     return;
 
-  RefPtr<EncodedFormData> http_body;
+  scoped_refptr<EncodedFormData> http_body;
 
   if (AreMethodAndURLValidForSend()) {
     http_body = body->ToEncodedFormData();
@@ -965,7 +978,7 @@ void XMLHttpRequest::SendBytesData(const void* data,
   if (!InitSend(exception_state))
     return;
 
-  RefPtr<EncodedFormData> http_body;
+  scoped_refptr<EncodedFormData> http_body;
 
   if (AreMethodAndURLValidForSend()) {
     http_body = EncodedFormData::Create(data, length);
@@ -975,7 +988,7 @@ void XMLHttpRequest::SendBytesData(const void* data,
 }
 
 void XMLHttpRequest::SendForInspectorXHRReplay(
-    RefPtr<EncodedFormData> form_data,
+    scoped_refptr<EncodedFormData> form_data,
     ExceptionState& exception_state) {
   CreateRequest(form_data ? form_data->DeepCopy() : nullptr, exception_state);
   exception_code_ = exception_state.Code();
@@ -1001,7 +1014,7 @@ void XMLHttpRequest::ThrowForLoadFailureIfNeeded(
   exception_state.ThrowDOMException(exception_code_, message);
 }
 
-void XMLHttpRequest::CreateRequest(RefPtr<EncodedFormData> http_body,
+void XMLHttpRequest::CreateRequest(scoped_refptr<EncodedFormData> http_body,
                                    ExceptionState& exception_state) {
   // Only GET request is supported for blob URL.
   if (url_.ProtocolIs("blob") && method_ != HTTPNames::GET) {
@@ -1112,6 +1125,17 @@ void XMLHttpRequest::CreateRequest(RefPtr<EncodedFormData> http_body,
   if (async_) {
     UseCounter::Count(&execution_context,
                       WebFeature::kXMLHttpRequestAsynchronous);
+    if (GetExecutionContext()->IsDocument()) {
+      // Update histogram for usage of async xhr within pagedismissal.
+      auto pagedismissal = GetDocument()->PageDismissalEventBeingDispatched();
+      if (pagedismissal != Document::kNoDismissal) {
+        UseCounter::Count(GetDocument(), WebFeature::kAsyncXhrInPageDismissal);
+        DEFINE_STATIC_LOCAL(EnumerationHistogram,
+                            asyncxhr_pagedismissal_histogram,
+                            ("XHR.Async.PageDismissal", 5));
+        asyncxhr_pagedismissal_histogram.Count(pagedismissal);
+      }
+    }
     if (upload_)
       request.SetReportUploadProgress(true);
 
@@ -1126,6 +1150,16 @@ void XMLHttpRequest::CreateRequest(RefPtr<EncodedFormData> http_body,
 
   // Use count for XHR synchronous requests.
   UseCounter::Count(&execution_context, WebFeature::kXMLHttpRequestSynchronous);
+  if (GetExecutionContext()->IsDocument()) {
+    // Update histogram for usage of sync xhr within pagedismissal.
+    auto pagedismissal = GetDocument()->PageDismissalEventBeingDispatched();
+    if (pagedismissal != Document::kNoDismissal) {
+      UseCounter::Count(GetDocument(), WebFeature::kSyncXhrInPageDismissal);
+      DEFINE_STATIC_LOCAL(EnumerationHistogram, syncxhr_pagedismissal_histogram,
+                          ("XHR.Sync.PageDismissal", 5));
+      syncxhr_pagedismissal_histogram.Count(pagedismissal);
+    }
+  }
   ThreadableLoader::LoadResourceSynchronously(execution_context, request, *this,
                                               options, resource_loader_options);
 
@@ -1244,7 +1278,7 @@ void XMLHttpRequest::ClearResponse() {
 
   // These variables may referred by the response accessors. So, we can clear
   // this only when we clear the response holder variables above.
-  binary_response_builder_.Clear();
+  binary_response_builder_ = nullptr;
   response_array_buffer_.Clear();
   response_array_buffer_failure_ = false;
 
@@ -1654,7 +1688,8 @@ void XMLHttpRequest::DidFailLoadingFromBlob() {
   HandleNetworkError();
 }
 
-RefPtr<BlobDataHandle> XMLHttpRequest::CreateBlobDataHandleFromResponse() {
+scoped_refptr<BlobDataHandle>
+XMLHttpRequest::CreateBlobDataHandleFromResponse() {
   DCHECK(downloading_to_file_);
   std::unique_ptr<BlobData> blob_data = BlobData::Create();
   String file_path = response_.DownloadedFilePath();
@@ -1763,37 +1798,48 @@ void XMLHttpRequest::ParseDocumentChunk(const char* data, unsigned len) {
 }
 
 std::unique_ptr<TextResourceDecoder> XMLHttpRequest::CreateDecoder() const {
-  if (response_type_code_ == kResponseTypeJSON) {
-    return TextResourceDecoder::Create(TextResourceDecoderOptions(
-        TextResourceDecoderOptions::kPlainTextContent, UTF8Encoding()));
-  }
+  const TextResourceDecoderOptions decoder_options_for_utf8_plain_text(
+      TextResourceDecoderOptions::kPlainTextContent, UTF8Encoding());
+  if (response_type_code_ == kResponseTypeJSON)
+    return TextResourceDecoder::Create(decoder_options_for_utf8_plain_text);
 
   String final_response_charset = FinalResponseCharset();
   if (!final_response_charset.IsEmpty()) {
+    // If the final charset is given, use the charset without sniffing the
+    // content.
     return TextResourceDecoder::Create(TextResourceDecoderOptions(
         TextResourceDecoderOptions::kPlainTextContent,
         WTF::TextEncoding(final_response_charset)));
   }
 
-  // allow TextResourceDecoder to look inside the m_response if it's XML or HTML
-  if (ResponseIsXML()) {
-    TextResourceDecoderOptions options(TextResourceDecoderOptions::kXMLContent);
+  TextResourceDecoderOptions decoder_options_for_xml(
+      TextResourceDecoderOptions::kXMLContent);
+  // Don't stop on encoding errors, unlike it is done for other kinds
+  // of XML resources. This matches the behavior of previous WebKit
+  // versions, Firefox and Opera.
+  decoder_options_for_xml.SetUseLenientXMLDecoding();
 
-    // Don't stop on encoding errors, unlike it is done for other kinds
-    // of XML resources. This matches the behavior of previous WebKit
-    // versions, Firefox and Opera.
-    options.SetUseLenientXMLDecoding();
-
-    return TextResourceDecoder::Create(options);
+  switch (response_type_code_) {
+    case kResponseTypeDefault:
+      if (ResponseIsXML())
+        return TextResourceDecoder::Create(decoder_options_for_xml);
+    // fall through
+    case kResponseTypeText:
+      return TextResourceDecoder::Create(decoder_options_for_utf8_plain_text);
+    case kResponseTypeDocument:
+      if (ResponseIsHTML()) {
+        return TextResourceDecoder::Create(TextResourceDecoderOptions(
+            TextResourceDecoderOptions::kHTMLContent, UTF8Encoding()));
+      }
+      return TextResourceDecoder::Create(decoder_options_for_xml);
+    case kResponseTypeJSON:
+    case kResponseTypeBlob:
+    case kResponseTypeArrayBuffer:
+      NOTREACHED();
+      break;
   }
-
-  if (ResponseIsHTML()) {
-    return TextResourceDecoder::Create(TextResourceDecoderOptions(
-        TextResourceDecoderOptions::kHTMLContent, UTF8Encoding()));
-  }
-
-  return TextResourceDecoder::Create(TextResourceDecoderOptions(
-      TextResourceDecoderOptions::kPlainTextContent, UTF8Encoding()));
+  NOTREACHED();
+  return nullptr;
 }
 
 void XMLHttpRequest::DidReceiveData(const char* data, unsigned len) {
@@ -1934,7 +1980,7 @@ void XMLHttpRequest::ReportMemoryUsageToV8() {
     isolate_->AdjustAmountOfExternalAllocatedMemory(diff);
 }
 
-DEFINE_TRACE(XMLHttpRequest) {
+void XMLHttpRequest::Trace(blink::Visitor* visitor) {
   visitor->Trace(response_blob_);
   visitor->Trace(loader_);
   visitor->Trace(response_document_);
@@ -1948,7 +1994,8 @@ DEFINE_TRACE(XMLHttpRequest) {
   SuspendableObject::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(XMLHttpRequest) {
+void XMLHttpRequest::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(response_blob_);
   visitor->TraceWrappers(response_document_);
   visitor->TraceWrappers(response_array_buffer_);

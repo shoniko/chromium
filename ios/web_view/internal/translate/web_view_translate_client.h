@@ -8,7 +8,6 @@
 #include <memory>
 #include <string>
 
-#import "base/ios/weak_nsobject.h"
 #include "components/translate/core/browser/translate_client.h"
 #include "components/translate/core/browser/translate_step.h"
 #include "components/translate/core/common/translate_errors.h"
@@ -47,7 +46,7 @@ class WebViewTranslateClient
 
   // This |controller| is assumed to outlive this WebViewTranslateClient.
   void set_translation_controller(CWVTranslationController* controller) {
-    translation_controller_.reset(controller);
+    translation_controller_ = controller;
   }
 
   translate::TranslateManager* translate_manager() {
@@ -81,13 +80,13 @@ class WebViewTranslateClient
   void ShowReportLanguageDetectionErrorUI(const GURL& report_url) override;
 
   // web::WebStateObserver implementation.
-  void WebStateDestroyed() override;
+  void WebStateDestroyed(web::WebState* web_state) override;
 
   std::unique_ptr<translate::TranslateManager> translate_manager_;
   translate::IOSTranslateDriver translate_driver_;
 
   // ObjC class that wraps this class.
-  base::WeakNSObject<CWVTranslationController> translation_controller_;
+  __weak CWVTranslationController* translation_controller_ = nil;
 
   DISALLOW_COPY_AND_ASSIGN(WebViewTranslateClient);
 };

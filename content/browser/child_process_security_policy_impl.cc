@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/command_line.h"
+#include "base/debug/crash_logging.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
@@ -83,7 +84,7 @@ bool IsMalformedBlobUrl(const GURL& url) {
 
   // If the part after blob: survives a roundtrip through url::Origin, then
   // it's a normal blob URL.
-  std::string canonical_origin = url::Origin(url).Serialize();
+  std::string canonical_origin = url::Origin::Create(url).Serialize();
   canonical_origin.append(1, '/');
   if (base::StartsWith(url.GetContent(), canonical_origin,
                        base::CompareCase::INSENSITIVE_ASCII))
@@ -215,7 +216,7 @@ class ChildProcessSecurityPolicyImpl::SecurityState {
       return true;
 
     // Otherwise, check for permission for specific origin.
-    if (CanCommitOrigin(url::Origin(url)))
+    if (CanCommitOrigin(url::Origin::Create(url)))
       return true;
 
     // file:// URLs are more granular.  The child may have been given
@@ -268,6 +269,8 @@ class ChildProcessSecurityPolicyImpl::SecurityState {
   void LockToOrigin(const GURL& gurl) {
     origin_lock_ = gurl;
   }
+
+  const GURL& origin_lock() { return origin_lock_; }
 
   ChildProcessSecurityPolicyImpl::CheckOriginLockResult CheckOriginLock(
       const GURL& gurl) {
@@ -654,7 +657,7 @@ bool ChildProcessSecurityPolicyImpl::CanRequestURL(
     if (IsMalformedBlobUrl(url))
       return false;
 
-    url::Origin origin(url);
+    url::Origin origin = url::Origin::Create(url);
     return origin.unique() || IsWebSafeScheme(origin.scheme()) ||
            CanCommitURL(child_id, GURL(origin.Serialize()));
   }
@@ -717,7 +720,7 @@ bool ChildProcessSecurityPolicyImpl::CanCommitURL(int child_id,
     if (IsMalformedBlobUrl(url))
       return false;
 
-    url::Origin origin(url);
+    url::Origin origin = url::Origin::Create(url);
     return origin.unique() || CanCommitURL(child_id, GURL(origin.Serialize()));
   }
 
@@ -1052,7 +1055,16 @@ bool ChildProcessSecurityPolicyImpl::CanAccessDataForOrigin(int child_id,
     // workaround for https://crbug.com/600441
     return true;
   }
-  return state->second->CanAccessDataForOrigin(site_url);
+  bool can_access = state->second->CanAccessDataForOrigin(site_url);
+  if (!can_access) {
+    // Returning false here will result in a renderer kill.  Set some crash
+    // keys that will help understand the circumstances of that kill.
+    base::debug::SetCrashKeyValue("requested_site_url", site_url.spec());
+    base::debug::SetCrashKeyValue("requested_origin", url.GetOrigin().spec());
+    base::debug::SetCrashKeyValue("killed_process_origin_lock",
+                                  state->second->origin_lock().spec());
+  }
+  return can_access;
 }
 
 bool ChildProcessSecurityPolicyImpl::HasSpecificPermissionForOrigin(
@@ -1083,6 +1095,14 @@ ChildProcessSecurityPolicyImpl::CheckOriginLock(int child_id,
   if (state == security_state_.end())
     return ChildProcessSecurityPolicyImpl::CheckOriginLockResult::NO_LOCK;
   return state->second->CheckOriginLock(site_url);
+}
+
+GURL ChildProcessSecurityPolicyImpl::GetOriginLock(int child_id) {
+  base::AutoLock lock(lock_);
+  SecurityStateMap::iterator state = security_state_.find(child_id);
+  if (state == security_state_.end())
+    return GURL();
+  return state->second->origin_lock();
 }
 
 void ChildProcessSecurityPolicyImpl::GrantPermissionsForFileSystem(
@@ -1142,7 +1162,7 @@ void ChildProcessSecurityPolicyImpl::AddIsolatedOriginsFromCommandLine(
   for (const base::StringPiece& origin_piece :
        base::SplitStringPiece(origin_list, ",", base::TRIM_WHITESPACE,
                               base::SPLIT_WANT_NONEMPTY)) {
-    url::Origin origin((GURL(origin_piece)));
+    url::Origin origin = url::Origin::Create((GURL(origin_piece)));
     if (!origin.unique())
       AddIsolatedOrigin(origin);
   }

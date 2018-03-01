@@ -13,7 +13,6 @@
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "platform/wtf/RefPtr.h"
 
 namespace blink {
@@ -24,9 +23,7 @@ class ScriptPromiseResolver;
 class ScriptState;
 struct WebPushSubscription;
 
-class PushSubscription final
-    : public GarbageCollectedFinalized<PushSubscription>,
-      public ScriptWrappable {
+class PushSubscription final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -47,7 +44,7 @@ class PushSubscription final
 
   ScriptValue toJSONForBinding(ScriptState*);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   PushSubscription(const WebPushSubscription&, ServiceWorkerRegistration*);

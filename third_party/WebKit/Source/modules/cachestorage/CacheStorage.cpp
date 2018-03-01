@@ -14,8 +14,8 @@
 #include "modules/cachestorage/CacheStorageError.h"
 #include "modules/fetch/Request.h"
 #include "modules/fetch/Response.h"
-#include "platform/HTTPNames.h"
 #include "platform/bindings/ScriptState.h"
+#include "platform/network/http_names.h"
 #include "platform/wtf/PtrUtil.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerCacheError.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerCacheStorage.h"
@@ -310,14 +310,14 @@ ScriptPromise CacheStorage::match(ScriptState* script_state,
                                   const RequestInfo& request,
                                   const CacheQueryOptions& options,
                                   ExceptionState& exception_state) {
-  DCHECK(!request.isNull());
+  DCHECK(!request.IsNull());
   if (!CommonChecks(script_state, exception_state))
     return ScriptPromise();
 
-  if (request.isRequest())
-    return MatchImpl(script_state, request.getAsRequest(), options);
+  if (request.IsRequest())
+    return MatchImpl(script_state, request.GetAsRequest(), options);
   Request* new_request =
-      Request::Create(script_state, request.getAsUSVString(), exception_state);
+      Request::Create(script_state, request.GetAsUSVString(), exception_state);
   if (exception_state.HadException())
     return ScriptPromise();
   return MatchImpl(script_state, new_request, options);
@@ -359,8 +359,9 @@ void CacheStorage::Dispose() {
   web_cache_storage_.reset();
 }
 
-DEFINE_TRACE(CacheStorage) {
+void CacheStorage::Trace(blink::Visitor* visitor) {
   visitor->Trace(scoped_fetcher_);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

@@ -69,7 +69,8 @@ class SpeechRecognizerImplTest : public SpeechRecognitionEventListener,
         base::MakeUnique<media::TestAudioThread>(true)));
     audio_manager_->SetInputStreamParameters(
         media::AudioParameters::UnavailableDeviceParams());
-    audio_system_ = media::AudioSystemImpl::Create(audio_manager_.get());
+    audio_system_ =
+        std::make_unique<media::AudioSystemImpl>(audio_manager_.get());
     recognizer_ = new SpeechRecognizerImpl(
         this, audio_system_.get(), audio_manager_.get(), kTestingSessionId,
         false, false, sr_engine);
@@ -506,8 +507,7 @@ TEST_F(SpeechRecognizerImplTest, AudioControllerErrorNoData) {
   TestAudioInputController* controller =
       audio_input_controller_factory_.controller();
   ASSERT_TRUE(controller);
-  controller->event_handler()->OnError(controller,
-      AudioInputController::UNKNOWN_ERROR);
+  controller->event_handler()->OnError(AudioInputController::UNKNOWN_ERROR);
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(recognition_started_);
   EXPECT_FALSE(audio_started_);
@@ -528,8 +528,7 @@ TEST_F(SpeechRecognizerImplTest, AudioControllerErrorWithData) {
       audio_input_controller_factory_.controller();
   ASSERT_TRUE(controller);
   OnData(audio_bus_.get());
-  controller->event_handler()->OnError(controller,
-      AudioInputController::UNKNOWN_ERROR);
+  controller->event_handler()->OnError(AudioInputController::UNKNOWN_ERROR);
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(url_fetcher_factory_.GetFetcherByID(0));
   EXPECT_TRUE(recognition_started_);

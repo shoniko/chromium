@@ -114,6 +114,9 @@
 // GL_ANGLE_client_arrays
 #define GL_CLIENT_ARRAYS_ANGLE 0x93AA
 
+// GL_ANGLE_robust_resource_initialization
+#define GL_ROBUST_RESOURCE_INITIALIZATION_ANGLE 0x93AB
+
 // GL_ANGLE_request_extension
 #define GL_REQUESTABLE_EXTENSIONS_ANGLE 0x93A8
 #define GL_NUM_REQUESTABLE_EXTENSIONS_ANGLE 0x93A8
@@ -172,6 +175,9 @@
 #define GL_COLOR_SPACE_SCRGB_LINEAR_CHROMIUM 0x8AF2
 #define GL_COLOR_SPACE_SRGB_CHROMIUM 0x8AF3
 #define GL_COLOR_SPACE_DISPLAY_P3_CHROMIUM 0x8AF4
+
+// GL_CHROMIUM_texture_storage_image
+#define GL_SCANOUT_CHROMIUM 0x6000
 
 // GL_OES_texure_3D
 #define GL_SAMPLER_3D_OES                                0x8B5F

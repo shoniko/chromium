@@ -12,7 +12,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/histogram_tester.h"
-#include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/browser/mock_autocomplete_provider_client.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/browser/test_scheme_classifier.h"
@@ -24,6 +23,7 @@
 #include "components/variations/variations_associated_data.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/text_elider.h"
 #include "url/gurl.h"
@@ -76,9 +76,7 @@ class FakeAutocompleteProviderClient
 
 class PhysicalWebProviderTest : public testing::Test {
  protected:
-  PhysicalWebProviderTest() : provider_(NULL) {
-    ResetFieldTrialList();
-  }
+  PhysicalWebProviderTest() : provider_(nullptr) { ResetFieldTrialList(); }
 
   ~PhysicalWebProviderTest() override {}
 
@@ -89,9 +87,7 @@ class PhysicalWebProviderTest : public testing::Test {
     provider_ = PhysicalWebProvider::Create(client_.get(), nullptr);
   }
 
-  void TearDown() override {
-    provider_ = NULL;
-  }
+  void TearDown() override { provider_ = nullptr; }
 
   void ResetFieldTrialList() {
     // Destroy the existing FieldTrialList before creating a new one to avoid a
@@ -134,20 +130,23 @@ class PhysicalWebProviderTest : public testing::Test {
   // Construct an AutocompleteInput to represent tapping the omnibox from the
   // new tab page.
   static AutocompleteInput CreateInputForNTP() {
-    return AutocompleteInput(
-        base::string16(), base::string16::npos, std::string(), GURL(),
+    AutocompleteInput input(
         base::string16(),
         metrics::OmniboxEventProto::INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS,
-        false, false, true, true, true, TestSchemeClassifier());
+        TestSchemeClassifier());
+    input.set_from_omnibox_focus(true);
+    return input;
   }
 
   // Construct an AutocompleteInput to represent tapping the omnibox with |url|
   // as the current web page.
   static AutocompleteInput CreateInputWithCurrentUrl(const std::string& url) {
-    return AutocompleteInput(base::UTF8ToUTF16(url), base::string16::npos,
-                             std::string(), GURL(url), base::string16(),
-                             metrics::OmniboxEventProto::OTHER, false, false,
-                             true, true, true, TestSchemeClassifier());
+    AutocompleteInput input(base::UTF8ToUTF16(url),
+                            metrics::OmniboxEventProto::OTHER,
+                            TestSchemeClassifier());
+    input.set_current_url(GURL(url));
+    input.set_from_omnibox_focus(true);
+    return input;
   }
 
   // For a given |match|, check that the destination URL, contents string,
@@ -324,11 +323,10 @@ TEST_F(PhysicalWebProviderTest, TestNoMatchesWithUserInput) {
   // Construct an AutocompleteInput to simulate user input in the omnibox input
   // field. The provider should not generate any matches.
   std::string text("user input");
-  const AutocompleteInput input(
-      base::UTF8ToUTF16(text), text.length(), std::string(), GURL(),
-      base::string16(),
+  AutocompleteInput input(
+      base::UTF8ToUTF16(text), text.length(),
       metrics::OmniboxEventProto::INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS,
-      true, false, true, true, false, TestSchemeClassifier());
+      TestSchemeClassifier());
   provider_->Start(input, false);
 
   EXPECT_TRUE(provider_->matches().empty());
@@ -344,10 +342,10 @@ TEST_F(PhysicalWebProviderTest, TestEmptyInputAfterTyping) {
   // Construct an AutocompleteInput to simulate a blank input field, as if the
   // user typed a query and then deleted it. The provider should generate
   // suggestions for the zero-suggest case. No default match should be created.
-  const AutocompleteInput input(
-      base::string16(), 0, std::string(), GURL(), base::string16(),
+  AutocompleteInput input(
+      base::string16(), 0,
       metrics::OmniboxEventProto::INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS,
-      true, false, true, true, false, TestSchemeClassifier());
+      TestSchemeClassifier());
   provider_->Start(input, false);
 
   size_t metadata_match_count = 0;
@@ -439,9 +437,9 @@ TEST_F(PhysicalWebProviderTest, TestNearbyURLCountHistograms) {
 
   AutocompleteInput zero_suggest_input(CreateInputForNTP());
   AutocompleteInput after_typing_input(
-      base::UTF8ToUTF16("Example"), 7, std::string(), GURL(), base::string16(),
+      base::UTF8ToUTF16("Example"), 7,
       metrics::OmniboxEventProto::INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS,
-      true, false, true, true, false, TestSchemeClassifier());
+      TestSchemeClassifier());
 
   data_source->SetMetadataList(CreateMetadata(3));
 
@@ -489,9 +487,9 @@ TEST_F(PhysicalWebProviderTest, TestNearbyURLCountAfterTypingWithoutFocus) {
   EXPECT_TRUE(data_source);
 
   AutocompleteInput after_typing_input(
-      base::UTF8ToUTF16("Example"), 7, std::string(), GURL(), base::string16(),
+      base::UTF8ToUTF16("Example"), 7,
       metrics::OmniboxEventProto::INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS,
-      true, false, true, true, false, TestSchemeClassifier());
+      TestSchemeClassifier());
 
   data_source->SetMetadataList(CreateMetadata(3));
 

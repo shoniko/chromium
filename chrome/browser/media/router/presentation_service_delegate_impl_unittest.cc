@@ -38,10 +38,9 @@ using ::testing::WithArgs;
 
 namespace {
 
-constexpr char kPresentationUrl1[] = "http://foo.fakeurl.com/";
-constexpr char kPresentationUrl2[] = "http://bar.fakeurl.com/";
-constexpr char kPresentationUrl3[] =
-    "https://google.com/cast#__castAppId__=233637DE";
+constexpr char kPresentationUrl1[] = "https://foo.fakeurl.com/";
+constexpr char kPresentationUrl2[] = "https://bar.fakeurl.com/";
+constexpr char kPresentationUrl3[] = "cast:233637DE";
 constexpr char kFrameUrl[] = "http://anotherframeurl.fakeurl.com/";
 constexpr char kPresentationId[] = "presentation_id";
 
@@ -124,7 +123,7 @@ class PresentationServiceDelegateImplTest
         presentation_url2_(kPresentationUrl2),
         presentation_urls_({presentation_url1_}),
         frame_url_(kFrameUrl),
-        frame_origin_(GURL(frame_url_)),
+        frame_origin_(url::Origin::Create(GURL(frame_url_))),
         source1_(MediaSourceForPresentationUrl(presentation_url1_)),
         source2_(MediaSourceForPresentationUrl(presentation_url2_)),
         listener1_(presentation_url1_),

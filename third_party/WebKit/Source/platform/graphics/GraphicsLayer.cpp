@@ -45,8 +45,11 @@
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/Image.h"
 #include "platform/graphics/LinkHighlight.h"
+#include "platform/graphics/compositing/CompositedLayerRasterInvalidator.h"
+#include "platform/graphics/compositing/PaintChunksToCcLayer.h"
 #include "platform/graphics/paint/DrawingRecorder.h"
 #include "platform/graphics/paint/PaintController.h"
+#include "platform/graphics/paint/PropertyTreeState.h"
 #include "platform/graphics/paint/RasterInvalidationTracking.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
 #include "platform/json/JSONValues.h"
@@ -61,6 +64,7 @@
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCompositorSupport.h"
+#include "public/platform/WebDisplayItemList.h"
 #include "public/platform/WebFloatPoint.h"
 #include "public/platform/WebFloatRect.h"
 #include "public/platform/WebLayer.h"
@@ -72,14 +76,6 @@
 #endif
 
 namespace blink {
-
-template class RasterInvalidationTrackingMap<const GraphicsLayer>;
-static RasterInvalidationTrackingMap<const GraphicsLayer>&
-GetRasterInvalidationTrackingMap() {
-  DEFINE_STATIC_LOCAL(RasterInvalidationTrackingMap<const GraphicsLayer>, map,
-                      ());
-  return map;
-}
 
 std::unique_ptr<GraphicsLayer> GraphicsLayer::Create(
     GraphicsLayerClient* client) {
@@ -98,18 +94,16 @@ GraphicsLayer::GraphicsLayer(GraphicsLayerClient* client)
       draws_content_(false),
       contents_visible_(true),
       is_root_for_isolated_group_(false),
-      should_hit_test_(false),
+      hit_testable_without_draws_content_(false),
       has_scroll_parent_(false),
       has_clip_parent_(false),
       painted_(false),
-      is_tracking_raster_invalidations_(
-          client && client->IsTrackingRasterInvalidations()),
       painting_phase_(kGraphicsLayerPaintAllWithOverflowClip),
-      parent_(0),
-      mask_layer_(0),
-      contents_clipping_mask_layer_(0),
+      parent_(nullptr),
+      mask_layer_(nullptr),
+      contents_clipping_mask_layer_(nullptr),
       paint_count_(0),
-      contents_layer_(0),
+      contents_layer_(nullptr),
       contents_layer_id_(0),
       scrollable_area_(nullptr),
       rendering_context3d_(0) {
@@ -120,6 +114,8 @@ GraphicsLayer::GraphicsLayer(GraphicsLayerClient* client)
   layer_ = Platform::Current()->CompositorSupport()->CreateContentLayer(this);
   layer_->Layer()->SetDrawsContent(draws_content_ && contents_visible_);
   layer_->Layer()->SetLayerClient(this);
+
+  UpdateTrackingRasterInvalidations();
 }
 
 GraphicsLayer::~GraphicsLayer() {
@@ -134,8 +130,6 @@ GraphicsLayer::~GraphicsLayer() {
 
   RemoveAllChildren();
   RemoveFromParent();
-
-  GetRasterInvalidationTrackingMap().Remove(this);
   DCHECK(!parent_);
 }
 
@@ -248,8 +242,8 @@ void GraphicsLayer::RemoveAllChildren() {
 void GraphicsLayer::RemoveFromParent() {
   if (parent_) {
     // We use reverseFind so that removeAllChildren() isn't n^2.
-    parent_->children_.erase(parent_->children_.ReverseFind(this));
-    SetParent(0);
+    parent_->children_.EraseAt(parent_->children_.ReverseFind(this));
+    SetParent(nullptr);
   }
 
   PlatformLayer()->RemoveFromParent();
@@ -287,17 +281,32 @@ IntRect GraphicsLayer::InterestRect() {
 
 void GraphicsLayer::Paint(const IntRect* interest_rect,
                           GraphicsContext::DisabledMode disabled_mode) {
-  if (PaintWithoutCommit(interest_rect, disabled_mode)) {
-    GetPaintController().CommitNewDisplayItems();
-    if (RuntimeEnabledFeatures::PaintUnderInvalidationCheckingEnabled() &&
-        DrawsContent()) {
-      auto& tracking = GetRasterInvalidationTrackingMap().Add(this);
-      tracking.CheckUnderInvalidations(DebugName(), CaptureRecord(),
-                                       InterestRect());
-      if (tracking.under_invalidation_record) {
-        GetPaintController().AppendDebugDrawingAfterCommit(
-            *this, tracking.under_invalidation_record, InterestRect());
-      }
+  if (!PaintWithoutCommit(interest_rect, disabled_mode))
+    return;
+
+  GetPaintController().CommitNewDisplayItems();
+
+  if (layer_state_) {
+    // Generate raster invalidations for SPv175 (but not SPv2).
+    DCHECK(RuntimeEnabledFeatures::SlimmingPaintV175Enabled());
+    IntRect layer_bounds(layer_state_->offset, ExpandedIntSize(Size()));
+    EnsureRasterInvalidator().Generate(layer_bounds, AllChunkPointers(),
+                                       layer_state_->state, this);
+  }
+
+  if (RuntimeEnabledFeatures::PaintUnderInvalidationCheckingEnabled() &&
+      DrawsContent()) {
+    auto& tracking = EnsureRasterInvalidator().EnsureTracking();
+    tracking.CheckUnderInvalidations(
+        DebugName(), CaptureRecord(), InterestRect(),
+        layer_state_ ? layer_state_->offset : IntPoint());
+    if (auto record = tracking.UnderInvalidationRecord()) {
+      // Add the under-invalidation overlay onto the painted result.
+      GetPaintController().AppendDebugDrawingAfterCommit(
+          *this, std::move(record), InterestRect(),
+          layer_state_ ? &layer_state_->state : nullptr);
+      // Ensure the compositor will raster the under-invalidation overlay.
+      layer_->Layer()->Invalidate();
     }
   }
 }
@@ -321,7 +330,8 @@ bool GraphicsLayer::PaintWithoutCommit(
   }
 
   if (!GetPaintController().SubsequenceCachingIsDisabled() &&
-      !client_->NeedsRepaint(*this) && !GetPaintController().CacheIsEmpty() &&
+      !client_->NeedsRepaint(*this) &&
+      !GetPaintController().CacheIsAllInvalid() &&
       previous_interest_rect_ == *interest_rect) {
     return false;
   }
@@ -424,7 +434,7 @@ void GraphicsLayer::SetContentsTo(WebLayer* layer) {
       children_changed = true;
 
       // The old contents layer will be removed via updateChildList.
-      contents_layer_ = 0;
+      contents_layer_ = nullptr;
       contents_layer_id_ = 0;
     }
   }
@@ -453,7 +463,7 @@ void GraphicsLayer::SetupContentsLayer(WebLayer* contents_layer) {
   WebLayer* border_web_layer =
       contents_clipping_mask_layer_
           ? contents_clipping_mask_layer_->PlatformLayer()
-          : 0;
+          : nullptr;
   contents_layer_->SetMaskLayer(border_web_layer);
 
   contents_layer_->SetRenderingContext(rendering_context3d_);
@@ -464,7 +474,7 @@ void GraphicsLayer::ClearContentsLayerIfUnregistered() {
       g_registered_layer_set->Contains(contents_layer_id_))
     return;
 
-  contents_layer_ = 0;
+  contents_layer_ = nullptr;
   contents_layer_id_ = 0;
 }
 
@@ -477,61 +487,53 @@ WebLayer* GraphicsLayer::ContentsLayerIfRegistered() {
   return contents_layer_;
 }
 
-void GraphicsLayer::SetTracksRasterInvalidations(
-    bool tracks_raster_invalidations) {
-  ResetTrackedRasterInvalidations();
-  is_tracking_raster_invalidations_ = tracks_raster_invalidations;
+CompositedLayerRasterInvalidator& GraphicsLayer::EnsureRasterInvalidator() {
+  if (!raster_invalidator_) {
+    raster_invalidator_ = WTF::MakeUnique<CompositedLayerRasterInvalidator>(
+        [this](const IntRect& r) { SetNeedsDisplayInRectInternal(r); });
+    raster_invalidator_->SetTracksRasterInvalidations(
+        client_->IsTrackingRasterInvalidations());
+  }
+  return *raster_invalidator_;
+}
+
+void GraphicsLayer::UpdateTrackingRasterInvalidations() {
+  bool should_track = client_->IsTrackingRasterInvalidations();
+  if (should_track)
+    EnsureRasterInvalidator().SetTracksRasterInvalidations(true);
+  else if (raster_invalidator_)
+    raster_invalidator_->SetTracksRasterInvalidations(false);
+
+  if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled() && paint_controller_)
+    paint_controller_->SetTracksRasterInvalidations(should_track);
 }
 
 void GraphicsLayer::ResetTrackedRasterInvalidations() {
-  RasterInvalidationTracking* tracking =
-      GetRasterInvalidationTrackingMap().Find(this);
-  if (!tracking)
-    return;
-
-  if (RuntimeEnabledFeatures::PaintUnderInvalidationCheckingEnabled())
-    tracking->invalidations.clear();
-  else
-    GetRasterInvalidationTrackingMap().Remove(this);
+  if (auto* tracking = GetRasterInvalidationTracking())
+    tracking->ClearInvalidations();
 }
 
 bool GraphicsLayer::HasTrackedRasterInvalidations() const {
   if (auto* tracking = GetRasterInvalidationTracking())
-    return !tracking->invalidations.IsEmpty();
+    return tracking->HasInvalidations();
   return false;
 }
 
-const RasterInvalidationTracking* GraphicsLayer::GetRasterInvalidationTracking()
+RasterInvalidationTracking* GraphicsLayer::GetRasterInvalidationTracking()
     const {
-  return GetRasterInvalidationTrackingMap().Find(this);
+  return raster_invalidator_ ? raster_invalidator_->GetTracking() : nullptr;
 }
 
 void GraphicsLayer::TrackRasterInvalidation(const DisplayItemClient& client,
                                             const IntRect& rect,
                                             PaintInvalidationReason reason) {
-  if (!IsTrackingOrCheckingRasterInvalidations() || rect.IsEmpty())
-    return;
+  if (RuntimeEnabledFeatures::PaintUnderInvalidationCheckingEnabled())
+    EnsureRasterInvalidator().EnsureTracking();
 
-  RasterInvalidationTracking& tracking =
-      GetRasterInvalidationTrackingMap().Add(this);
-
-  if (is_tracking_raster_invalidations_) {
-    RasterInvalidationInfo info;
-    info.client = &client;
-    info.client_debug_name = client.DebugName();
-    info.rect = rect;
-    info.reason = reason;
-    tracking.invalidations.push_back(info);
-  }
-
-  if (RuntimeEnabledFeatures::PaintUnderInvalidationCheckingEnabled() &&
-      !ScopedSetNeedsDisplayInRectForTrackingOnly::s_enabled_) {
-    // TODO(crbug.com/496260): Some antialiasing effects overflow the paint
-    // invalidation rect.
-    IntRect r = rect;
-    r.Inflate(1);
-    tracking.invalidation_region_since_last_paint.Unite(r);
-  }
+  // For SPv175, this only tracks invalidations that the WebLayer is fully
+  // invalidated directly, e.g. from SetContentsNeedsDisplay(), etc.
+  if (auto* tracking = GetRasterInvalidationTracking())
+    tracking->AddInvalidation(&client, client.DebugName(), rect, reason);
 }
 
 static String PointerAsString(const void* ptr) {
@@ -597,7 +599,8 @@ class GraphicsLayer::LayersAsJSONArray {
       layer.AddFlattenInheritedTransformJSON(*scroll_translate_json);
     }
 
-    if (!layer.transform_.IsIdentity() || layer.rendering_context3d_) {
+    if (!layer.transform_.IsIdentity() || layer.rendering_context3d_ ||
+        layer.GetCompositingReasons() & kCompositingReason3DTransform) {
       if (position != FloatPoint()) {
         // Output position offset as a transform.
         auto* position_translate_json = AddTransformJSON(transform_id);
@@ -609,11 +612,14 @@ class GraphicsLayer::LayersAsJSONArray {
           position_translate_json->SetBoolean("flattenInheritedTransform",
                                               false);
         }
+        position = FloatPoint();
       }
 
-      auto* transform_json = AddTransformJSON(transform_id);
-      layer.AddTransformJSONProperties(*transform_json, rendering_context_map_);
-      position = FloatPoint();
+      if (!layer.transform_.IsIdentity() || layer.rendering_context3d_) {
+        auto* transform_json = AddTransformJSON(transform_id);
+        layer.AddTransformJSONProperties(*transform_json,
+                                         rendering_context_map_);
+      }
     }
 
     auto json =
@@ -717,8 +723,10 @@ std::unique_ptr<JSONObject> GraphicsLayer::LayerAsJSONInternal(
     }
   }
 
-  if (flags & kLayerTreeIncludesPaintInvalidations)
-    GetRasterInvalidationTrackingMap().AsJSON(this, json.get());
+  if ((flags & kLayerTreeIncludesPaintInvalidations) &&
+      client_->IsTrackingRasterInvalidations() &&
+      GetRasterInvalidationTracking())
+    GetRasterInvalidationTracking()->AsJSON(json.get());
 
   if ((flags & kLayerTreeIncludesPaintingPhases) && painting_phase_) {
     std::unique_ptr<JSONArray> painting_phases_json = JSONArray::Create();
@@ -1009,7 +1017,8 @@ void GraphicsLayer::SetMaskLayer(GraphicsLayer* mask_layer) {
     return;
 
   mask_layer_ = mask_layer;
-  WebLayer* mask_web_layer = mask_layer_ ? mask_layer_->PlatformLayer() : 0;
+  WebLayer* mask_web_layer =
+      mask_layer_ ? mask_layer_->PlatformLayer() : nullptr;
   layer_->Layer()->SetMaskLayer(mask_web_layer);
 }
 
@@ -1025,7 +1034,7 @@ void GraphicsLayer::SetContentsClippingMaskLayer(
   WebLayer* contents_clipping_mask_web_layer =
       contents_clipping_mask_layer_
           ? contents_clipping_mask_layer_->PlatformLayer()
-          : 0;
+          : nullptr;
   contents_layer->SetMaskLayer(contents_clipping_mask_web_layer);
   UpdateContentsRect();
 }
@@ -1055,11 +1064,11 @@ void GraphicsLayer::SetIsRootForIsolatedGroup(bool isolated) {
   PlatformLayer()->SetIsRootForIsolatedGroup(isolated);
 }
 
-void GraphicsLayer::SetShouldHitTest(bool hit_test) {
-  if (should_hit_test_ == hit_test)
+void GraphicsLayer::SetHitTestableWithoutDrawsContent(bool should_hit_test) {
+  if (hit_testable_without_draws_content_ == should_hit_test)
     return;
-  should_hit_test_ = hit_test;
-  PlatformLayer()->SetShouldHitTest(hit_test);
+  hit_testable_without_draws_content_ = should_hit_test;
+  PlatformLayer()->SetHitTestableWithoutDrawsContent(should_hit_test);
 }
 
 void GraphicsLayer::SetContentsNeedsDisplay() {
@@ -1090,18 +1099,26 @@ void GraphicsLayer::SetNeedsDisplayInRect(
     const IntRect& rect,
     PaintInvalidationReason invalidation_reason,
     const DisplayItemClient& client) {
+  DCHECK(!RuntimeEnabledFeatures::SlimmingPaintV175Enabled());
   if (!DrawsContent())
     return;
 
   if (!ScopedSetNeedsDisplayInRectForTrackingOnly::s_enabled_) {
-    layer_->Layer()->InvalidateRect(rect);
+    SetNeedsDisplayInRectInternal(rect);
+    // TODO(wangxianzhu): Need equivalence for SPv175/SPv2.
     if (FirstPaintInvalidationTracking::IsEnabled())
       debug_info_.AppendAnnotatedInvalidateRect(rect, invalidation_reason);
-    for (size_t i = 0; i < link_highlights_.size(); ++i)
-      link_highlights_[i]->Invalidate();
   }
 
   TrackRasterInvalidation(client, rect, invalidation_reason);
+}
+
+void GraphicsLayer::SetNeedsDisplayInRectInternal(const IntRect& rect) {
+  DCHECK(DrawsContent());
+
+  layer_->Layer()->InvalidateRect(rect);
+  for (auto* link_highlight : link_highlights_)
+    link_highlight->Invalidate();
 }
 
 void GraphicsLayer::SetContentsRect(const IntRect& rect) {
@@ -1114,6 +1131,7 @@ void GraphicsLayer::SetContentsRect(const IntRect& rect) {
 
 void GraphicsLayer::SetContentsToImage(
     Image* image,
+    Image::ImageDecodingMode decode_mode,
     RespectImageOrientationEnum respect_image_orientation) {
   PaintImage paint_image;
   if (image)
@@ -1128,6 +1146,10 @@ void GraphicsLayer::SetContentsToImage(
   }
 
   if (paint_image) {
+    paint_image =
+        PaintImageBuilder::WithCopy(std::move(paint_image))
+            .set_decoding_mode(Image::ToPaintImageDecodingMode(decode_mode))
+            .TakePaintImage();
     if (!image_layer_) {
       image_layer_ =
           Platform::Current()->CompositorSupport()->CreateImageLayer();
@@ -1141,7 +1163,7 @@ void GraphicsLayer::SetContentsToImage(
     image_layer_.reset();
   }
 
-  SetContentsTo(image_layer_ ? image_layer_->Layer() : 0);
+  SetContentsTo(image_layer_ ? image_layer_->Layer() : nullptr);
 }
 
 WebLayer* GraphicsLayer::PlatformLayer() const {
@@ -1181,7 +1203,7 @@ void GraphicsLayer::AddLinkHighlight(LinkHighlight* link_highlight) {
 }
 
 void GraphicsLayer::RemoveLinkHighlight(LinkHighlight* link_highlight) {
-  link_highlights_.erase(link_highlights_.Find(link_highlight));
+  link_highlights_.EraseAt(link_highlights_.Find(link_highlight));
   UpdateChildList();
 }
 
@@ -1212,8 +1234,13 @@ void GraphicsLayer::didChangeScrollbarsHidden(bool hidden) {
 
 PaintController& GraphicsLayer::GetPaintController() const {
   CHECK(DrawsContent());
-  if (!paint_controller_)
+  if (!paint_controller_) {
     paint_controller_ = PaintController::Create();
+    if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
+      paint_controller_->SetTracksRasterInvalidations(
+          client_->IsTrackingRasterInvalidations());
+    }
+  }
   return *paint_controller_;
 }
 
@@ -1228,11 +1255,6 @@ CompositorElementId GraphicsLayer::GetElementId() const {
   return CompositorElementId();
 }
 
-void GraphicsLayer::SetCompositorMutableProperties(uint32_t properties) {
-  if (WebLayer* layer = PlatformLayer())
-    layer->SetCompositorMutableProperties(properties);
-}
-
 sk_sp<PaintRecord> GraphicsLayer::CaptureRecord() {
   if (!DrawsContent())
     return nullptr;
@@ -1241,8 +1263,38 @@ sk_sp<PaintRecord> GraphicsLayer::CaptureRecord() {
   GraphicsContext graphics_context(GetPaintController(),
                                    GraphicsContext::kNothingDisabled, nullptr);
   graphics_context.BeginRecording(bounds);
-  GetPaintController().GetPaintArtifact().Replay(bounds, graphics_context);
+  if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled() && !layer_state_) {
+    // TODO(wangxianzhu): Remove this condition when all drawable layers have
+    // layer_state_.
+    for (const auto& display_item :
+         GetPaintController().GetPaintArtifact().GetDisplayItemList())
+      display_item.Replay(graphics_context);
+  } else {
+    GetPaintController().GetPaintArtifact().Replay(graphics_context);
+  }
   return graphics_context.EndRecording();
+}
+
+void GraphicsLayer::SetLayerState(PropertyTreeState&& layer_state,
+                                  const IntPoint& layer_offset) {
+  DCHECK(RuntimeEnabledFeatures::SlimmingPaintV175Enabled());
+
+  if (!layer_state_) {
+    layer_state_ = std::make_unique<LayerState>(
+        LayerState{std::move(layer_state), layer_offset});
+    return;
+  }
+  layer_state_->state = std::move(layer_state);
+  layer_state_->offset = layer_offset;
+}
+
+Vector<const PaintChunk*> GraphicsLayer::AllChunkPointers() const {
+  const auto& chunks = GetPaintController().GetPaintArtifact().PaintChunks();
+  Vector<const PaintChunk*> result;
+  result.ReserveInitialCapacity(chunks.size());
+  for (const auto& chunk : chunks)
+    result.push_back(&chunk);
+  return result;
 }
 
 void GraphicsLayer::PaintContents(WebDisplayItemList* web_display_item_list,
@@ -1273,14 +1325,24 @@ void GraphicsLayer::PaintContents(WebDisplayItemList* web_display_item_list,
     disabled_mode = GraphicsContext::kFullyDisabled;
 
   // Anything other than PaintDefaultBehavior is for testing. In non-testing
-  // scenarios, it is an error to call GraphicsLayer::paint. Actual painting
-  // occurs in FrameView::paintTree(); this method merely copies the painted
-  // output to the WebDisplayItemList.
+  // scenarios, it is an error to call GraphicsLayer::Paint. Actual painting
+  // occurs in LocalFrameView::PaintTree() which calls GraphicsLayer::Paint();
+  // this method merely copies the painted output to the WebDisplayItemList.
   if (painting_control != kPaintDefaultBehavior)
     Paint(nullptr, disabled_mode);
 
-  paint_controller.GetPaintArtifact().AppendToWebDisplayItemList(
-      OffsetFromLayoutObjectWithSubpixelAccumulation(), web_display_item_list);
+  if (layer_state_) {
+    DCHECK(RuntimeEnabledFeatures::SlimmingPaintV175Enabled());
+    PaintChunksToCcLayer::ConvertInto(
+        AllChunkPointers(), layer_state_->state,
+        gfx::Vector2dF(layer_state_->offset.X(), layer_state_->offset.Y()),
+        paint_controller.GetPaintArtifact().GetDisplayItemList(),
+        *web_display_item_list->GetCcDisplayItemList());
+  } else {
+    paint_controller.GetPaintArtifact().AppendToWebDisplayItemList(
+        OffsetFromLayoutObjectWithSubpixelAccumulation(),
+        web_display_item_list);
+  }
 
   paint_controller.SetDisplayItemConstructionIsDisabled(false);
   paint_controller.SetSubsequenceCachingIsDisabled(false);

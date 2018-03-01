@@ -39,6 +39,9 @@
 #include "ios/chrome/browser/drag_and_drop/drag_and_drop_flag.h"
 #include "ios/chrome/browser/ios_chrome_flag_descriptions.h"
 #include "ios/chrome/browser/ssl/captive_portal_features.h"
+#include "ios/chrome/browser/ui/external_search/features.h"
+#include "ios/chrome/browser/ui/main/main_feature_flags.h"
+#import "ios/chrome/browser/ui/toolbar/toolbar_controller_base_feature.h"
 #include "ios/chrome/browser/web/features.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
@@ -58,15 +61,6 @@ using flags_ui::FeatureEntry;
 namespace {
 const FeatureEntry::Choice kMarkHttpAsChoices[] = {
     {flags_ui::kGenericExperimentChoiceDefault, "", ""},
-    {flag_descriptions::kMarkHttpAsNonSecureAfterEditing,
-     security_state::switches::kMarkHttpAs,
-     security_state::switches::kMarkHttpAsNonSecureAfterEditing},
-    {flag_descriptions::kMarkHttpAsNonSecureWhileIncognito,
-     security_state::switches::kMarkHttpAs,
-     security_state::switches::kMarkHttpAsNonSecureWhileIncognito},
-    {flag_descriptions::kMarkHttpAsNonSecureWhileIncognitoOrEditing,
-     security_state::switches::kMarkHttpAs,
-     security_state::switches::kMarkHttpAsNonSecureWhileIncognitoOrEditing},
     {flag_descriptions::kMarkHttpAsDangerous,
      security_state::switches::kMarkHttpAs,
      security_state::switches::kMarkHttpAsDangerous}};
@@ -182,8 +176,19 @@ const flags_ui::FeatureEntry kFeatureEntries[] = {
 #if defined(__IPHONE_11_0) && (__IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_11_0)
     {"drag_and_drop", flag_descriptions::kDragAndDropName,
      flag_descriptions::kDragAndDropDescription, flags_ui::kOsIos,
-     FEATURE_VALUE_TYPE(kDragAndDrop)}
+     FEATURE_VALUE_TYPE(kDragAndDrop)},
 #endif
+    {"tab_switcher_presents_bvc",
+     flag_descriptions::kTabSwitcherPresentsBVCName,
+     flag_descriptions::kTabSwitcherPresentsBVCDescription, flags_ui::kOsIos,
+     FEATURE_VALUE_TYPE(kTabSwitcherPresentsBVC)},
+    {"safe_area_compatible_toolbar",
+     flag_descriptions::kSafeAreaCompatibleToolbarName,
+     flag_descriptions::kSafeAreaCompatibleToolbarDescription, flags_ui::kOsIos,
+     FEATURE_VALUE_TYPE(kSafeAreaCompatibleToolbar)},
+    {"external-search", flag_descriptions::kExternalSearchName,
+     flag_descriptions::kExternalSearchDescription, flags_ui::kOsIos,
+     FEATURE_VALUE_TYPE(kExternalSearch)},
 };
 
 // Add all switches from experimental flags to |command_line|.
@@ -268,14 +273,6 @@ void AppendSwitchesFromExperimentalSettings(base::CommandLine* command_line) {
 
     base::CommandLine temp_command_line(flags);
     command_line->AppendArguments(temp_command_line, false);
-  }
-
-  // Populate command line flag for Sign-in promo.
-  NSString* enableSigninPromo = [defaults stringForKey:@"EnableSigninPromo"];
-  if ([enableSigninPromo isEqualToString:@"Enabled"]) {
-    command_line->AppendSwitch(switches::kEnableSigninPromo);
-  } else if ([enableSigninPromo isEqualToString:@"Disabled"]) {
-    command_line->AppendSwitch(switches::kDisableSigninPromo);
   }
 
   // Populate command line flag for 3rd party keyboard omnibox workaround.

@@ -20,6 +20,7 @@
         "renderer": [
           "blink::mojom::BackgroundFetchService",
           "blink::mojom::BackgroundSyncService",
+          "blink::mojom::BlobRegistry",
           "blink::mojom::BroadcastChannelProvider",
           "blink::mojom::Hyphenation",
           "blink::mojom::MimeRegistry",
@@ -28,6 +29,7 @@
           "blink::mojom::PermissionService",
           "blink::mojom::WebSocket",
           "content::mojom::FieldTrialRecorder",
+          "content::mojom::FileUtilitiesHost",
           "content::mojom::FrameSinkProvider",
           "content::mojom::MediaStreamDispatcherHost",
           "content::mojom::MemoryCoordinatorHandle",
@@ -37,9 +39,12 @@
           "content::mojom::StoragePartitionService",
           "content::mojom::URLLoaderFactory",
           "content::mojom::VideoCaptureHost",
+          "content::mojom::WebDatabaseHost",
           "content::mojom::WorkerURLLoaderFactoryProvider",
+          "device::mojom::BatteryMonitor",
           "device::mojom::GamepadMonitor",
           "discardable_memory::mojom::DiscardableSharedMemoryManager",
+          "media::mojom::VideoDecodePerfHistory",
           "memory_coordinator::mojom::MemoryCoordinatorHandle",
           "metrics::mojom::SingleSampleMetricsProvider",
           "payments::mojom::PaymentManager",
@@ -47,7 +52,6 @@
           "shape_detection::mojom::FaceDetectionProvider",
           "resource_coordinator::mojom::CoordinationUnit",
           "shape_detection::mojom::TextDetection",
-          "storage::mojom::BlobRegistry",
           "ui::mojom::Gpu",
           "viz::mojom::SharedBitmapAllocationNotifier"
         ],
@@ -61,10 +65,7 @@
       "requires": {
         "*": [ "app" ],
         "cdm": [ "media:cdm" ],
-        // In classic ash, the browser supplies ash interfaces to itself.
         "content_browser": [
-          "ash",
-          "display",
           "url_keyed_metrics",
           "geolocation_config"
         ],
@@ -72,9 +73,11 @@
         "content_plugin": [ "browser" ],
         "content_renderer": [ "browser" ],
         "content_utility": [ "browser" ],
-        "data_decoder": [ "image_decoder" ],
+        "data_decoder": [ "image_decoder", "json_parser" ],
         "device": [
+          "device:battery_monitor",
           "device:generic_sensor",
+          "device:hid",
           "device:nfc",
           "device:serial",
           "device:vibration",
@@ -103,7 +106,8 @@
           "coordination_unit",
           "coordination_unit_introspector",
           "service_callbacks",
-          "tab_signal"
+          "tab_signal",
+          "tracing"
         ],
         "video_capture": [ "capture", "tests" ]
       }
@@ -116,6 +120,7 @@
           // impossible this week. Remove once sky/ken fix this.
           "autofill::mojom::AutofillDriver",
           "autofill::mojom::PasswordManagerDriver",
+          "blink::mojom::DedicatedWorkerFactory",
           "blink::mojom::InsecureInputService",
           "blink::mojom::KeyboardLockService",
           "blink::mojom::MediaSessionService",
@@ -132,6 +137,7 @@
           "content::mojom::InputInjector",
 
           "content::mojom::RendererAudioOutputStreamFactory",
+          "content::mojom::SharedWorkerConnector",
           "device::mojom::Geolocation",
           "device::mojom::GeolocationService",
           "device::mojom::NFC",
@@ -149,6 +155,7 @@
           "media::mojom::VideoDecodeStatsRecorder",
           "media::mojom::WatchTimeRecorderProvider",
           "mojom::MediaDevicesDispatcherHost",
+          "network::mojom::RestrictedCookieManager",
           "payments::mojom::PaymentManager",
           "payments::mojom::PaymentRequest",
           "resource_coordinator::mojom::CoordinationUnit",
@@ -161,6 +168,24 @@
       },
       "requires": {
         "content_renderer": [ "browser" ]
+      }
+    },
+    "navigation:dedicated_worker": {
+      "provides": {
+        "renderer": [
+        ]
+      }
+    },
+    "navigation:service_worker": {
+      "provides": {
+        "renderer": [
+        ]
+      }
+    },
+    "navigation:shared_worker": {
+      "provides": {
+        "renderer": [
+        ]
       }
     }
   }

@@ -27,8 +27,6 @@
 #include "bindings/core/v8/ScriptController.h"
 #include "bindings/core/v8/ScriptSourceCode.h"
 #include "bindings/core/v8/V8BindingForCore.h"
-#include "core/HTMLNames.h"
-#include "core/SVGNames.h"
 #include "core/dom/ClassicPendingScript.h"
 #include "core/dom/ClassicScript.h"
 #include "core/dom/Document.h"
@@ -48,10 +46,12 @@
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/imports/HTMLImport.h"
 #include "core/html/parser/HTMLParserIdioms.h"
+#include "core/html_names.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/loader/SubresourceIntegrityHelper.h"
 #include "core/loader/modulescript/ModuleScriptFetchRequest.h"
 #include "core/loader/resource/ScriptResource.h"
+#include "core/svg_names.h"
 #include "platform/WebFrameScheduler.h"
 #include "platform/loader/SubresourceIntegrity.h"
 #include "platform/loader/fetch/AccessControlStatus.h"
@@ -62,7 +62,6 @@
 #include "platform/wtf/StdLibExtras.h"
 #include "platform/wtf/text/StringBuilder.h"
 #include "platform/wtf/text/StringHash.h"
-#include "public/platform/WebCachePolicy.h"
 
 namespace blink {
 
@@ -110,7 +109,7 @@ ScriptLoader::ScriptLoader(ScriptElementBase* element,
 
 ScriptLoader::~ScriptLoader() {}
 
-DEFINE_TRACE(ScriptLoader) {
+void ScriptLoader::Trace(blink::Visitor* visitor) {
   visitor->Trace(element_);
   visitor->Trace(resource_);
   visitor->Trace(pending_script_);
@@ -119,7 +118,7 @@ DEFINE_TRACE(ScriptLoader) {
   PendingScriptClient::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(ScriptLoader) {
+void ScriptLoader::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(pending_script_);
   visitor->TraceWrappers(module_tree_client_);
 }
@@ -349,7 +348,7 @@ bool ScriptLoader::PrepareScript(const TextPosition& script_start_position,
   // 17. "If the script element has a nonce attribute,
   //      then let cryptographic nonce be that attribute's value.
   //      Otherwise, let cryptographic nonce be the empty string."
-  String nonce = element_->GetNonceForElement();
+  nonce_ = element_->GetNonceForElement();
 
   // 18. is handled below.
 
@@ -425,7 +424,7 @@ bool ScriptLoader::PrepareScript(const TextPosition& script_start_position,
         SubresourceIntegrityHelper::DoReport(element_document, report_info);
       }
 
-      if (!FetchClassicScript(url, element_document.Fetcher(), nonce,
+      if (!FetchClassicScript(url, element_document.Fetcher(), nonce_,
                               integrity_metadata, parser_state, cross_origin,
                               element_document.GetSecurityOrigin(), encoding)) {
         // TODO(hiroshige): Make this asynchronous. Currently we fire the error
@@ -446,8 +445,14 @@ bool ScriptLoader::PrepareScript(const TextPosition& script_start_position,
 
       Modulator* modulator = Modulator::From(
           ToScriptStateForMainWorld(context_document->GetFrame()));
-      FetchModuleScriptTree(url, modulator, nonce, parser_state,
-                            credentials_mode);
+      // 20. "Let options be a script fetch options whose cryptographic nonce is
+      //      cryptographic nonce, integrity metadata is integrity metadata,
+      //      parser metadata is parser metadata, and credentials mode is module
+      //      script credentials mode." [spec text]
+      // TODO(kouhei,hiroshige): Move 20 higher up, when we modify
+      // FetchClassicScript to take |options| too.
+      ScriptFetchOptions options(nonce_, parser_state, credentials_mode);
+      FetchModuleScriptTree(url, modulator, options);
 
       DCHECK(!resource_);
       DCHECK(module_tree_client_);
@@ -495,11 +500,13 @@ bool ScriptLoader::PrepareScript(const TextPosition& script_start_position,
         // 2. "Let script be the result of creating a module script using
         //     source text, settings, base URL, cryptographic nonce,
         //     parser state, and module script credentials mode."
+        // TODO(kouhei,hiroshige): Update spec refs to use ScriptFetchOptions.
         Modulator* modulator = Modulator::From(
             ToScriptStateForMainWorld(context_document->GetFrame()));
         ModuleScript* module_script = ModuleScript::Create(
-            element_->TextFromChildren(), modulator, base_url, nonce,
-            parser_state, credentials_mode, kSharableCrossOrigin, position);
+            element_->TextFromChildren(), modulator, base_url,
+            ScriptFetchOptions(nonce_, parser_state, credentials_mode),
+            kSharableCrossOrigin, position);
 
         // 3. "If this returns null, set the script's script to null and abort
         //     these substeps; the script is ready."
@@ -695,7 +702,11 @@ bool ScriptLoader::FetchClassicScript(
     CrossOriginAttributeValue cross_origin,
     SecurityOrigin* security_origin,
     const WTF::TextEncoding& encoding) {
+  // TODO(hiroshige): remove nonce from the method argument.
+  DCHECK_EQ(nonce_, nonce);
+
   // https://html.spec.whatwg.org/#prepare-a-script
+  // TODO(kouhei,hiroshige): Update to use ScriptFetchOptions
   // 21.6, "classic":
   // "Fetch a classic script given url, settings, ..."
   ResourceRequest resource_request(url);
@@ -729,7 +740,7 @@ bool ScriptLoader::FetchClassicScript(
   FetchParameters params(resource_request, options);
 
   // "... cryptographic nonce, ..."
-  params.SetContentSecurityPolicyNonce(nonce);
+  params.SetContentSecurityPolicyNonce(nonce_);
 
   // "... integrity metadata, ..."
   params.SetIntegrityMetadata(integrity_metadata);
@@ -761,23 +772,16 @@ bool ScriptLoader::FetchClassicScript(
   return true;
 }
 
-void ScriptLoader::FetchModuleScriptTree(
-    const KURL& url,
-    Modulator* modulator,
-    const String& nonce,
-    ParserDisposition parser_state,
-    WebURLRequest::FetchCredentialsMode credentials_mode) {
+void ScriptLoader::FetchModuleScriptTree(const KURL& url,
+                                         Modulator* modulator,
+                                         const ScriptFetchOptions& options) {
   // https://html.spec.whatwg.org/#prepare-a-script
-  // 21.6, "module":
-  //     "Fetch a module script graph given url, settings, "script",
-  //      cryptographic nonce, parser state, and
-  //      module script credentials mode."
-  ModuleScriptFetchRequest module_request(url, nonce, parser_state,
-                                          credentials_mode);
-
+  // 22.6, "module":
+  //     "Fetch a module script graph given url, settings object, "script", and
+  //      options."
   module_tree_client_ = ModulePendingScriptTreeClient::Create();
-
-  modulator->FetchTree(module_request, module_tree_client_);
+  modulator->FetchTree(ModuleScriptFetchRequest(url, options),
+                       module_tree_client_);
 }
 
 PendingScript* ScriptLoader::CreatePendingScript() {
@@ -842,7 +846,7 @@ ScriptLoader::ExecuteScriptResult ScriptLoader::DoExecuteScript(
                   script->GetScriptType() == ScriptType::kModule ||
                   is_imported_script
               ? context_document
-              : 0);
+              : nullptr);
 
   // 4. "Let old script element be the value to which the script element's
   //     node document's currentScript object was most recently set."
@@ -909,7 +913,7 @@ void ScriptLoader::ExecuteScriptBlock(PendingScript* pending_script,
   Document* element_document = &(element_->GetDocument());
   Document* context_document = element_document->ContextDocument();
   if (original_document_ != context_document &&
-      script->GetScriptType() == ScriptType::kModule)
+      GetScriptType() == ScriptType::kModule)
     return;
 
   // 2. "If the script's script is null, fire an event named error at the
@@ -969,14 +973,9 @@ void ScriptLoader::PendingScriptFinished(PendingScript* pending_script) {
   DCHECK_EQ(pending_script_, pending_script);
   DCHECK_EQ(pending_script_->GetScriptType(), GetScriptType());
 
-  // We do not need this script in the memory cache. The primary goals of
-  // sending this fetch request are to let the third party server know
-  // about the document.write scripts intervention and populate the http
-  // cache for subsequent uses.
   if (document_write_intervention_ ==
       DocumentWriteIntervention::kFetchDocWrittenScriptDeferIdle) {
     DCHECK_EQ(pending_script_->GetScriptType(), ScriptType::kClassic);
-    pending_script_->RemoveFromMemoryCache();
     pending_script_->StopWatchingForLoad();
     return;
   }

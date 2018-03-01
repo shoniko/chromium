@@ -110,16 +110,15 @@ class QUIC_EXPORT_PRIVATE BbrSender : public SendAlgorithmInterface {
                          QuicByteCount prior_in_flight,
                          QuicTime event_time,
                          const AckedPacketVector& acked_packets,
-                         const CongestionVector& lost_packets) override;
-  bool OnPacketSent(QuicTime sent_time,
+                         const LostPacketVector& lost_packets) override;
+  void OnPacketSent(QuicTime sent_time,
                     QuicByteCount bytes_in_flight,
                     QuicPacketNumber packet_number,
                     QuicByteCount bytes,
                     HasRetransmittableData is_retransmittable) override;
   void OnRetransmissionTimeout(bool packets_retransmitted) override {}
   void OnConnectionMigration() override {}
-  QuicTime::Delta TimeUntilSend(QuicTime now,
-                                QuicByteCount bytes_in_flight) override;
+  bool CanSend(QuicByteCount bytes_in_flight) override;
   QuicBandwidth PacingRate(QuicByteCount bytes_in_flight) const override;
   QuicBandwidth BandwidthEstimate() const override;
   QuicByteCount GetCongestionWindow() const override;
@@ -168,7 +167,7 @@ class QUIC_EXPORT_PRIVATE BbrSender : public SendAlgorithmInterface {
   void EnterProbeBandwidthMode(QuicTime now);
 
   // Discards the lost packets from BandwidthSampler state.
-  void DiscardLostPackets(const CongestionVector& lost_packets);
+  void DiscardLostPackets(const LostPacketVector& lost_packets);
   // Updates the round-trip counter if a round-trip has passed.  Returns true if
   // the counter has been advanced.
   bool UpdateRoundTripCounter(QuicPacketNumber last_acked_packet);
@@ -312,13 +311,16 @@ class QUIC_EXPORT_PRIVATE BbrSender : public SendAlgorithmInterface {
   // Current state of recovery.
   RecoveryState recovery_state_;
   // Receiving acknowledgement of a packet after |end_recovery_at_| will cause
-  // BBR to exit the recovery mode.
+  // BBR to exit the recovery mode.  A value above zero indicates at least one
+  // loss has been detected, so it must not be set back to zero.
   QuicPacketNumber end_recovery_at_;
   // A window used to limit the number of bytes in flight during loss recovery.
   QuicByteCount recovery_window_;
 
   // When true, recovery is rate based rather than congestion window based.
   bool rate_based_recovery_;
+  // When true, pace at 1.5x and disable packet conservation in STARTUP.
+  bool slower_startup_;
 
   DISALLOW_COPY_AND_ASSIGN(BbrSender);
 };

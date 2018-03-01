@@ -144,7 +144,7 @@ TEST_F(GpuDataManagerImplPrivateTest, GpuSideBlacklisting) {
       gpu::kGpuDataManagerTestingEntries
           [gpu::kGpuDataManagerImplPrivateTest_GpuSideBlacklisting_1],
   };
-  const gpu::GpuControlListData kData("1.0", 2, kEntries);
+  const gpu::GpuControlListData kData(2, kEntries);
 
   gpu::GPUInfo gpu_info;
   gpu_info.gpu.vendor_id = 0x10de;
@@ -170,12 +170,14 @@ TEST_F(GpuDataManagerImplPrivateTest, GpuSideBlacklisting) {
     EXPECT_TRUE(reason.empty());
     EXPECT_EQ(static_cast<size_t>(gpu::NUMBER_OF_GPU_FEATURE_TYPES),
               manager->GetBlacklistedFeatureCount());
-    EXPECT_TRUE(manager->IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_WEBGL2));
+    EXPECT_TRUE(manager->IsFeatureBlacklisted(
+        gpu::GPU_FEATURE_TYPE_ACCELERATED_WEBGL2));
   } else {
     EXPECT_TRUE(manager->GpuAccessAllowed(&reason));
     EXPECT_TRUE(reason.empty());
     EXPECT_EQ(2u, manager->GetBlacklistedFeatureCount());
-    EXPECT_FALSE(manager->IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_WEBGL2));
+    EXPECT_FALSE(manager->IsFeatureBlacklisted(
+        gpu::GPU_FEATURE_TYPE_ACCELERATED_WEBGL2));
   }
   EXPECT_TRUE(
       manager->IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_ACCELERATED_WEBGL));
@@ -200,7 +202,7 @@ TEST_F(GpuDataManagerImplPrivateTest, GpuSideBlacklistingWebGL) {
       gpu::kGpuDataManagerTestingEntries
           [gpu::kGpuDataManagerImplPrivateTest_GpuSideBlacklistingWebGL_1],
   };
-  const gpu::GpuControlListData kData("1.0", 2, kEntries);
+  const gpu::GpuControlListData kData(2, kEntries);
 
   gpu::GPUInfo gpu_info;
   gpu_info.gpu.vendor_id = 0x10de;
@@ -233,7 +235,8 @@ TEST_F(GpuDataManagerImplPrivateTest, GpuSideBlacklistingWebGL) {
       gpu::GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS));
   EXPECT_TRUE(
       manager->IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_ACCELERATED_WEBGL));
-  EXPECT_TRUE(manager->IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_WEBGL2));
+  EXPECT_TRUE(
+      manager->IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_ACCELERATED_WEBGL2));
 }
 
 TEST_F(GpuDataManagerImplPrivateTest, GpuSideExceptions) {
@@ -245,7 +248,7 @@ TEST_F(GpuDataManagerImplPrivateTest, GpuSideExceptions) {
       gpu::kGpuDataManagerTestingEntries
           [gpu::kGpuDataManagerImplPrivateTest_GpuSideException],
   };
-  const gpu::GpuControlListData kData("1.0", 1, kEntries);
+  const gpu::GpuControlListData kData(1, kEntries);
 
   gpu::GPUInfo gpu_info;
   gpu_info.gpu.vendor_id = 0x10de;
@@ -306,7 +309,8 @@ TEST_F(GpuDataManagerImplPrivateTest, SwiftShaderRendering) {
             manager->GetBlacklistedFeatureCount());
   EXPECT_TRUE(manager->IsFeatureBlacklisted(
       gpu::GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS));
-  EXPECT_TRUE(manager->IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_WEBGL2));
+  EXPECT_TRUE(
+      manager->IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_ACCELERATED_WEBGL2));
 }
 
 TEST_F(GpuDataManagerImplPrivateTest, SwiftShaderRendering2) {
@@ -328,7 +332,8 @@ TEST_F(GpuDataManagerImplPrivateTest, SwiftShaderRendering2) {
             manager->GetBlacklistedFeatureCount());
   EXPECT_TRUE(manager->IsFeatureBlacklisted(
       gpu::GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS));
-  EXPECT_TRUE(manager->IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_WEBGL2));
+  EXPECT_TRUE(
+      manager->IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_ACCELERATED_WEBGL2));
 }
 
 TEST_F(GpuDataManagerImplPrivateTest, GpuInfoUpdate) {
@@ -527,7 +532,7 @@ TEST_F(GpuDataManagerImplPrivateTest, SetGLStrings) {
       gpu::kGpuDataManagerTestingEntries
           [gpu::kGpuDataManagerImplPrivateTest_SetGLStrings],
   };
-  const gpu::GpuControlListData kData("1.0", 1, kEntries);
+  const gpu::GpuControlListData kData(1, kEntries);
 
   gpu::GPUInfo gpu_info;
   gpu_info.gpu.vendor_id = 0x8086;
@@ -573,7 +578,7 @@ TEST_F(GpuDataManagerImplPrivateTest, SetGLStringsNoEffects) {
       gpu::kGpuDataManagerTestingEntries
           [gpu::kGpuDataManagerImplPrivateTest_SetGLStringsNoEffects],
   };
-  const gpu::GpuControlListData kData("1.0", 1, kEntries);
+  const gpu::GpuControlListData kData(1, kEntries);
 
   gpu::GPUInfo gpu_info;
   gpu_info.gpu.vendor_id = 0x8086;
@@ -624,7 +629,7 @@ TEST_F(GpuDataManagerImplPrivateTest, SetGLStringsDefered) {
       gpu::kGpuDataManagerTestingEntries
           [gpu::kGpuDataManagerImplPrivateTest_SetGLStringsDefered],
   };
-  const gpu::GpuControlListData kData("1.0", 1, kEntries);
+  const gpu::GpuControlListData kData(1, kEntries);
 
   // Check that it is allowed to call SetGLStrings before Initialize.
 
@@ -660,7 +665,7 @@ TEST_F(GpuDataManagerImplPrivateTest, BlacklistAllFeatures) {
       gpu::kGpuDataManagerTestingEntries
           [gpu::kGpuDataManagerImplPrivateTest_BlacklistAllFeatures],
   };
-  const gpu::GpuControlListData kData("1.0", 1, kEntries);
+  const gpu::GpuControlListData kData(1, kEntries);
 
   gpu::GPUInfo gpu_info;
   gpu_info.gpu.vendor_id = 0x10de;
@@ -682,7 +687,7 @@ TEST_F(GpuDataManagerImplPrivateTest, UpdateActiveGpu) {
       gpu::kGpuDataManagerTestingEntries
           [gpu::kGpuDataManagerImplPrivateTest_UpdateActiveGpu],
   };
-  const gpu::GpuControlListData kData("1.0", 1, kEntries);
+  const gpu::GpuControlListData kData(1, kEntries);
 
   // Two GPUs, the secondary Intel GPU is active.
   gpu::GPUInfo gpu_info;

@@ -3,7 +3,9 @@
 // found in the LICENSE file.
 
 // IPC messages for extensions.
-// Multiply-included message file, hence no include guard.
+
+#ifndef EXTENSIONS_COMMON_EXTENSION_MESSAGES_H_
+#define EXTENSIONS_COMMON_EXTENSION_MESSAGES_H_
 
 #include <stdint.h>
 
@@ -276,9 +278,16 @@ IPC_STRUCT_TRAITS_BEGIN(extensions::EventFilteringInfo)
   IPC_STRUCT_TRAITS_MEMBER(window_exposed_by_default)
 IPC_STRUCT_TRAITS_END()
 
+// Identifier containing info about a service worker, used in event listener
+// IPCs.
+IPC_STRUCT_BEGIN(ServiceWorkerIdentifier)
+  IPC_STRUCT_MEMBER(GURL, scope)
+  IPC_STRUCT_MEMBER(int, thread_id)
+IPC_STRUCT_END()
+
 // Singly-included section for custom IPC traits.
-#ifndef EXTENSIONS_COMMON_EXTENSION_MESSAGES_H_
-#define EXTENSIONS_COMMON_EXTENSION_MESSAGES_H_
+#ifndef INTERNAL_EXTENSIONS_COMMON_EXTENSION_MESSAGES_H_
+#define INTERNAL_EXTENSIONS_COMMON_EXTENSION_MESSAGES_H_
 
 // IPC_MESSAGE macros choke on extra , in the std::map, when expanding. We need
 // to typedef it to avoid that.
@@ -346,7 +355,7 @@ struct ExtensionMsg_Loaded_Params {
 };
 
 struct ExtensionHostMsg_AutomationQuerySelector_Error {
-  enum Value { kNone, kNoMainFrame, kNoDocument, kNodeDestroyed };
+  enum Value { kNone, kNoDocument, kNodeDestroyed };
 
   ExtensionHostMsg_AutomationQuerySelector_Error() : value(kNone) {}
 
@@ -437,7 +446,7 @@ struct ParamTraits<ExtensionMsg_Loaded_Params> {
 
 }  // namespace IPC
 
-#endif  // EXTENSIONS_COMMON_EXTENSION_MESSAGES_H_
+#endif  // INTERNAL_EXTENSIONS_COMMON_EXTENSION_MESSAGES_H_
 
 IPC_ENUM_TRAITS_MAX_VALUE(
     ExtensionHostMsg_AutomationQuerySelector_Error::Value,
@@ -724,19 +733,27 @@ IPC_MESSAGE_CONTROL3(ExtensionHostMsg_RemoveLazyServiceWorkerListener,
 
 // Notify the browser that the given extension added a listener to instances of
 // the named event that satisfy the filter.
-IPC_MESSAGE_CONTROL4(ExtensionHostMsg_AddFilteredListener,
-                     std::string /* extension_id */,
-                     std::string /* name */,
-                     base::DictionaryValue /* filter */,
-                     bool /* lazy */)
+// If |sw_identifier| is specified, it implies that the listener is for a
+// service worker, and the param is used to identify the worker.
+IPC_MESSAGE_CONTROL5(
+    ExtensionHostMsg_AddFilteredListener,
+    std::string /* extension_id */,
+    std::string /* name */,
+    base::Optional<ServiceWorkerIdentifier> /* sw_identifier */,
+    base::DictionaryValue /* filter */,
+    bool /* lazy */)
 
 // Notify the browser that the given extension is no longer interested in
 // instances of the named event that satisfy the filter.
-IPC_MESSAGE_CONTROL4(ExtensionHostMsg_RemoveFilteredListener,
-                     std::string /* extension_id */,
-                     std::string /* name */,
-                     base::DictionaryValue /* filter */,
-                     bool /* lazy */)
+// If |sw_identifier| is specified, it implies that the listener is for a
+// service worker, and the param is used to identify the worker.
+IPC_MESSAGE_CONTROL5(
+    ExtensionHostMsg_RemoveFilteredListener,
+    std::string /* extension_id */,
+    std::string /* name */,
+    base::Optional<ServiceWorkerIdentifier> /* sw_identifier */,
+    base::DictionaryValue /* filter */,
+    bool /* lazy */)
 
 // Notify the browser that an event has finished being dispatched.
 IPC_MESSAGE_ROUTED1(ExtensionHostMsg_EventAck, int /* message_id */)
@@ -855,7 +872,7 @@ IPC_SYNC_MESSAGE_CONTROL0_1(ExtensionHostMsg_GenerateUniqueID,
 
 // Notify the browser that an app window is ready and can resume resource
 // requests.
-IPC_MESSAGE_CONTROL1(ExtensionHostMsg_AppWindowReady, int /* route_id */)
+IPC_MESSAGE_ROUTED0(ExtensionHostMsg_AppWindowReady)
 
 // Sent by the renderer when the draggable regions are updated.
 IPC_MESSAGE_ROUTED1(ExtensionHostMsg_UpdateDraggableRegions,
@@ -881,8 +898,8 @@ IPC_MESSAGE_CONTROL2(ExtensionHostMsg_AddDOMActionToActivityLog,
 //
 // * ExtensionMsg_WatchPages was received, updating the set of conditions.
 // * A new page is loaded.  This will be sent after
-//   FrameHostMsg_DidCommitProvisionalLoad. Currently this only fires for the
-//   main frame.
+//   mojom::FrameHost::DidCommitProvisionalLoad. Currently this only fires for
+//   the main frame.
 // * Something changed on an existing frame causing the set of matching searches
 //   to change.
 IPC_MESSAGE_ROUTED1(ExtensionHostMsg_OnWatchedPageChange,
@@ -961,3 +978,5 @@ IPC_MESSAGE_CONTROL2(ExtensionHostMsg_IncrementServiceWorkerActivity,
 IPC_MESSAGE_CONTROL2(ExtensionHostMsg_DecrementServiceWorkerActivity,
                      int64_t /* service_worker_version_id */,
                      std::string /* request_uuid */)
+
+#endif  // EXTENSIONS_COMMON_EXTENSION_MESSAGES_H_

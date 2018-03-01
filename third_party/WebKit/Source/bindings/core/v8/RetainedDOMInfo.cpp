@@ -42,8 +42,8 @@ v8::RetainedObjectInfo* RetainedDOMInfo::CreateRetainedDOMInfo(
     v8::Local<v8::Value> wrapper) {
   DCHECK_EQ(class_id, WrapperTypeInfo::kNodeClassId);
   if (!wrapper->IsObject())
-    return 0;
-  Node* node = V8Node::toImpl(wrapper.As<v8::Object>());
+    return nullptr;
+  Node* node = V8Node::ToImpl(wrapper.As<v8::Object>());
   return node ? new RetainedDOMInfo(node) : nullptr;
 }
 

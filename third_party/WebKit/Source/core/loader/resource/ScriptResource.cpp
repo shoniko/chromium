@@ -77,7 +77,7 @@ void ScriptResource::OnMemoryDump(WebMemoryDumpLevelOfDetail level_of_detail,
                                   WebProcessMemoryDump* memory_dump) const {
   Resource::OnMemoryDump(level_of_detail, memory_dump);
   const String name = GetMemoryDumpName() + "/decoded_script";
-  auto dump = memory_dump->CreateMemoryAllocatorDump(name);
+  auto* dump = memory_dump->CreateMemoryAllocatorDump(name);
   dump->AddScalar("size", "bytes", source_text_.CharactersSizeInBytes());
   memory_dump->AddSuballocation(
       dump->Guid(), String(WTF::Partitions::kAllocatedObjectPoolName));
@@ -99,16 +99,6 @@ const String& ScriptResource::SourceText() {
 void ScriptResource::DestroyDecodedDataForFailedRevalidation() {
   source_text_ = AtomicString();
   SetDecodedSize(0);
-}
-
-// static
-bool ScriptResource::MimeTypeAllowedByNosniff(
-    const ResourceResponse& response) {
-  return ParseContentTypeOptionsHeader(
-             response.HttpHeaderField(HTTPNames::X_Content_Type_Options)) !=
-             kContentTypeOptionsNosniff ||
-         MIMETypeRegistry::IsSupportedJavaScriptMIMEType(
-             response.HttpContentType());
 }
 
 AccessControlStatus ScriptResource::CalculateAccessControlStatus() const {

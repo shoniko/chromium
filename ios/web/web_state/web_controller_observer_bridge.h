@@ -5,7 +5,8 @@
 #ifndef IOS_WEB_WEB_STATE_WEB_CONTROLLER_OBSERVER_BRIDGE_H_
 #define IOS_WEB_WEB_STATE_WEB_CONTROLLER_OBSERVER_BRIDGE_H_
 
-#import "base/ios/weak_nsobject.h"
+#import <Foundation/Foundation.h>
+
 #include "base/macros.h"
 #include "ios/web/public/web_state/web_state_observer.h"
 
@@ -40,10 +41,11 @@ class WebControllerObserverBridge : public WebStateObserver {
 
  private:
   // WebStateObserver implementation.
-  void PageLoaded(PageLoadCompletionStatus load_completion_status) override;
+  void PageLoaded(WebState* web_state,
+                  PageLoadCompletionStatus load_completion_status) override;
 
-  base::WeakNSProtocol<id<CRWWebControllerObserver>> web_controller_observer_;
-  base::WeakNSObject<CRWWebController> web_controller_;
+  __weak id<CRWWebControllerObserver> web_controller_observer_ = nil;
+  __weak CRWWebController* web_controller_ = nil;
 
   DISALLOW_COPY_AND_ASSIGN(WebControllerObserverBridge);
 };

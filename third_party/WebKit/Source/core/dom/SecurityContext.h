@@ -52,11 +52,11 @@ class CORE_EXPORT SecurityContext : public GarbageCollectedMixin {
   WTF_MAKE_NONCOPYABLE(SecurityContext);
 
  public:
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   using InsecureNavigationsSet = HashSet<unsigned, WTF::AlreadyHashed>;
 
-  SecurityOrigin* GetSecurityOrigin() const { return security_origin_.Get(); }
+  SecurityOrigin* GetSecurityOrigin() const { return security_origin_.get(); }
   ContentSecurityPolicy* GetContentSecurityPolicy() const {
     return content_security_policy_.Get();
   }
@@ -64,7 +64,7 @@ class CORE_EXPORT SecurityContext : public GarbageCollectedMixin {
   // Explicitly override the security origin for this security context.
   // Note: It is dangerous to change the security origin of a script context
   //       that already contains content.
-  void SetSecurityOrigin(RefPtr<SecurityOrigin>);
+  void SetSecurityOrigin(scoped_refptr<SecurityOrigin>);
   virtual void DidUpdateSecurityOrigin() = 0;
 
   SandboxFlags GetSandboxFlags() const { return sandbox_flags_; }
@@ -74,6 +74,9 @@ class CORE_EXPORT SecurityContext : public GarbageCollectedMixin {
   void SetAddressSpace(WebAddressSpace space) { address_space_ = space; }
   WebAddressSpace AddressSpace() const { return address_space_; }
   String addressSpaceForBindings() const;
+
+  void SetRequireTrustedTypes() { require_safe_types_ = true; }
+  bool RequireTrustedTypes() const { return require_safe_types_; }
 
   void AddInsecureNavigationUpgrade(unsigned hashed_host) {
     insecure_navigations_to_upgrade_.insert(hashed_host);
@@ -106,7 +109,7 @@ class CORE_EXPORT SecurityContext : public GarbageCollectedMixin {
   void SetContentSecurityPolicy(ContentSecurityPolicy*);
 
  private:
-  RefPtr<SecurityOrigin> security_origin_;
+  scoped_refptr<SecurityOrigin> security_origin_;
   Member<ContentSecurityPolicy> content_security_policy_;
   std::unique_ptr<WebFeaturePolicy> feature_policy_;
 
@@ -115,6 +118,7 @@ class CORE_EXPORT SecurityContext : public GarbageCollectedMixin {
   WebAddressSpace address_space_;
   WebInsecureRequestPolicy insecure_request_policy_;
   InsecureNavigationsSet insecure_navigations_to_upgrade_;
+  bool require_safe_types_;
 };
 
 }  // namespace blink

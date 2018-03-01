@@ -41,6 +41,7 @@
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/controls/prefix_selector.h"
 #include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/layout/layout_provider.h"
 #include "ui/views/mouse_constants.h"
 #include "ui/views/painter.h"
 #include "ui/views/resources/grit/views_resources.h"
@@ -515,6 +516,12 @@ bool Combobox::SelectValue(const base::string16& value) {
   return false;
 }
 
+void Combobox::SetTooltipText(const base::string16& tooltip_text) {
+  arrow_button_->SetTooltipText(tooltip_text);
+  if (accessible_name_.empty())
+    accessible_name_ = tooltip_text;
+}
+
 void Combobox::SetAccessibleName(const base::string16& name) {
   accessible_name_ = name;
 }
@@ -595,10 +602,10 @@ gfx::Size Combobox::CalculatePreferredSize() const {
   // The preferred size will drive the local bounds which in turn is used to set
   // the minimum width for the dropdown list.
   gfx::Insets insets = GetInsets();
-  insets += gfx::Insets(Textfield::kTextPadding,
-                        Textfield::kTextPadding,
-                        Textfield::kTextPadding,
-                        Textfield::kTextPadding);
+  const LayoutProvider* provider = LayoutProvider::Get();
+  insets += gfx::Insets(
+      provider->GetDistanceMetric(DISTANCE_CONTROL_VERTICAL_TEXT_PADDING),
+      provider->GetDistanceMetric(DISTANCE_TEXTFIELD_HORIZONTAL_TEXT_PADDING));
   int total_width = std::max(kMinComboboxWidth, content_size_.width()) +
                     insets.width() + GetArrowContainerWidth();
   return gfx::Size(total_width, content_size_.height() + insets.height());
@@ -828,7 +835,8 @@ void Combobox::AdjustBoundsForRTLUI(gfx::Rect* rect) const {
 
 void Combobox::PaintText(gfx::Canvas* canvas) {
   gfx::Insets insets = GetInsets();
-  insets += gfx::Insets(0, Textfield::kTextPadding, 0, Textfield::kTextPadding);
+  insets += gfx::Insets(0, LayoutProvider::Get()->GetDistanceMetric(
+                               DISTANCE_TEXTFIELD_HORIZONTAL_TEXT_PADDING));
 
   gfx::ScopedCanvas scoped_canvas(canvas);
   canvas->ClipRect(GetContentsBounds());

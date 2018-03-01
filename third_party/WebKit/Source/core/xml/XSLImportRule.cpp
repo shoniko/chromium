@@ -24,11 +24,11 @@
 #include "core/dom/Document.h"
 #include "core/loader/resource/XSLStyleSheetResource.h"
 #include "platform/SharedBuffer.h"
-#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
 #include "platform/loader/fetch/FetchParameters.h"
 #include "platform/loader/fetch/RawResource.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
+#include "platform/loader/fetch/fetch_initiator_type_names.h"
 #include "platform/wtf/text/TextEncoding.h"
 
 namespace blink {
@@ -42,7 +42,7 @@ void XSLImportRule::SetXSLStyleSheet(const String& href,
                                      const KURL& base_url,
                                      const String& sheet) {
   if (style_sheet_)
-    style_sheet_->SetParentStyleSheet(0);
+    style_sheet_->SetParentStyleSheet(nullptr);
 
   style_sheet_ = XSLStyleSheet::Create(this, href, base_url);
 
@@ -102,7 +102,7 @@ void XSLImportRule::LoadSheet() {
   SetXSLStyleSheet(abs_href, resource->GetResponse().Url(), resource->Sheet());
 }
 
-DEFINE_TRACE(XSLImportRule) {
+void XSLImportRule::Trace(blink::Visitor* visitor) {
   visitor->Trace(parent_style_sheet_);
   visitor->Trace(style_sheet_);
 }

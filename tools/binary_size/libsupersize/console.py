@@ -14,6 +14,7 @@ import os
 import readline
 import subprocess
 import sys
+import types
 
 import archive
 import canned_queries
@@ -22,6 +23,7 @@ import diff
 import file_format
 import match_util
 import models
+import nm
 import paths
 
 
@@ -70,12 +72,15 @@ class _Session(object):
     self._printed_variables = []
     self._variables = {
         'Print': self._PrintFunc,
+        'Csv': self._CsvFunc,
         'Diff': self._DiffFunc,
+        'ReadStringLiterals': self._ReadStringLiterals,
         'Disassemble': self._DisassembleFunc,
         'ExpandRegex': match_util.ExpandRegexIdentifierPlaceholder,
         'ShowExamples': self._ShowExamplesFunc,
         'canned_queries': canned_queries.CannedQueries(size_infos),
         'printed': self._printed_variables,
+        'models': models,
     }
     self._lazy_paths = lazy_paths
     self._size_infos = size_infos
@@ -86,6 +91,44 @@ class _Session(object):
     else:
       for i, size_info in enumerate(size_infos):
         self._variables['size_info%d' % (i + 1)] = size_info
+
+  def _ReadStringLiterals(self, thing=None, elf_path=None):
+    """Returns a list of (symbol, string value) for all string literal symbols.
+
+    E.g.:
+      # Print sorted list of all string literals:
+      Print(sorted(x[1] for x in ReadStringLiterals()))
+    Args:
+      thing: Can be a Symbol, iterable of symbols, or SizeInfo.
+           Defaults to the current SizeInfo.
+      elf_path: Path to the executable containing the symbol. Required only
+          when auto-detection fails.
+    """
+    if thing is None:
+      thing = self._size_infos[-1]
+    if isinstance(thing, models.SizeInfo):
+      thing = thing.raw_symbols.IterUniqueSymbols()
+    elif isinstance(thing, models.BaseSymbol):
+      thing = thing.IterLeafSymbols()
+
+    thing, thing_clone = itertools.tee(thing)
+    first_sym = next(thing_clone, None)
+    if not first_sym:
+      return []
+    size_info = self._SizeInfoForSymbol(first_sym)
+    elf_path, tool_prefix = self._ElfPathAndToolPrefixForSymbol(
+        size_info, elf_path)
+
+    address, offset, _ = nm.LookupElfRodataInfo(elf_path, tool_prefix)
+    adjust = offset - address
+    ret = []
+    with open(elf_path) as f:
+      for symbol in thing:
+        if symbol.IsStringLiteral():
+          f.seek(symbol.address + adjust)
+          data = f.read(symbol.size_without_padding)
+          ret.append((symbol, data))
+    return ret
 
   def _DiffFunc(self, before=None, after=None, sort=True):
     """Diffs two SizeInfo objects. Returns a DeltaSizeInfo.
@@ -99,31 +142,63 @@ class _Session(object):
     after = after if after is not None else self._size_infos[1]
     ret = diff.Diff(before, after)
     if sort:
-      ret.symbols = ret.symbols.Sorted()
+      syms = ret.symbols  # Triggers clustering.
+      logging.debug('Grouping')
+      # Group path aliases so that functions defined in headers will be sorted
+      # by their actual size rather than shown as many small symbols.
+      syms = syms.GroupedByAliases(same_name_only=True)
+      logging.debug('Sorting')
+      ret.symbols = syms.Sorted()
+    logging.debug('Diff complete')
     return ret
 
-  def _PrintFunc(self, obj=None, verbose=False, recursive=False, use_pager=None,
-                 to_file=None):
-    """Prints out the given Symbol / SymbolGroup / SizeInfo.
-
-    For convenience, |obj| will be appended to the global "printed" list.
-
-    Args:
-      obj: The object to be printed. Defaults to size_infos[-1]. Also accepts an
-          index into the |printed| array for showing previous results.
-      verbose: Show more detailed output.
-      recursive: Print children of nested SymbolGroups.
-      use_pager: Pipe output through `less`. Ignored when |obj| is a Symbol.
-          default is to automatically pipe when output is long.
-      to_file: Rather than print to stdio, write to the given file.
-    """
+  def _GetObjToPrint(self, obj=None):
     if isinstance(obj, int):
       obj = self._printed_variables[obj]
     elif not self._printed_variables or self._printed_variables[-1] != obj:
       if not isinstance(obj, models.SymbolGroup) or len(obj) > 0:
         self._printed_variables.append(obj)
-    obj = obj if obj is not None else self._size_infos[-1]
-    lines = describe.GenerateLines(obj, verbose=verbose, recursive=recursive)
+    return obj if obj is not None else self._size_infos[-1]
+
+  def _PrintFunc(self, obj=None, verbose=False, summarize=True, recursive=False,
+                 use_pager=None, to_file=None):
+    """Prints out the given Symbol / SymbolGroup / SizeInfo.
+
+    For convenience, |obj| will be appended to the global "printed" list.
+
+    Args:
+      obj: The object to be printed. Defaults to |size_infos[-1]|. Also accepts
+          an index into the |_printed_variables| array for showing previous
+          results.
+      verbose: Show more detailed output.
+      summarize: If False, show symbols only (no headers / summaries).
+      recursive: Print children of nested SymbolGroups.
+      use_pager: Pipe output through `less`. Ignored when |obj| is a Symbol.
+          default is to automatically pipe when output is long.
+      to_file: Rather than print to stdio, write to the given file.
+    """
+    obj = self._GetObjToPrint(obj)
+    lines = describe.GenerateLines(
+        obj, verbose=verbose, recursive=recursive, summarize=summarize,
+        format_name='text')
+    _WriteToStream(lines, use_pager=use_pager, to_file=to_file)
+
+  def _CsvFunc(self, obj=None, verbose=False, use_pager=None, to_file=None):
+    """Prints out the given Symbol / SymbolGroup / SizeInfo in CSV format.
+
+    For convenience, |obj| will be appended to the global "printed" list.
+
+    Args:
+      obj: The object to be printed as CSV. Defaults to |size_infos[-1]|. Also
+          accepts an index into the |_printed_variables| array for showing
+          previous results.
+      use_pager: Pipe output through `less`. Ignored when |obj| is a Symbol.
+          default is to automatically pipe when output is long.
+      to_file: Rather than print to stdio, write to the given file.
+    """
+    obj = self._GetObjToPrint(obj)
+    lines = describe.GenerateLines(obj, verbose=verbose, recursive=False,
+                                   format_name='csv')
     _WriteToStream(lines, use_pager=use_pager, to_file=to_file)
 
   def _ElfPathAndToolPrefixForSymbol(self, size_info, elf_path):
@@ -199,6 +274,12 @@ class _Session(object):
     logging.warning('Found no source paths in objdump output.')
     return None
 
+  def _SizeInfoForSymbol(self, symbol):
+    for size_info in self._size_infos:
+      if symbol in size_info.raw_symbols:
+        return size_info
+    assert False, 'Symbol does not belong to a size_info.'
+
   def _DisassembleFunc(self, symbol, elf_path=None, use_pager=None,
                        to_file=None):
     """Shows objdump disassembly for the given symbol.
@@ -212,12 +293,7 @@ class _Session(object):
     assert symbol.address and symbol.section_name == '.text'
     assert not symbol.IsDelta(), ('Cannot disasseble a Diff\'ed symbol. Try '
                                   'passing .before_symbol or .after_symbol.')
-    size_info = None
-    for size_info in self._size_infos:
-      if symbol in size_info.raw_symbols:
-        break
-    else:
-      assert False, 'Symbol does not belong to a size_info.'
+    size_info = self._SizeInfoForSymbol(symbol)
 
     elf_path, tool_prefix = self._ElfPathAndToolPrefixForSymbol(
         size_info, elf_path)
@@ -260,6 +336,12 @@ class _Session(object):
         '',
         '# Show all attributes of all symbols & per-section totals:',
         'Print(size_info, verbose=True)',
+        '',
+        '# Dump section info and all symbols in CSV format:',
+        'Csv(size_info)',
+        '',
+        '# Print sorted list of all string literals:',
+        'Print(sorted(x[1] for x in ReadStringLiterals()))',
         '',
         '# Show two levels of .text, grouped by first two subdirectories',
         'text_syms = size_info.symbols.WhereInSection("t")',
@@ -327,6 +409,8 @@ class _Session(object):
         '  printed: List of objects passed to Print().',
     ]
     for key, value in self._variables.iteritems():
+      if isinstance(value, types.ModuleType):
+        continue
       if key.startswith('size_info'):
         lines.append('  {}: Loaded from {}'.format(key, value.size_path))
     lines.append('*' * 80)

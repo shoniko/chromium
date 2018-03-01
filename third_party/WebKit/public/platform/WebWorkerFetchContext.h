@@ -10,14 +10,11 @@
 #include "public/platform/WebApplicationCacheHost.h"
 #include "public/platform/WebDocumentSubresourceFilter.h"
 #include "public/platform/WebURL.h"
-
-namespace base {
-class SingleThreadTaskRunner;
-}  // namespace base
+#include "public/platform/scheduler/single_thread_task_runner.h"
 
 namespace blink {
 
-class WebURLLoader;
+class WebURLLoaderFactory;
 class WebURLRequest;
 class WebDocumentSubresourceFilter;
 
@@ -30,13 +27,11 @@ class WebWorkerFetchContext {
  public:
   virtual ~WebWorkerFetchContext() {}
 
-  virtual void InitializeOnWorkerThread(base::SingleThreadTaskRunner*) = 0;
+  virtual void InitializeOnWorkerThread(SingleThreadTaskRunnerRefPtr) = 0;
 
-  // Returns a new WebURLLoader instance which is associated with the worker
-  // thread.
-  virtual std::unique_ptr<WebURLLoader> CreateURLLoader(
-      const WebURLRequest&,
-      base::SingleThreadTaskRunner*) = 0;
+  // Returns a new WebURLLoaderFactory which is associated with the worker
+  // context. It can be called only once.
+  virtual std::unique_ptr<WebURLLoaderFactory> CreateURLLoaderFactory() = 0;
 
   // Called when a request is about to be sent out to modify the request to
   // handle the request correctly in the loading stack later. (Example: service

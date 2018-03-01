@@ -7,20 +7,23 @@
 
 #include <map>
 #include <memory>
-#include <queue>
 #include <set>
 #include <string>
 
 #include "base/callback.h"
+#include "base/containers/queue.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/notifications/notification_common.h"
 #include "chrome/browser/notifications/notification_display_service.h"
 
 class MessageCenterDisplayService;
-class Notification;
 class NotificationPlatformBridge;
 class Profile;
+
+namespace message_center {
+class Notification;
+}
 
 // A class to display and interact with notifications in native notification
 // centers on platforms that support it.
@@ -34,7 +37,8 @@ class NativeNotificationDisplayService : public NotificationDisplayService {
   // NotificationDisplayService implementation.
   void Display(NotificationCommon::Type notification_type,
                const std::string& notification_id,
-               const Notification& notification) override;
+               const message_center::Notification& notification,
+               std::unique_ptr<NotificationCommon::Metadata> metadata) override;
   void Close(NotificationCommon::Type notification_type,
              const std::string& notification_id) override;
   void GetDisplayed(const DisplayedNotificationsCallback& callback) override;
@@ -56,7 +60,7 @@ class NativeNotificationDisplayService : public NotificationDisplayService {
 
   // Tasks that need to be run once we have the initialization status
   // for |notification_bridge_|.
-  std::queue<base::OnceClosure> actions_;
+  base::queue<base::OnceClosure> actions_;
 
   base::WeakPtrFactory<NativeNotificationDisplayService> weak_factory_;
 

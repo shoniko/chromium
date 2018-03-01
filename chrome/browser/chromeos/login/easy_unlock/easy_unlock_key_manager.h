@@ -24,7 +24,7 @@ class AccountId;
 namespace base {
 class DictionaryValue;
 class ListValue;
-}
+}  // namespace base
 
 namespace chromeos {
 
@@ -89,9 +89,6 @@ class EasyUnlockKeyManager {
   void RefreshKeysWithTpmKeyPresent(const UserContext& user_context,
                                     base::ListValue* remote_devices,
                                     const RefreshKeysCallback& callback);
-
-  // Returns true if there are pending operations.
-  bool HasPendingOperations() const;
 
   // Callback invoked after refresh keys operation.
   void OnKeysRefreshed(const RefreshKeysCallback& callback,

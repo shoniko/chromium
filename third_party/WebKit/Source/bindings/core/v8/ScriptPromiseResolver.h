@@ -10,9 +10,9 @@
 #include "core/CoreExport.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/SuspendableObject.h"
-#include "platform/ScriptForbiddenScope.h"
 #include "platform/Timer.h"
 #include "platform/bindings/ScopedPersistent.h"
+#include "platform/bindings/ScriptForbiddenScope.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/heap/Handle.h"
 #include "platform/heap/SelfKeepAlive.h"
@@ -73,7 +73,7 @@ class CORE_EXPORT ScriptPromiseResolver
   void Resolve() { Resolve(ToV8UndefinedGenerator()); }
   void Reject() { Reject(ToV8UndefinedGenerator()); }
 
-  ScriptState* GetScriptState() { return script_state_.Get(); }
+  ScriptState* GetScriptState() { return script_state_.get(); }
 
   // Note that an empty ScriptPromise will be returned after resolve or
   // reject is called.
@@ -84,7 +84,7 @@ class CORE_EXPORT ScriptPromiseResolver
     return resolver_.Promise();
   }
 
-  ScriptState* GetScriptState() const { return script_state_.Get(); }
+  ScriptState* GetScriptState() const { return script_state_.get(); }
 
   // SuspendableObject implementation.
   void Suspend() override;
@@ -101,7 +101,7 @@ class CORE_EXPORT ScriptPromiseResolver
   // promise is pending and the associated ExecutionContext isn't stopped.
   void KeepAliveWhilePending();
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
   // You need to call suspendIfNeeded after the construction because
@@ -125,7 +125,7 @@ class CORE_EXPORT ScriptPromiseResolver
     DCHECK(new_state == kResolving || new_state == kRejecting);
     state_ = new_state;
 
-    ScriptState::Scope scope(script_state_.Get());
+    ScriptState::Scope scope(script_state_.get());
 
     // Calling ToV8 in a ScriptForbiddenScope will trigger a CHECK and
     // cause a crash. ToV8 just invokes a constructor for wrapper creation,

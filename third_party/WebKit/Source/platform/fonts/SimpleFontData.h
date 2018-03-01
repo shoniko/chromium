@@ -69,26 +69,26 @@ enum FontDataVariant {
 class PLATFORM_EXPORT SimpleFontData : public FontData {
  public:
   // Used to create platform fonts.
-  static PassRefPtr<SimpleFontData> Create(
+  static scoped_refptr<SimpleFontData> Create(
       const FontPlatformData& platform_data,
-      PassRefPtr<CustomFontData> custom_data = nullptr,
+      scoped_refptr<CustomFontData> custom_data = nullptr,
       bool is_text_orientation_fallback = false,
       bool subpixel_ascent_descent = false) {
-    return AdoptRef(new SimpleFontData(platform_data, std::move(custom_data),
-                                       is_text_orientation_fallback,
-                                       subpixel_ascent_descent));
+    return WTF::AdoptRef(new SimpleFontData(
+        platform_data, std::move(custom_data), is_text_orientation_fallback,
+        subpixel_ascent_descent));
   }
 
   const FontPlatformData& PlatformData() const { return platform_data_; }
   const OpenTypeVerticalData* VerticalData() const {
-    return vertical_data_.Get();
+    return vertical_data_.get();
   }
 
-  PassRefPtr<SimpleFontData> SmallCapsFontData(const FontDescription&) const;
-  PassRefPtr<SimpleFontData> EmphasisMarkFontData(const FontDescription&) const;
+  scoped_refptr<SimpleFontData> SmallCapsFontData(const FontDescription&) const;
+  scoped_refptr<SimpleFontData> EmphasisMarkFontData(const FontDescription&) const;
 
-  PassRefPtr<SimpleFontData> VariantFontData(const FontDescription& description,
-                                             FontDataVariant variant) const {
+  scoped_refptr<SimpleFontData> VariantFontData(const FontDescription& description,
+                                         FontDataVariant variant) const {
     switch (variant) {
       case kSmallCapsVariant:
         return SmallCapsFontData(description);
@@ -102,8 +102,8 @@ class PLATFORM_EXPORT SimpleFontData : public FontData {
     return const_cast<SimpleFontData*>(this);
   }
 
-  PassRefPtr<SimpleFontData> VerticalRightOrientationFontData() const;
-  PassRefPtr<SimpleFontData> UprightOrientationFontData() const;
+  scoped_refptr<SimpleFontData> VerticalRightOrientationFontData() const;
+  scoped_refptr<SimpleFontData> UprightOrientationFontData() const;
 
   bool HasVerticalGlyphs() const { return has_vertical_glyphs_; }
   bool IsTextOrientationFallback() const {
@@ -153,7 +153,7 @@ class PLATFORM_EXPORT SimpleFontData : public FontData {
 
   Glyph GlyphForCharacter(UChar32) const;
 
-  bool IsCustomFont() const override { return custom_font_data_.Get(); }
+  bool IsCustomFont() const override { return custom_font_data_.get(); }
   bool IsLoading() const override {
     return custom_font_data_ ? custom_font_data_->IsLoading() : false;
   }
@@ -170,7 +170,7 @@ class PLATFORM_EXPORT SimpleFontData : public FontData {
     missing_glyph_data_ = glyph_data;
   }
 
-  CustomFontData* GetCustomFontData() const { return custom_font_data_.Get(); }
+  CustomFontData* GetCustomFontData() const { return custom_font_data_.get(); }
 
   unsigned VisualOverflowInflationForAscent() const {
     return visual_overflow_inflation_for_ascent_;
@@ -181,19 +181,19 @@ class PLATFORM_EXPORT SimpleFontData : public FontData {
 
  protected:
   SimpleFontData(const FontPlatformData&,
-                 PassRefPtr<CustomFontData> custom_data,
+                 scoped_refptr<CustomFontData> custom_data,
                  bool is_text_orientation_fallback = false,
                  bool subpixel_ascent_descent = false);
 
   // Only used for testing.
-  SimpleFontData(const FontPlatformData&, PassRefPtr<OpenTypeVerticalData>);
+  SimpleFontData(const FontPlatformData&, scoped_refptr<OpenTypeVerticalData>);
 
  private:
   void PlatformInit(bool subpixel_ascent_descent);
   void PlatformGlyphInit();
 
-  PassRefPtr<SimpleFontData> CreateScaledFontData(const FontDescription&,
-                                                  float scale_factor) const;
+  scoped_refptr<SimpleFontData> CreateScaledFontData(const FontDescription&,
+                                              float scale_factor) const;
 
   void ComputeEmHeightMetrics() const;
   bool NormalizeEmHeightMetrics(float, float) const;
@@ -205,7 +205,7 @@ class PLATFORM_EXPORT SimpleFontData : public FontData {
   FontPlatformData platform_data_;
   SkPaint paint_;
 
-  RefPtr<OpenTypeVerticalData> vertical_data_;
+  scoped_refptr<OpenTypeVerticalData> vertical_data_;
 
   Glyph space_glyph_;
   float space_width_;
@@ -220,10 +220,10 @@ class PLATFORM_EXPORT SimpleFontData : public FontData {
    public:
     static std::unique_ptr<DerivedFontData> Create();
 
-    RefPtr<SimpleFontData> small_caps;
-    RefPtr<SimpleFontData> emphasis_mark;
-    RefPtr<SimpleFontData> vertical_right_orientation;
-    RefPtr<SimpleFontData> upright_orientation;
+    scoped_refptr<SimpleFontData> small_caps;
+    scoped_refptr<SimpleFontData> emphasis_mark;
+    scoped_refptr<SimpleFontData> vertical_right_orientation;
+    scoped_refptr<SimpleFontData> upright_orientation;
 
    private:
     DerivedFontData() {}
@@ -231,7 +231,7 @@ class PLATFORM_EXPORT SimpleFontData : public FontData {
 
   mutable std::unique_ptr<DerivedFontData> derived_font_data_;
 
-  RefPtr<CustomFontData> custom_font_data_;
+  scoped_refptr<CustomFontData> custom_font_data_;
 
   unsigned is_text_orientation_fallback_ : 1;
   unsigned has_vertical_glyphs_ : 1;

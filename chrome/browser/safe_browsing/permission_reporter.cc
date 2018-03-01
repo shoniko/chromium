@@ -6,6 +6,7 @@
 
 #include <functional>
 
+#include "base/containers/queue.h"
 #include "base/hash.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_piece.h"
@@ -21,7 +22,7 @@ namespace safe_browsing {
 namespace {
 // URL to upload permission action reports.
 const char kPermissionActionReportingUploadUrl[] =
-    "https://safebrowsing.googleusercontent.com/safebrowsing/clientreport/"
+    "https://safebrowsing.google.com/safebrowsing/clientreport/"
     "chrome-permissions";
 
 const int kMaximumReportsPerOriginPerPermissionPerMinute = 5;
@@ -256,7 +257,7 @@ bool PermissionReporter::BuildReport(const PermissionReportInfo& report_info,
 bool PermissionReporter::IsReportThresholdExceeded(
     ContentSettingsType permission,
     const GURL& origin) {
-  std::queue<base::Time>& log = report_logs_[{permission, origin}];
+  base::queue<base::Time>& log = report_logs_[{permission, origin}];
   base::Time current_time = clock_->Now();
   // Remove entries that are sent more than one minute ago.
   while (!log.empty() &&

@@ -13,7 +13,6 @@
 
 #include "base/callback.h"
 #include "base/files/file_path.h"
-#include "base/json/json_file_value_serializer.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "components/update_client/out_of_process_patcher.h"
@@ -23,10 +22,6 @@ namespace update_client {
 
 class CrxInstaller;
 class ComponentPatcher;
-
-// Deserializes the CRX manifest. The top level must be a dictionary.
-std::unique_ptr<base::DictionaryValue> ReadManifest(
-    const base::FilePath& unpack_path);
 
 // In charge of unpacking the component CRX package and verifying that it is
 // well formed and the cryptographic signature is correct.
@@ -76,6 +71,9 @@ class ComponentUnpacker : public base::RefCountedThreadSafe<ComponentUnpacker> {
 
     // Path of the unpacked files if the unpacking was successful.
     base::FilePath unpack_path;
+
+    // The extracted public key of the package if the unpacking was successful.
+    std::string public_key;
   };
 
   using Callback = base::Callback<void(const Result& result)>;
@@ -132,6 +130,7 @@ class ComponentUnpacker : public base::RefCountedThreadSafe<ComponentUnpacker> {
   scoped_refptr<OutOfProcessPatcher> oop_patcher_;
   UnpackerError error_;
   int extended_error_;
+  std::string public_key_;
 
   DISALLOW_COPY_AND_ASSIGN(ComponentUnpacker);
 };

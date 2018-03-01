@@ -77,7 +77,7 @@ class CryptoResultImpl::Resolver final : public ScriptPromiseResolver {
     ScriptPromiseResolver::ContextDestroyed(destroyed_context);
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(result_);
     ScriptPromiseResolver::Trace(visitor);
   }
@@ -131,7 +131,7 @@ CryptoResultImpl::~CryptoResultImpl() {
   DCHECK(!resolver_);
 }
 
-DEFINE_TRACE(CryptoResultImpl) {
+void CryptoResultImpl::Trace(blink::Visitor* visitor) {
   visitor->Trace(resolver_);
   CryptoResult::Trace(visitor);
 }
@@ -228,7 +228,7 @@ void CryptoResultImpl::CompleteWithKeyPair(const WebCryptoKey& public_key,
 void CryptoResultImpl::Cancel() {
   DCHECK(cancel_);
   cancel_->Cancel();
-  cancel_.Clear();
+  cancel_ = nullptr;
   ClearResolver();
 }
 

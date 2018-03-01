@@ -36,7 +36,6 @@
 #include "modules/quota/StorageQuotaCallback.h"
 #include "modules/quota/StorageUsageCallback.h"
 #include "platform/StorageQuotaCallbacks.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "platform/wtf/RefPtr.h"
 
 namespace blink {
@@ -57,7 +56,7 @@ class MODULES_EXPORT DeprecatedStorageQuotaCallbacksImpl final
   }
 
   ~DeprecatedStorageQuotaCallbacksImpl() override;
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   void DidQueryStorageUsageAndQuota(unsigned long long usage_in_bytes,
                                     unsigned long long quota_in_bytes) override;

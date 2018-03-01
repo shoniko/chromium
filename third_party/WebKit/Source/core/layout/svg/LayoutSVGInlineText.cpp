@@ -27,7 +27,6 @@
 #include "core/css/FontSize.h"
 #include "core/css/StyleEngine.h"
 #include "core/editing/TextAffinity.h"
-#include "core/editing/VisiblePosition.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/layout/svg/LayoutSVGText.h"
 #include "core/layout/svg/SVGLayoutSupport.h"
@@ -44,19 +43,21 @@ namespace blink {
 // Turn tabs, newlines and carriage returns into spaces. In the future this
 // should be removed in favor of letting the generic white-space code handle
 // this.
-static RefPtr<StringImpl> NormalizeWhitespace(RefPtr<StringImpl> string) {
-  RefPtr<StringImpl> new_string = string->Replace('\t', ' ');
+static scoped_refptr<StringImpl> NormalizeWhitespace(
+    scoped_refptr<StringImpl> string) {
+  scoped_refptr<StringImpl> new_string = string->Replace('\t', ' ');
   new_string = new_string->Replace('\n', ' ');
   new_string = new_string->Replace('\r', ' ');
   return new_string;
 }
 
-LayoutSVGInlineText::LayoutSVGInlineText(Node* n, RefPtr<StringImpl> string)
+LayoutSVGInlineText::LayoutSVGInlineText(Node* n,
+                                         scoped_refptr<StringImpl> string)
     : LayoutText(n, NormalizeWhitespace(std::move(string))),
       scaling_factor_(1) {}
 
-void LayoutSVGInlineText::SetTextInternal(RefPtr<StringImpl> text) {
-  LayoutText::SetTextInternal(std::move(text));
+void LayoutSVGInlineText::SetTextInternal(scoped_refptr<StringImpl> text) {
+  LayoutText::SetTextInternal(NormalizeWhitespace(std::move(text)));
   if (LayoutSVGText* text_layout_object =
           LayoutSVGText::LocateLayoutSVGTextAncestor(this))
     text_layout_object->SubtreeTextDidChange();
@@ -96,13 +97,13 @@ InlineTextBox* LayoutSVGInlineText::CreateTextBox(int start,
   return box;
 }
 
-LayoutRect LayoutSVGInlineText::LocalCaretRect(InlineBox* box,
+LayoutRect LayoutSVGInlineText::LocalCaretRect(const InlineBox* box,
                                                int caret_offset,
-                                               LayoutUnit*) {
+                                               LayoutUnit*) const {
   if (!box || !box->IsInlineTextBox())
     return LayoutRect();
 
-  InlineTextBox* text_box = ToInlineTextBox(box);
+  const InlineTextBox* text_box = ToInlineTextBox(box);
   if (static_cast<unsigned>(caret_offset) < text_box->Start() ||
       static_cast<unsigned>(caret_offset) > text_box->Start() + text_box->Len())
     return LayoutRect();
@@ -203,9 +204,10 @@ PositionWithAffinity LayoutSVGInlineText::PositionForPoint(
   int offset = closest_distance_box->OffsetForPositionInFragment(
       *closest_distance_fragment,
       LayoutUnit(absolute_point.X() - closest_distance_position), true);
-  return CreatePositionWithAffinity(
-      offset + closest_distance_box->Start(),
-      offset > 0 ? VP_UPSTREAM_IF_POSSIBLE : TextAffinity::kDownstream);
+  return CreatePositionWithAffinity(offset + closest_distance_box->Start(),
+                                    offset > 0
+                                        ? TextAffinity::kUpstreamIfPossible
+                                        : TextAffinity::kDownstream);
 }
 
 namespace {
@@ -419,13 +421,6 @@ LayoutRect LayoutSVGInlineText::AbsoluteVisualRect() const {
 
 FloatRect LayoutSVGInlineText::VisualRectInLocalSVGCoordinates() const {
   return Parent()->VisualRectInLocalSVGCoordinates();
-}
-
-RefPtr<StringImpl> LayoutSVGInlineText::OriginalText() const {
-  RefPtr<StringImpl> result = LayoutText::OriginalText();
-  if (!result)
-    return nullptr;
-  return NormalizeWhitespace(std::move(result));
 }
 
 }  // namespace blink

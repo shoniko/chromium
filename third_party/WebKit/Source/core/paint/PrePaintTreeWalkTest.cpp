@@ -6,6 +6,7 @@
 #include "core/layout/LayoutTreeAsText.h"
 #include "core/layout/api/LayoutViewItem.h"
 #include "core/paint/ObjectPaintProperties.h"
+#include "core/paint/PaintControllerPaintTest.h"
 #include "core/paint/PaintLayer.h"
 #include "core/paint/PaintPropertyTreePrinter.h"
 #include "core/paint/PrePaintTreeWalk.h"
@@ -21,18 +22,8 @@
 
 namespace blink {
 
-typedef std::pair<bool, bool> SlimmingPaintAndRootLayerScrolling;
-class PrePaintTreeWalkTest
-    : public ::testing::WithParamInterface<SlimmingPaintAndRootLayerScrolling>,
-      private ScopedSlimmingPaintV2ForTest,
-      private ScopedRootLayerScrollingForTest,
-      public RenderingTest {
+class PrePaintTreeWalkTest : public PaintControllerPaintTest {
  public:
-  PrePaintTreeWalkTest()
-      : ScopedSlimmingPaintV2ForTest(GetParam().second),
-        ScopedRootLayerScrollingForTest(GetParam().first),
-        RenderingTest(EmptyLocalFrameClient::Create()) {}
-
   const TransformPaintPropertyNode* FramePreTranslation() {
     LocalFrameView* frame_view = GetDocument().View();
     if (RuntimeEnabledFeatures::RootLayerScrollingEnabled()) {
@@ -75,15 +66,9 @@ class PrePaintTreeWalkTest
   }
 };
 
-SlimmingPaintAndRootLayerScrolling g_prepaint_foo[] = {
-    SlimmingPaintAndRootLayerScrolling(false, false),
-    SlimmingPaintAndRootLayerScrolling(true, false),
-    SlimmingPaintAndRootLayerScrolling(false, true),
-    SlimmingPaintAndRootLayerScrolling(true, true)};
-
 INSTANTIATE_TEST_CASE_P(All,
                         PrePaintTreeWalkTest,
-                        ::testing::ValuesIn(g_prepaint_foo));
+                        ::testing::ValuesIn(kDefaultPaintTestConfigurations));
 
 TEST_P(PrePaintTreeWalkTest, PropertyTreesRebuiltWithBorderInvalidation) {
   SetBodyInnerHTML(
@@ -154,7 +139,7 @@ TEST_P(PrePaintTreeWalkTest, PropertyTreesRebuiltWithCSSTransformInvalidation) {
 
 TEST_P(PrePaintTreeWalkTest, PropertyTreesRebuiltWithOpacityInvalidation) {
   // In SPv1 mode, we don't need or store property tree nodes for effects.
-  if (!RuntimeEnabledFeatures::SlimmingPaintV2Enabled())
+  if (!RuntimeEnabledFeatures::SlimmingPaintV175Enabled())
     return;
   SetBodyInnerHTML(
       "<style>"
@@ -303,9 +288,9 @@ TEST_P(PrePaintTreeWalkTest, VisualRectClipForceSubtree) {
   GetDocument().getElementById("parent")->removeAttribute("style");
   GetDocument().View()->UpdateAllLifecyclePhases();
 
-  // In SPv2 mode, VisualRects are in the space of the containing transform
+  // In SPv175 mode, VisualRects are in the space of the containing transform
   // node without applying any ancestor property nodes, including clip.
-  if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled())
+  if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled())
     EXPECT_EQ(200, grandchild->VisualRect().Height());
   else
     EXPECT_EQ(75, grandchild->VisualRect().Height());

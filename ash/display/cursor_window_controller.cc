@@ -7,9 +7,12 @@
 #include "ash/ash_constants.h"
 #include "ash/display/mirror_window_controller.h"
 #include "ash/display/window_tree_host_manager.h"
+#include "ash/public/cpp/ash_pref_names.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
+#include "ash/session/session_controller.h"
 #include "ash/shell.h"
+#include "components/prefs/pref_service.h"
 #include "services/ui/public/interfaces/window_tree_constants.mojom.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window_delegate.h"
@@ -63,7 +66,8 @@ class CursorWindowDelegate : public aura::WindowDelegate {
     ui::PaintRecorder recorder(context, size_);
     recorder.canvas()->DrawImageInt(cursor_image_, 0, 0);
   }
-  void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
+  void OnDeviceScaleFactorChanged(float old_device_scale_factor,
+                                  float new_device_scale_factor) override {}
   void OnWindowDestroying(aura::Window* window) override {}
   void OnWindowDestroyed(aura::Window* window) override {}
   void OnWindowTargetVisibilityChanged(bool visible) override {}
@@ -113,6 +117,19 @@ void CursorWindowController::SetLargeCursorSizeInDip(
 
   if (display_.is_valid())
     UpdateCursorImage();
+}
+
+bool CursorWindowController::ShouldEnableCursorCompositing() {
+  PrefService* prefs =
+      Shell::Get()->session_controller()->GetActivePrefService();
+  if (!prefs) {
+    // The active pref service can be null early in startup.
+    return false;
+  }
+  return prefs->GetBoolean(prefs::kAccessibilityLargeCursorEnabled) ||
+         prefs->GetBoolean(prefs::kAccessibilityHighContrastEnabled) ||
+         prefs->GetBoolean(prefs::kAccessibilityScreenMagnifierEnabled) ||
+         prefs->GetBoolean(prefs::kNightLightEnabled);
 }
 
 void CursorWindowController::SetCursorCompositingEnabled(bool enabled) {
@@ -253,7 +270,7 @@ void CursorWindowController::UpdateCursorImage() {
     return;
   }
   const gfx::ImageSkia* image =
-      ResourceBundle::GetSharedInstance().GetImageSkiaNamed(resource_id);
+      ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(resource_id);
   if (!is_cursor_compositing_enabled_) {
     gfx::ImageSkia rotated = *image;
     switch (display_.rotation()) {

@@ -14,7 +14,6 @@
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -69,10 +68,6 @@
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_util.h"
-
-#if defined(USE_ASH)
-#include "ash/shell.h"  // nogncheck
-#endif
 
 namespace {
 // User dictionary keys.
@@ -261,11 +256,6 @@ class UserManagerScreenHandler::ProfileUpdateObserver
 
   void OnProfileHighResAvatarLoaded(
       const base::FilePath& profile_path) override {
-    // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/461175
-    // is fixed.
-    tracked_objects::ScopedTracker tracking_profile(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "461175 UserManagerScreenHandler::OnProfileHighResAvatarLoaded"));
     user_manager_handler_->SendUserList();
   }
 
@@ -494,7 +484,8 @@ void UserManagerScreenHandler::HandleRemoveUser(const base::ListValue* args) {
 
   DCHECK(profiles::IsMultipleProfilesEnabled());
 
-  if (profiles::AreAllNonChildNonSupervisedProfilesLocked()) {
+  if (!signin_util::IsForceSigninEnabled() &&
+      profiles::AreAllNonChildNonSupervisedProfilesLocked()) {
     web_ui()->CallJavascriptFunctionUnsafe(
         "cr.webUIListenerCallback", base::Value("show-error-dialog"),
         base::Value(l10n_util::GetStringUTF8(
@@ -864,12 +855,6 @@ void UserManagerScreenHandler::SendUserList() {
           GetAllProfilesAttributesSortedByName();
   user_auth_type_map_.clear();
 
-  // Profile deletion is not allowed in Metro mode.
-  bool can_remove = true;
-#if defined(USE_ASH)
-  can_remove = !ash::Shell::HasInstance();
-#endif
-
   for (const ProfileAttributesEntry* entry : entries) {
     // Don't show profiles still in the middle of being set up as new legacy
     // supervised users.
@@ -893,7 +878,7 @@ void UserManagerScreenHandler::SendUserList() {
     profile_value->SetBoolean(kKeyHasLocalCreds,
                               !entry->GetLocalAuthCredentials().empty());
     profile_value->SetBoolean(kKeyIsOwner, false);
-    profile_value->SetBoolean(kKeyCanRemove, can_remove);
+    profile_value->SetBoolean(kKeyCanRemove, true);
     profile_value->SetBoolean(kKeyIsDesktop, true);
     profile_value->SetString(kKeyAvatarUrl, GetAvatarImage(entry));
 

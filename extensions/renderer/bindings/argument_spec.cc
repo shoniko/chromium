@@ -9,7 +9,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
-#include "content/public/child/v8_value_converter.h"
+#include "content/public/renderer/v8_value_converter.h"
 #include "extensions/renderer/bindings/api_invocation_errors.h"
 #include "extensions/renderer/bindings/api_type_reference_map.h"
 #include "gin/converter.h"
@@ -667,7 +667,7 @@ bool ArgumentSpec::ParseArgumentToAny(v8::Local<v8::Context> context,
       return false;
     }
     if (type_ == ArgumentType::BINARY)
-      DCHECK_EQ(base::Value::Type::BINARY, converted->GetType());
+      DCHECK_EQ(base::Value::Type::BINARY, converted->type());
     *out_value = std::move(converted);
   }
   return true;

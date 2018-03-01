@@ -44,11 +44,6 @@ class StartWithUrlColdTBM(_StartupPerfBenchmark):
     super(StartWithUrlColdTBM, self).SetExtraBrowserOptions(options)
 
   @classmethod
-  def ShouldDisable(cls, possible_browser):  # http://crbug.com/667470
-    return (possible_browser.platform.GetDeviceTypeName() in
-            ['Nexus 7v2', 'Nexus 9'])
-
-  @classmethod
   def Name(cls):
     return 'start_with_url.cold.startup_pages'
 
@@ -87,4 +82,3 @@ class StartWithUrlWarmTBM(_StartupPerfBenchmark):
         self.DisableStory(
             'http://kapook.com', [story.expectations.ALL], 'crbug.com/667470')
     return StoryExpectations()
-

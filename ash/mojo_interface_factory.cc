@@ -9,10 +9,14 @@
 #include "ash/accelerators/accelerator_controller.h"
 #include "ash/cast_config_controller.h"
 #include "ash/display/ash_display_controller.h"
+#include "ash/highlighter/highlighter_controller.h"
 #include "ash/ime/ime_controller.h"
 #include "ash/login/lock_screen_controller.h"
 #include "ash/media_controller.h"
+#include "ash/message_center/message_center_controller.h"
 #include "ash/new_window_controller.h"
+#include "ash/note_taking_controller.h"
+#include "ash/public/cpp/ash_switches.h"
 #include "ash/session/session_controller.h"
 #include "ash/shelf/shelf_controller.h"
 #include "ash/shell.h"
@@ -26,12 +30,16 @@
 #include "ash/wallpaper/wallpaper_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "base/bind.h"
+#include "base/lazy_instance.h"
 #include "base/single_thread_task_runner.h"
 #include "ui/app_list/presenter/app_list.h"
 
 namespace ash {
-
+namespace mojo_interface_factory {
 namespace {
+
+base::LazyInstance<RegisterInterfacesCallback>::Leaky
+    g_register_interfaces_callback = LAZY_INSTANCE_INITIALIZER;
 
 void BindAcceleratorControllerRequestOnMainThread(
     mojom::AcceleratorControllerRequest request) {
@@ -48,8 +56,18 @@ void BindAshDisplayControllerRequestOnMainThread(
   Shell::Get()->ash_display_controller()->BindRequest(std::move(request));
 }
 
+void BindAshMessageCenterControllerRequestOnMainThread(
+    mojom::AshMessageCenterControllerRequest request) {
+  Shell::Get()->message_center_controller()->BindRequest(std::move(request));
+}
+
 void BindCastConfigOnMainThread(mojom::CastConfigRequest request) {
   Shell::Get()->cast_config()->BindRequest(std::move(request));
+}
+
+void BindHighlighterControllerRequestOnMainThread(
+    mojom::HighlighterControllerRequest request) {
+  Shell::Get()->highlighter_controller()->BindRequest(std::move(request));
 }
 
 void BindImeControllerRequestOnMainThread(mojom::ImeControllerRequest request) {
@@ -81,6 +99,11 @@ void BindNightLightControllerRequestOnMainThread(
   Shell::Get()->night_light_controller()->BindRequest(std::move(request));
 }
 
+void BindNoteTakingControllerRequestOnMainThread(
+    mojom::NoteTakingControllerRequest request) {
+  Shell::Get()->note_taking_controller()->BindRequest(std::move(request));
+}
+
 void BindSessionControllerRequestOnMainThread(
     mojom::SessionControllerRequest request) {
   Shell::Get()->session_controller()->BindRequest(std::move(request));
@@ -100,7 +123,7 @@ void BindSystemTrayRequestOnMainThread(mojom::SystemTrayRequest request) {
 }
 
 void BindTabletModeRequestOnMainThread(
-    mojom::TabletModeManagerRequest request) {
+    mojom::TabletModeControllerRequest request) {
   Shell::Get()->tablet_mode_controller()->BindRequest(std::move(request));
 }
 
@@ -119,8 +142,6 @@ void BindWallpaperRequestOnMainThread(
 
 }  // namespace
 
-namespace mojo_interface_factory {
-
 void RegisterInterfaces(
     service_manager::BinderRegistry* registry,
     scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner) {
@@ -129,12 +150,18 @@ void RegisterInterfaces(
       main_thread_task_runner);
   registry->AddInterface(base::Bind(&BindAppListRequestOnMainThread),
                          main_thread_task_runner);
-  registry->AddInterface(base::Bind(&BindImeControllerRequestOnMainThread),
-                         main_thread_task_runner);
   registry->AddInterface(
       base::Bind(&BindAshDisplayControllerRequestOnMainThread),
       main_thread_task_runner);
+  registry->AddInterface(
+      base::Bind(&BindAshMessageCenterControllerRequestOnMainThread),
+      main_thread_task_runner);
   registry->AddInterface(base::Bind(&BindCastConfigOnMainThread),
+                         main_thread_task_runner);
+  registry->AddInterface(
+      base::Bind(&BindHighlighterControllerRequestOnMainThread),
+      main_thread_task_runner);
+  registry->AddInterface(base::Bind(&BindImeControllerRequestOnMainThread),
                          main_thread_task_runner);
   registry->AddInterface(
       base::Bind(&BindLocaleNotificationControllerOnMainThread),
@@ -146,11 +173,14 @@ void RegisterInterfaces(
   registry->AddInterface(
       base::Bind(&BindNewWindowControllerRequestOnMainThread),
       main_thread_task_runner);
-  if (NightLightController::IsFeatureEnabled()) {
+  if (switches::IsNightLightEnabled()) {
     registry->AddInterface(
         base::Bind(&BindNightLightControllerRequestOnMainThread),
         main_thread_task_runner);
   }
+  registry->AddInterface(
+      base::Bind(&BindNoteTakingControllerRequestOnMainThread),
+      main_thread_task_runner);
   registry->AddInterface(base::Bind(&BindSessionControllerRequestOnMainThread),
                          main_thread_task_runner);
   registry->AddInterface(base::Bind(&BindShelfRequestOnMainThread),
@@ -167,6 +197,16 @@ void RegisterInterfaces(
                          main_thread_task_runner);
   registry->AddInterface(base::Bind(&BindWallpaperRequestOnMainThread),
                          main_thread_task_runner);
+
+  // Inject additional optional interfaces.
+  if (g_register_interfaces_callback.Get()) {
+    std::move(g_register_interfaces_callback.Get())
+        .Run(registry, main_thread_task_runner);
+  }
+}
+
+void SetRegisterInterfacesCallback(RegisterInterfacesCallback callback) {
+  g_register_interfaces_callback.Get() = std::move(callback);
 }
 
 }  // namespace mojo_interface_factory

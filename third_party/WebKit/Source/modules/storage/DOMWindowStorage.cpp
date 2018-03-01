@@ -12,14 +12,14 @@
 #include "modules/storage/Storage.h"
 #include "modules/storage/StorageNamespace.h"
 #include "modules/storage/StorageNamespaceController.h"
-#include "platform/wtf/PassRefPtr.h"
+#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
 DOMWindowStorage::DOMWindowStorage(LocalDOMWindow& window)
     : Supplement<LocalDOMWindow>(window) {}
 
-DEFINE_TRACE(DOMWindowStorage) {
+void DOMWindowStorage::Trace(blink::Visitor* visitor) {
   visitor->Trace(session_storage_);
   visitor->Trace(local_storage_);
   Supplement<LocalDOMWindow>::Trace(visitor);

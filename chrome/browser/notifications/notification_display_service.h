@@ -12,16 +12,17 @@
 
 #include "base/callback_forward.h"
 #include "base/macros.h"
+#include "base/optional.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/notifications/notification_common.h"
 #include "components/keyed_service/core/keyed_service.h"
 
-namespace base {
-class NullableString16;
-}
-
-class Notification;
 class NotificationHandler;
 class Profile;
+
+namespace message_center {
+class Notification;
+}
 
 // Profile-bound service that enables notifications to be displayed and
 // interacted with on the user's screen, orthogonal of whether this
@@ -38,9 +39,11 @@ class NotificationDisplayService : public KeyedService {
   ~NotificationDisplayService() override;
 
   // Displays the |notification| identified by |notification_id|.
-  virtual void Display(NotificationCommon::Type notification_type,
-                       const std::string& notification_id,
-                       const Notification& notification) = 0;
+  virtual void Display(
+      NotificationCommon::Type notification_type,
+      const std::string& notification_id,
+      const message_center::Notification& notification,
+      std::unique_ptr<NotificationCommon::Metadata> metadata = nullptr) = 0;
 
   // Closes the notification identified by |notification_id|.
   virtual void Close(NotificationCommon::Type notification_type,
@@ -58,24 +61,29 @@ class NotificationDisplayService : public KeyedService {
                                     NotificationCommon::Type notification_type,
                                     const std::string& origin,
                                     const std::string& notification_id,
-                                    int action_index,
-                                    const base::NullableString16& reply);
+                                    const base::Optional<int>& action_index,
+                                    const base::Optional<base::string16>& reply,
+                                    const base::Optional<bool>& by_user);
 
   // Return whether a notification of |notification_type| should be displayed
   // for |origin| when the browser is in full screen mode.
   bool ShouldDisplayOverFullscreen(const GURL& origin,
                                    NotificationCommon::Type notification_type);
 
- protected:
+  // Returns the notification handler that was registered for the given type.
+  // May return null.
   NotificationHandler* GetNotificationHandler(
       NotificationCommon::Type notification_type);
 
- private:
   // Registers an implementation object to handle notification operations
   // for |notification_type|.
   void AddNotificationHandler(NotificationCommon::Type notification_type,
                               std::unique_ptr<NotificationHandler> handler);
 
+  // Removes an implementation object added via AddNotificationHandler.
+  void RemoveNotificationHandler(NotificationCommon::Type notification_type);
+
+ private:
   std::map<NotificationCommon::Type, std::unique_ptr<NotificationHandler>>
       notification_handlers_;
   Profile* profile_;

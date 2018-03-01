@@ -89,7 +89,7 @@ void PointerEventManager::Clear() {
   dispatching_pointer_id_ = 0;
 }
 
-DEFINE_TRACE(PointerEventManager) {
+void PointerEventManager::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_);
   visitor->Trace(node_under_pointer_);
   visitor->Trace(pointer_capture_target_);
@@ -262,8 +262,8 @@ void PointerEventManager::BlockTouchPointers(TimeTicks platform_time_stamp) {
     return;
   in_canceled_state_for_pointer_type_touch_ = true;
 
-  Vector<int> touch_pointer_ids = pointer_event_factory_.GetPointerIdsOfType(
-      WebPointerProperties::PointerType::kTouch);
+  Vector<int> touch_pointer_ids =
+      pointer_event_factory_.GetPointerIdsOfScrollCapablePointers();
 
   for (int pointer_id : touch_pointer_ids) {
     PointerEvent* pointer_event =
@@ -336,7 +336,7 @@ WebInputEventResult PointerEventManager::HandleTouchEvents(
       !in_canceled_state_for_pointer_type_touch_ && event.touches_length &&
       first_pointer_event_target.target_frame) {
     holder =
-        LocalFrame::CreateUserGesture(first_pointer_event_target.target_frame);
+        Frame::NotifyUserActivation(first_pointer_event_target.target_frame);
   }
 
   for (unsigned touch_point_idx = 0; touch_point_idx < event.touches_length;
@@ -385,16 +385,16 @@ PointerEventManager::ComputePointerEventTarget(
     HitTestRequest::HitTestRequestType hit_type = HitTestRequest::kTouchEvent |
                                                   HitTestRequest::kReadOnly |
                                                   HitTestRequest::kActive;
-    LayoutPoint page_point = LayoutPoint(
-        frame_->View()->RootFrameToContents(touch_point.PositionInWidget()));
+    LayoutPoint page_point = frame_->View()->RootFrameToContents(
+        LayoutPoint(touch_point.PositionInWidget()));
     HitTestResult hit_test_tesult =
         frame_->GetEventHandler().HitTestResultAtPoint(page_point, hit_type);
     Node* node = hit_test_tesult.InnerNode();
     if (node) {
       pointer_event_target.target_frame = node->GetDocument().GetFrame();
-      if (isHTMLCanvasElement(node)) {
+      if (auto* canvas = ToHTMLCanvasElementOrNull(node)) {
         HitTestCanvasResult* hit_test_canvas_result =
-            toHTMLCanvasElement(node)->GetControlAndIdIfHitRegionExists(
+            canvas->GetControlAndIdIfHitRegionExists(
                 hit_test_tesult.PointInInnerNodeFrame());
         if (hit_test_canvas_result->GetControl())
           node = hit_test_canvas_result->GetControl();

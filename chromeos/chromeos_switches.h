@@ -75,8 +75,6 @@ CHROMEOS_EXPORT extern const char
     kDisableSystemTimezoneAutomaticDetectionPolicy[];
 CHROMEOS_EXPORT extern const char kDisableVolumeAdjustSound[];
 CHROMEOS_EXPORT extern const char kDisableWakeOnWifi[];
-CHROMEOS_EXPORT extern const char kEafePath[];
-CHROMEOS_EXPORT extern const char kEafeUrl[];
 CHROMEOS_EXPORT extern const char kEnableAndroidWallpapersApp[];
 CHROMEOS_EXPORT extern const char kEnableArc[];
 CHROMEOS_EXPORT extern const char kEnableArcOOBEOptIn[];
@@ -103,7 +101,8 @@ CHROMEOS_EXPORT extern const char kEnableFileManagerTouchMode[];
 CHROMEOS_EXPORT extern const char kDisableFileManagerTouchMode[];
 CHROMEOS_EXPORT extern const char kEnableVideoPlayerChromecastSupport[];
 CHROMEOS_EXPORT extern const char kEnableVoiceInteraction[];
-CHROMEOS_EXPORT extern const char kEnableZipArchiverOnFileManager[];
+CHROMEOS_EXPORT extern const char kEnableZipArchiverPacker[];
+CHROMEOS_EXPORT extern const char kEnableZipArchiverUnpacker[];
 CHROMEOS_EXPORT extern const char kEnterpriseDisableArc[];
 CHROMEOS_EXPORT extern const char kEnterpriseEnableForcedReEnrollment[];
 CHROMEOS_EXPORT extern const char kEnterpriseEnableZeroTouchEnrollment[];
@@ -137,7 +136,6 @@ CHROMEOS_EXPORT extern const char kOobeSkipPostLogin[];
 CHROMEOS_EXPORT extern const char kOobeTimerInterval[];
 CHROMEOS_EXPORT extern const char kShillStub[];
 CHROMEOS_EXPORT extern const char kShowLoginDevOverlay[];
-CHROMEOS_EXPORT extern const char kShowMdLogin[];
 CHROMEOS_EXPORT extern const char kShowNonMdLogin[];
 CHROMEOS_EXPORT extern const char kSmsTestMessages[];
 CHROMEOS_EXPORT extern const char kStubCrosSettings[];
@@ -149,7 +147,7 @@ CHROMEOS_EXPORT extern const char kForceSystemCompositorMode[];
 CHROMEOS_EXPORT extern const char kTestEncryptionMigrationUI[];
 CHROMEOS_EXPORT extern const char kCrosGaiaApiV1[];
 CHROMEOS_EXPORT extern const char kVoiceInteractionLocales[];
-CHROMEOS_EXPORT extern const char kEnterpriseEnableLicenseTypeSelection[];
+CHROMEOS_EXPORT extern const char kEnterpriseDisableLicenseTypeSelection[];
 CHROMEOS_EXPORT extern const char kDisablePerUserTimezone[];
 
 // Returns true if the system should wake in response to wifi traffic.

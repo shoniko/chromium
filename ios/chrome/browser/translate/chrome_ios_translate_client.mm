@@ -11,7 +11,6 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "components/infobars/core/infobar.h"
-#include "components/metrics/proto/translate_event.pb.h"
 #include "components/prefs/pref_service.h"
 #include "components/sync/driver/sync_driver_switches.h"
 #include "components/sync/protocol/user_event_specifics.pb.h"
@@ -29,6 +28,7 @@
 #include "ios/chrome/browser/infobars/infobar.h"
 #include "ios/chrome/browser/infobars/infobar_controller.h"
 #include "ios/chrome/browser/infobars/infobar_manager_impl.h"
+#include "ios/chrome/browser/language/language_model_factory.h"
 #include "ios/chrome/browser/language/url_language_histogram_factory.h"
 #include "ios/chrome/browser/pref_names.h"
 #import "ios/chrome/browser/sync/ios_user_event_service_factory.h"
@@ -44,6 +44,7 @@
 #include "ios/web/public/navigation_item.h"
 #include "ios/web/public/navigation_manager.h"
 #include "ios/web/public/web_state/web_state.h"
+#include "third_party/metrics_proto/translate_event.pb.h"
 #include "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -59,7 +60,9 @@ ChromeIOSTranslateClient::ChromeIOSTranslateClient(web::WebState* web_state)
           translate::TranslateRankerFactory::GetForBrowserState(
               ios::ChromeBrowserState::FromBrowserState(
                   web_state->GetBrowserState())),
-          prefs::kAcceptLanguages)),
+          LanguageModelFactory::GetInstance()->GetForBrowserState(
+              ios::ChromeBrowserState::FromBrowserState(
+                  web_state->GetBrowserState())))),
       translate_driver_(web_state,
                         web_state->GetNavigationManager(),
                         translate_manager_.get(),
@@ -111,8 +114,7 @@ std::unique_ptr<infobars::InfoBar> ChromeIOSTranslateClient::CreateInfoBar(
       NOTREACHED();
   }
   infobar->SetController(controller);
-  // TODO(crbug.com/703565): remove std::move() once Xcode 9.0+ is required.
-  return std::move(infobar);
+  return infobar;
 }
 
 void ChromeIOSTranslateClient::RecordTranslateEvent(
@@ -224,7 +226,7 @@ void ChromeIOSTranslateClient::ShowReportLanguageDetectionErrorUI(
   NOTREACHED();
 }
 
-void ChromeIOSTranslateClient::WebStateDestroyed() {
+void ChromeIOSTranslateClient::WebStateDestroyed(web::WebState* web_state) {
   // Translation process can be interrupted.
   // Destroying the TranslateManager now guarantees that it never has to deal
   // with nullptr WebState.

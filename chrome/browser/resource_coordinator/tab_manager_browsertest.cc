@@ -28,6 +28,7 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/test_utils.h"
@@ -409,10 +410,10 @@ IN_PROC_BROWSER_TEST_F(TabManagerTest, ProtectVideoTabs) {
   auto* tab = browser()->tab_strip_model()->GetWebContentsAt(1);
 
   // Simulate that a video stream is now being captured.
-  content::MediaStreamDevice fake_media_device(
-      content::MEDIA_DEVICE_VIDEO_CAPTURE, "fake_media_device",
-      "fake_media_device");
-  content::MediaStreamDevices video_devices(1, fake_media_device);
+  content::MediaStreamDevices video_devices(1);
+  video_devices[0] =
+      content::MediaStreamDevice(content::MEDIA_DEVICE_VIDEO_CAPTURE,
+                                 "fake_media_device", "fake_media_device");
   MediaCaptureDevicesDispatcher* dispatcher =
       MediaCaptureDevicesDispatcher::GetInstance();
   dispatcher->SetTestVideoCaptureDevices(video_devices);
@@ -443,10 +444,10 @@ IN_PROC_BROWSER_TEST_F(TabManagerTest, CanSuspendBackgroundedRenderer) {
 
   auto* tab = browser()->tab_strip_model()->GetWebContentsAt(1);
   // Simulate that a video stream is now being captured.
-  content::MediaStreamDevice fake_media_device(
-      content::MEDIA_DEVICE_VIDEO_CAPTURE, "fake_media_device",
-      "fake_media_device");
-  content::MediaStreamDevices video_devices(1, fake_media_device);
+  content::MediaStreamDevices video_devices(1);
+  video_devices[0] =
+      content::MediaStreamDevice(content::MEDIA_DEVICE_VIDEO_CAPTURE,
+                                 "fake_media_device", "fake_media_device");
   MediaCaptureDevicesDispatcher* dispatcher =
       MediaCaptureDevicesDispatcher::GetInstance();
   dispatcher->SetTestVideoCaptureDevices(video_devices);
@@ -456,7 +457,7 @@ IN_PROC_BROWSER_TEST_F(TabManagerTest, CanSuspendBackgroundedRenderer) {
   video_stream_ui->OnStarted(base::Closure());
 
   // Should not be able to suspend a tab which plays a video.
-  int render_process_id = tab->GetRenderProcessHost()->GetID();
+  int render_process_id = tab->GetMainFrame()->GetProcess()->GetID();
   ASSERT_FALSE(tab_manager->CanSuspendBackgroundedRenderer(render_process_id));
 
   // Remove the video stream.
@@ -554,16 +555,17 @@ IN_PROC_BROWSER_TEST_F(TabManagerTest, PurgeBackgroundRenderer) {
   // The time-to-purge initialized at ActiveTabChanged should be in the
   // right default range.
   EXPECT_GE(tab1_contents_data->time_to_purge(),
-            base::TimeDelta::FromMinutes(30));
-  EXPECT_LT(tab1_contents_data->time_to_purge(),
-            base::TimeDelta::FromMinutes(60));
+            base::TimeDelta::FromMinutes(1));
+  EXPECT_LE(tab1_contents_data->time_to_purge(),
+            base::TimeDelta::FromMinutes(4));
   EXPECT_GE(tab2_contents_data->time_to_purge(),
-            base::TimeDelta::FromMinutes(30));
-  EXPECT_LT(tab2_contents_data->time_to_purge(),
-            base::TimeDelta::FromMinutes(60));
+            base::TimeDelta::FromMinutes(1));
+  EXPECT_LE(tab2_contents_data->time_to_purge(),
+            base::TimeDelta::FromMinutes(4));
+
   EXPECT_GE(tab3_contents_data->time_to_purge(),
             base::TimeDelta::FromMinutes(30));
-  EXPECT_LT(tab3_contents_data->time_to_purge(),
+  EXPECT_LE(tab3_contents_data->time_to_purge(),
             base::TimeDelta::FromMinutes(60));
 
   // To make it easy to test, configure time-to-purge here.
@@ -797,15 +799,11 @@ namespace {
 // Ensures that |browser| has |num_tabs| open tabs.
 void EnsureTabsInBrowser(Browser* browser, int num_tabs) {
   for (int i = 0; i < num_tabs; ++i) {
-    content::WindowedNotificationObserver load(
-        content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-        content::NotificationService::AllSources());
-    OpenURLParams open(GURL(chrome::kChromeUICreditsURL), content::Referrer(),
-                       i == 0 ? WindowOpenDisposition::CURRENT_TAB
-                              : WindowOpenDisposition::NEW_BACKGROUND_TAB,
-                       ui::PAGE_TRANSITION_TYPED, false);
-    browser->OpenURL(open);
-    load.Wait();
+    ui_test_utils::NavigateToURLWithDisposition(
+        browser, GURL(chrome::kChromeUICreditsURL),
+        i == 0 ? WindowOpenDisposition::CURRENT_TAB
+               : WindowOpenDisposition::NEW_BACKGROUND_TAB,
+        ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
   }
 
   EXPECT_EQ(num_tabs, browser->tab_strip_model()->count());
@@ -814,18 +812,26 @@ void EnsureTabsInBrowser(Browser* browser, int num_tabs) {
 // Creates a browser with |num_tabs| tabs.
 Browser* CreateBrowserWithTabs(int num_tabs) {
   Browser* current_browser = BrowserList::GetInstance()->GetLastActive();
+  ui_test_utils::BrowserAddedObserver browser_added_observer;
   chrome::NewWindow(current_browser);
-  base::RunLoop().RunUntilIdle();
-  Browser* new_browser = BrowserList::GetInstance()->GetLastActive();
-  EXPECT_NE(current_browser, new_browser);
+  Browser* new_browser = browser_added_observer.WaitForSingleNewBrowser();
+  EXPECT_EQ(new_browser, BrowserList::GetInstance()->GetLastActive());
   EnsureTabsInBrowser(new_browser, num_tabs);
   return new_browser;
 }
 
 }  // namespace
 
+// Flaky on Linux.  Times out on Windows debug builds. http://crbug.com/772839.
+#if defined(OS_LINUX) || (defined(OS_WIN) && !defined(NDEBUG))
+#define MAYBE_DiscardTabsWithMinimizedAndOccludedWindows \
+  DISABLED_DiscardTabsWithMinimizedAndOccludedWindows
+#else
+#define MAYBE_DiscardTabsWithMinimizedAndOccludedWindows \
+  DiscardTabsWithMinimizedAndOccludedWindows
+#endif
 IN_PROC_BROWSER_TEST_F(TabManagerTest,
-                       DiscardTabsWithMinimizedAndOccludedWindows) {
+                       MAYBE_DiscardTabsWithMinimizedAndOccludedWindows) {
   TabManager* tab_manager = g_browser_process->GetTabManager();
 
   // Disable the protection of recent tabs.

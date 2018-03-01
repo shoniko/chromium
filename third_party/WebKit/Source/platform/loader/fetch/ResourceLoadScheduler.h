@@ -23,7 +23,7 @@ class PLATFORM_EXPORT ResourceLoadSchedulerClient
   // Called when the request is granted to run.
   virtual void Run() = 0;
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  void Trace(blink::Visitor* visitor) override {}
 };
 
 // The ResourceLoadScheduler provides a unified per-frame infrastructure to
@@ -55,14 +55,15 @@ class PLATFORM_EXPORT ResourceLoadScheduler final
 
   static constexpr ClientId kInvalidClientId = 0u;
 
-  static constexpr size_t kOutstandingUnlimited = 0u;
+  static constexpr size_t kOutstandingUnlimited =
+      std::numeric_limits<size_t>::max();
 
   static ResourceLoadScheduler* Create(FetchContext* context = nullptr) {
     return new ResourceLoadScheduler(context ? context
                                              : &FetchContext::NullInstance());
   }
   ~ResourceLoadScheduler() {}
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   // Stops all operations including observing throttling signals.
   // ResourceLoadSchedulerClient::Run() will not be called once this method is
@@ -131,7 +132,8 @@ class PLATFORM_EXPORT ResourceLoadScheduler final
     kInitial,
     kThrottled,
     kNotThrottled,
-    kPartiallyThrottled
+    kPartiallyThrottled,
+    kStopped,
   };
   ThrottlingHistory throttling_history_ = ThrottlingHistory::kInitial;
 

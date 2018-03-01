@@ -30,6 +30,7 @@
 
 #include "core/page/PageWidgetDelegate.h"
 
+#include "core/dom/AXObjectCache.h"
 #include "core/events/WebInputEventConversion.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
@@ -90,9 +91,10 @@ static void PaintInternal(Page& page,
       ClipRecorder clip_recorder(paint_context, builder,
                                  DisplayItem::kPageWidgetDelegateClip,
                                  dirty_rect);
-      view->Paint(paint_context, global_paint_flags, CullRect(dirty_rect));
+      view->PaintWithLifecycleUpdate(paint_context, global_paint_flags,
+                                     CullRect(dirty_rect));
     } else {
-      DrawingRecorder drawing_recorder(
+      DrawingRecorder recorder(
           paint_context, builder,
           DisplayItem::kPageWidgetDelegateBackgroundFallback, dirty_rect);
       paint_context.FillRect(dirty_rect, Color::kWhite);

@@ -7,6 +7,10 @@
 #import "ios/web/public/test/web_test_with_web_state.h"
 #include "ios/web/public/web_state/web_state_observer.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace web {
 
 namespace {
@@ -23,7 +27,8 @@ class FaviconUrlObserver : public web::WebStateObserver {
   // Returns true if FaviconUrlUpdated was called.
   bool favicon_url_updated() const { return favicon_url_updated_; }
   // WebStateObserver overrides:
-  void FaviconUrlUpdated(const std::vector<FaviconURL>& candidates) override {
+  void FaviconUrlUpdated(web::WebState* web_state,
+                         const std::vector<FaviconURL>& candidates) override {
     favicon_url_candidates_ = candidates;
     favicon_url_updated_ = true;
   }

@@ -15,6 +15,8 @@
 #include "content/browser/service_worker/service_worker_register_job_base.h"
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/common/service_worker/service_worker_status_code.h"
+#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_event_status.mojom.h"
+#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_registration.mojom.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -49,7 +51,7 @@ class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase,
   CONTENT_EXPORT ServiceWorkerRegisterJob(
       base::WeakPtr<ServiceWorkerContextCore> context,
       const GURL& script_url,
-      const ServiceWorkerRegistrationOptions& options);
+      const blink::mojom::ServiceWorkerRegistrationOptions& options);
 
   // For update jobs.
   CONTENT_EXPORT ServiceWorkerRegisterJob(
@@ -58,9 +60,6 @@ class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase,
       bool force_bypass_cache,
       bool skip_script_comparison);
   ~ServiceWorkerRegisterJob() override;
-
-  // Sets the time the job started, only for test.
-  void set_start_time_for_test(base::TimeTicks time) { start_time_ = time; };
 
   // Registers a callback to be called when the promise would resolve (whether
   // successfully or not). Multiple callbacks may be registered.
@@ -73,8 +72,9 @@ class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase,
   void Start() override;
   void Abort() override;
   bool Equals(ServiceWorkerRegisterJobBase* job) const override;
-  base::TimeTicks StartTime() const override;
   RegistrationJobType GetType() const override;
+
+  void DoomInstallingWorker();
 
  private:
   enum Phase {
@@ -129,7 +129,7 @@ class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase,
   void OnInstallFinished(
       int request_id,
       std::unique_ptr<InstallEventMethodsReceiver> install_event_methods,
-      ServiceWorkerStatusCode status,
+      blink::mojom::ServiceWorkerEventStatus event_status,
       bool has_fetch_handler,
       base::Time dispatch_event_time);
   void OnInstallFailed(ServiceWorkerStatusCode status);
@@ -153,15 +153,13 @@ class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase,
   // The ServiceWorkerContextCore object should always outlive this.
   base::WeakPtr<ServiceWorkerContextCore> context_;
 
-  // Holds the time the job started.
-  base::TimeTicks start_time_;
-
   RegistrationJobType job_type_;
   const GURL pattern_;
   GURL script_url_;
   std::vector<RegistrationCallback> callbacks_;
   Phase phase_;
   Internal internal_;
+  bool doom_installing_worker_;
   bool is_promise_resolved_;
   bool should_uninstall_on_failure_;
   bool force_bypass_cache_;

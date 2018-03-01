@@ -88,19 +88,6 @@ bool IsPinchToZoomEnabled() {
   return !command_line.HasSwitch(switches::kDisablePinch);
 }
 
-#if defined(OS_WIN)
-
-bool IsWin32kLockdownEnabled() {
-  if (base::win::GetVersion() < base::win::VERSION_WIN8)
-    return false;
-  const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
-  if (cmd_line->HasSwitch(switches::kDisableWin32kLockDown))
-    return false;
-  return true;
-}
-
-#endif
-
 V8CacheOptions GetV8CacheOptions() {
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
@@ -156,6 +143,21 @@ ProgressBarCompletion GetProgressBarCompletionPolicy() {
   }
 #endif
   return ProgressBarCompletion::LOAD_EVENT;
+}
+
+SavePreviousDocumentResources GetSavePreviousDocumentResources() {
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  std::string save_previous_document_resources =
+      command_line.GetSwitchValueASCII(
+          switches::kSavePreviousDocumentResources);
+  if (save_previous_document_resources == "never")
+    return SavePreviousDocumentResources::NEVER;
+  if (save_previous_document_resources == "onDOMContentLoaded")
+    return SavePreviousDocumentResources::UNTIL_ON_DOM_CONTENT_LOADED;
+  if (save_previous_document_resources == "onload")
+    return SavePreviousDocumentResources::UNTIL_ON_LOAD;
+  return SavePreviousDocumentResources::NEVER;
 }
 
 void WaitForDebugger(const std::string& label) {

@@ -32,10 +32,10 @@
 #include "core/xml/DocumentXSLT.h"
 #include "core/xml/XSLStyleSheet.h"
 #include "core/xml/parser/XMLDocumentParser.h"  // for parseAttributes()
-#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
 #include "platform/loader/fetch/FetchParameters.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
+#include "platform/loader/fetch/fetch_initiator_type_names.h"
 
 namespace blink {
 
@@ -60,7 +60,7 @@ ProcessingInstruction::~ProcessingInstruction() {}
 
 EventListener* ProcessingInstruction::EventListenerForXSLT() {
   if (!listener_for_xslt_)
-    return 0;
+    return nullptr;
 
   return listener_for_xslt_->ToEventListener();
 }
@@ -138,7 +138,7 @@ void ProcessingInstruction::Process(const String& href, const String& charset) {
     // It needs to be able to kick off import/include loads that
     // can hang off some parent sheet.
     if (is_xsl_ && RuntimeEnabledFeatures::XSLTEnabled()) {
-      KURL final_url(kParsedURLString, local_href_);
+      KURL final_url(local_href_);
       sheet_ = XSLStyleSheet::CreateEmbedded(this, final_url);
       loading_ = false;
     }
@@ -299,7 +299,7 @@ void ProcessingInstruction::ClearSheet() {
   sheet_.Release()->ClearOwnerNode();
 }
 
-DEFINE_TRACE(ProcessingInstruction) {
+void ProcessingInstruction::Trace(blink::Visitor* visitor) {
   visitor->Trace(sheet_);
   visitor->Trace(listener_for_xslt_);
   CharacterData::Trace(visitor);

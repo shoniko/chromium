@@ -40,10 +40,10 @@ class CORE_EXPORT UnpackedSerializedScriptValue
  public:
   ~UnpackedSerializedScriptValue();
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
-  SerializedScriptValue* Value() { return value_.Get(); }
-  const SerializedScriptValue* Value() const { return value_.Get(); }
+  SerializedScriptValue* Value() { return value_.get(); }
+  const SerializedScriptValue* Value() const { return value_.get(); }
 
   const HeapVector<Member<DOMArrayBufferBase>>& ArrayBuffers() const {
     return array_buffers_;

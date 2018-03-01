@@ -20,14 +20,19 @@ import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.SmallTest;
 
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.InMemorySharedPreferences;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.notifications.NotificationManagerProxy;
 import org.chromium.chrome.browser.notifications.NotificationManagerProxyImpl;
+import org.chromium.chrome.test.util.browser.Features;
+import org.chromium.content.browser.test.NativeLibraryTestRule;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -37,15 +42,27 @@ import java.util.List;
  * Tests that ChannelsUpdater correctly initializes channels on the notification manager.
  */
 @RunWith(BaseJUnit4ClassRunner.class)
+@TargetApi(Build.VERSION_CODES.O)
 public class ChannelsUpdaterTest {
     private NotificationManagerProxy mNotificationManagerProxy;
     private InMemorySharedPreferences mMockSharedPreferences;
     private ChannelsInitializer mChannelsInitializer;
     private Resources mMockResources;
 
+    @Rule
+    @SuppressFBWarnings("URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD")
+    public Features.Processor processor = new Features.Processor();
+
+    @Rule
+    public NativeLibraryTestRule mNativeLibraryTestRule = new NativeLibraryTestRule();
+
     @Before
     public void setUp() throws Exception {
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        // Not initializing the browser process is safe because
+        // UrlFormatter.formatUrlForSecurityDisplay() is stand-alone.
+        mNativeLibraryTestRule.loadNativeLibraryNoBrowserProcess();
+
+        Context context = InstrumentationRegistry.getTargetContext();
         mNotificationManagerProxy = new NotificationManagerProxyImpl(
                 (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE));
 
@@ -124,6 +141,7 @@ public class ChannelsUpdaterTest {
     @SmallTest
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
     @TargetApi(Build.VERSION_CODES.O)
+    @Features(@Features.Register(ChromeFeatureList.SITE_NOTIFICATION_CHANNELS))
     public void testUpdateChannels_createsExpectedChannelsAndUpdatesPref() throws Exception {
         ChannelsUpdater updater = new ChannelsUpdater(
                 true /* isAtLeastO */, mMockSharedPreferences, mChannelsInitializer, 21);
@@ -134,7 +152,7 @@ public class ChannelsUpdaterTest {
                 containsInAnyOrder(ChannelDefinitions.CHANNEL_ID_BROWSER,
                         ChannelDefinitions.CHANNEL_ID_DOWNLOADS,
                         ChannelDefinitions.CHANNEL_ID_INCOGNITO,
-                        ChannelDefinitions.CHANNEL_ID_SITES, ChannelDefinitions.CHANNEL_ID_MEDIA));
+                        ChannelDefinitions.CHANNEL_ID_MEDIA));
         assertThat(mMockSharedPreferences.getInt(ChannelsUpdater.CHANNELS_VERSION_KEY, -1), is(21));
     }
 
@@ -142,6 +160,7 @@ public class ChannelsUpdaterTest {
     @SmallTest
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
     @TargetApi(Build.VERSION_CODES.O)
+    @Features(@Features.Register(ChromeFeatureList.SITE_NOTIFICATION_CHANNELS))
     public void testUpdateChannels_deletesLegacyChannelsAndCreatesExpectedOnes() throws Exception {
         // Set up any legacy channels.
         for (String id : ChannelDefinitions.getLegacyChannelIds()) {
@@ -159,7 +178,7 @@ public class ChannelsUpdaterTest {
                 containsInAnyOrder(ChannelDefinitions.CHANNEL_ID_BROWSER,
                         ChannelDefinitions.CHANNEL_ID_DOWNLOADS,
                         ChannelDefinitions.CHANNEL_ID_INCOGNITO,
-                        ChannelDefinitions.CHANNEL_ID_SITES, ChannelDefinitions.CHANNEL_ID_MEDIA));
+                        ChannelDefinitions.CHANNEL_ID_MEDIA));
     }
 
     private static List<String> getChannelIds(List<NotificationChannel> channels) {

@@ -27,9 +27,6 @@ declare_args() {
   # Enables ProGuard obfuscation of Chromium packages.
   enable_proguard_obfuscation = false
 
-  # Enables ProGuard obfuscation of chrome_public_test_apk.
-  enable_proguard_obfuscation_for_tests = false
-
   # Enable multidex in release builds.
   multidex_in_release = false
 }
@@ -39,6 +36,10 @@ default_chrome_public_jinja_variables = [
   "enable_leakcanary=$enable_leakcanary",
   "enable_vr=$enable_vr",
 ]
+
+if (use_order_profiling) {
+  default_chrome_public_jinja_variables += [ "use_order_profiling=1" ]
+}
 
 template("chrome_public_apk_tmpl") {
   android_apk(target_name) {

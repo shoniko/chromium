@@ -18,8 +18,8 @@ class StyleSheetContents;
 // properties with either CSS properties or SVG attributes.
 class CORE_EXPORT StringKeyframe : public Keyframe {
  public:
-  static RefPtr<StringKeyframe> Create() {
-    return AdoptRef(new StringKeyframe);
+  static scoped_refptr<StringKeyframe> Create() {
+    return WTF::AdoptRef(new StringKeyframe);
   }
 
   MutableStylePropertySet::SetResult SetCSSPropertyValue(
@@ -63,13 +63,13 @@ class CORE_EXPORT StringKeyframe : public Keyframe {
   class CSSPropertySpecificKeyframe
       : public Keyframe::PropertySpecificKeyframe {
    public:
-    static RefPtr<CSSPropertySpecificKeyframe> Create(
+    static scoped_refptr<CSSPropertySpecificKeyframe> Create(
         double offset,
-        RefPtr<TimingFunction> easing,
+        scoped_refptr<TimingFunction> easing,
         const CSSValue* value,
         EffectModel::CompositeOperation composite) {
-      return AdoptRef(new CSSPropertySpecificKeyframe(offset, std::move(easing),
-                                                      value, composite));
+      return WTF::AdoptRef(new CSSPropertySpecificKeyframe(
+          offset, std::move(easing), value, composite));
     }
 
     const CSSValue* Value() const { return value_.Get(); }
@@ -79,17 +79,17 @@ class CORE_EXPORT StringKeyframe : public Keyframe {
                                  const ComputedStyle& base_style,
                                  const ComputedStyle* parent_style) const final;
     const AnimatableValue* GetAnimatableValue() const final {
-      return animatable_value_cache_.Get();
+      return animatable_value_cache_.get();
     }
 
     bool IsNeutral() const final { return !value_; }
-    RefPtr<Keyframe::PropertySpecificKeyframe> NeutralKeyframe(
+    scoped_refptr<Keyframe::PropertySpecificKeyframe> NeutralKeyframe(
         double offset,
-        RefPtr<TimingFunction> easing) const final;
+        scoped_refptr<TimingFunction> easing) const final;
 
    private:
     CSSPropertySpecificKeyframe(double offset,
-                                RefPtr<TimingFunction> easing,
+                                scoped_refptr<TimingFunction> easing,
                                 const CSSValue* value,
                                 EffectModel::CompositeOperation composite)
         : Keyframe::PropertySpecificKeyframe(offset,
@@ -97,41 +97,42 @@ class CORE_EXPORT StringKeyframe : public Keyframe {
                                              composite),
           value_(const_cast<CSSValue*>(value)) {}
 
-    virtual RefPtr<Keyframe::PropertySpecificKeyframe> CloneWithOffset(
-        double offset) const;
+    scoped_refptr<Keyframe::PropertySpecificKeyframe> CloneWithOffset(
+        double offset) const override;
     bool IsCSSPropertySpecificKeyframe() const override { return true; }
 
     // TODO(sashab): Make this a const CSSValue.
     Persistent<CSSValue> value_;
-    mutable RefPtr<AnimatableValue> animatable_value_cache_;
+    mutable scoped_refptr<AnimatableValue> animatable_value_cache_;
   };
 
   class SVGPropertySpecificKeyframe
       : public Keyframe::PropertySpecificKeyframe {
    public:
-    static RefPtr<SVGPropertySpecificKeyframe> Create(
+    static scoped_refptr<SVGPropertySpecificKeyframe> Create(
         double offset,
-        RefPtr<TimingFunction> easing,
+        scoped_refptr<TimingFunction> easing,
         const String& value,
         EffectModel::CompositeOperation composite) {
-      return AdoptRef(new SVGPropertySpecificKeyframe(offset, std::move(easing),
-                                                      value, composite));
+      return WTF::AdoptRef(new SVGPropertySpecificKeyframe(
+          offset, std::move(easing), value, composite));
     }
 
     const String& Value() const { return value_; }
 
-    RefPtr<PropertySpecificKeyframe> CloneWithOffset(double offset) const final;
+    scoped_refptr<PropertySpecificKeyframe> CloneWithOffset(
+        double offset) const final;
 
     const AnimatableValue* GetAnimatableValue() const final { return nullptr; }
 
     bool IsNeutral() const final { return value_.IsNull(); }
-    RefPtr<PropertySpecificKeyframe> NeutralKeyframe(
+    scoped_refptr<PropertySpecificKeyframe> NeutralKeyframe(
         double offset,
-        RefPtr<TimingFunction> easing) const final;
+        scoped_refptr<TimingFunction> easing) const final;
 
    private:
     SVGPropertySpecificKeyframe(double offset,
-                                RefPtr<TimingFunction> easing,
+                                scoped_refptr<TimingFunction> easing,
                                 const String& value,
                                 EffectModel::CompositeOperation composite)
         : Keyframe::PropertySpecificKeyframe(offset,
@@ -152,9 +153,9 @@ class CORE_EXPORT StringKeyframe : public Keyframe {
 
   StringKeyframe(const StringKeyframe& copy_from);
 
-  RefPtr<Keyframe> Clone() const override;
-  RefPtr<Keyframe::PropertySpecificKeyframe> CreatePropertySpecificKeyframe(
-      const PropertyHandle&) const override;
+  scoped_refptr<Keyframe> Clone() const override;
+  scoped_refptr<Keyframe::PropertySpecificKeyframe>
+  CreatePropertySpecificKeyframe(const PropertyHandle&) const override;
 
   bool IsStringKeyframe() const override { return true; }
 

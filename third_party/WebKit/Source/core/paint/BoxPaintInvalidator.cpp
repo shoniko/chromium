@@ -53,7 +53,7 @@ void BoxPaintInvalidator::IncrementallyInvalidatePaint(
     PaintInvalidationReason reason,
     const LayoutRect& old_rect,
     const LayoutRect& new_rect) {
-  DCHECK(!RuntimeEnabledFeatures::SlimmingPaintV2Enabled());
+  DCHECK(!RuntimeEnabledFeatures::SlimmingPaintV175Enabled());
   DCHECK(old_rect.Location() == new_rect.Location());
   DCHECK(old_rect.Size() != new_rect.Size());
   LayoutRect right_delta = ComputeRightDelta(
@@ -91,7 +91,7 @@ PaintInvalidationReason BoxPaintInvalidator::ComputePaintInvalidationReason() {
     // composited. There are no other box decoration on the LayoutView thus we
     // can safely exit here.
     if (layout_view.UsesCompositing() ||
-        RuntimeEnabledFeatures::SlimmingPaintV2Enabled())
+        RuntimeEnabledFeatures::SlimmingPaintV175Enabled())
       return reason;
   }
 
@@ -99,7 +99,7 @@ PaintInvalidationReason BoxPaintInvalidator::ComputePaintInvalidationReason() {
 
   if ((style.BackgroundLayers().ThisOrNextLayersUseContentBox() ||
        style.MaskLayers().ThisOrNextLayersUseContentBox()) &&
-      box_.PreviousContentBoxSize() != box_.ContentBoxRect().Size())
+      box_.PreviousContentBoxSize() != box_.ContentSize())
     return PaintInvalidationReason::kGeometry;
 
   LayoutSize old_border_box_size = box_.PreviousSize();
@@ -117,13 +117,13 @@ PaintInvalidationReason BoxPaintInvalidator::ComputePaintInvalidationReason() {
   if (context_.old_visual_rect !=
           LayoutRect(context_.old_location, old_border_box_size) ||
       box_.VisualRect() !=
-          LayoutRect(context_.new_location, new_border_box_size)) {
+          LayoutRect(box_.LocationInBacking(), new_border_box_size)) {
     return PaintInvalidationReason::kGeometry;
   }
 
   DCHECK(border_box_changed);
 
-  if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled()) {
+  if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
     // Incremental invalidation is not applicable if there is border in the
     // direction of border box size change because we don't know the border
     // width when issuing incremental raster invalidations.
@@ -132,7 +132,7 @@ PaintInvalidationReason BoxPaintInvalidator::ComputePaintInvalidationReason() {
   }
 
   if (style.HasVisualOverflowingEffect() || style.HasAppearance() ||
-      style.HasFilterInducingProperty() || style.HasMask())
+      style.HasFilterInducingProperty() || style.HasMask() || style.ClipPath())
     return PaintInvalidationReason::kGeometry;
 
   if (style.HasBorderRadius())
@@ -231,8 +231,8 @@ void BoxPaintInvalidator::InvalidateScrollingContentsBackground(
     return;
 
   // TODO(crbug.com/732611): Implement raster invalidation of background on
-  // scrolling contents layer for SPv2.
-  if (!RuntimeEnabledFeatures::SlimmingPaintV2Enabled()) {
+  // scrolling contents layer for SPv175.
+  if (!RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
     const LayoutRect& old_layout_overflow = box_.PreviousLayoutOverflowRect();
     LayoutRect new_layout_overflow = box_.LayoutOverflowRect();
     if (backgroundInvalidationType == BackgroundInvalidationType::kFull) {
@@ -273,17 +273,17 @@ PaintInvalidationReason BoxPaintInvalidator::InvalidatePaint() {
         !RuntimeEnabledFeatures::RootLayerScrollingEnabled()) {
       should_invalidate = context_.old_visual_rect != box_.VisualRect();
       if (should_invalidate &&
-          !RuntimeEnabledFeatures::SlimmingPaintV2Enabled()) {
+          !RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
         IncrementallyInvalidatePaint(reason, context_.old_visual_rect,
                                      box_.VisualRect());
       }
     } else {
       should_invalidate = box_.PreviousSize() != box_.Size();
       if (should_invalidate &&
-          !RuntimeEnabledFeatures::SlimmingPaintV2Enabled()) {
+          !RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
         IncrementallyInvalidatePaint(
             reason, LayoutRect(context_.old_location, box_.PreviousSize()),
-            LayoutRect(context_.new_location, box_.Size()));
+            LayoutRect(box_.LocationInBacking(), box_.Size()));
       }
     }
     if (should_invalidate) {
@@ -329,7 +329,7 @@ bool BoxPaintInvalidator::
   // crbug.com/490533
   if ((style.BackgroundLayers().ThisOrNextLayersUseContentBox() ||
        style.MaskLayers().ThisOrNextLayersUseContentBox()) &&
-      box_.ContentBoxRect().Size() != box_.Size())
+      box_.ContentSize() != box_.Size())
     return true;
   if ((BackgroundGeometryDependsOnLayoutOverflowRect() ||
        BackgroundPaintsOntoScrollingContentsLayer()) &&

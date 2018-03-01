@@ -77,11 +77,11 @@ class MODULES_EXPORT Request final : public Body {
   const BodyStreamBuffer* BodyBuffer() const override {
     return request_->Buffer();
   }
-  PassRefPtr<EncodedFormData> AttachedCredential() const {
+  scoped_refptr<EncodedFormData> AttachedCredential() const {
     return request_->AttachedCredential();
   }
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   Request(ScriptState*, FetchRequestData*, Headers*);

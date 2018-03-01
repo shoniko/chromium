@@ -55,9 +55,9 @@ class SearchResultTileItemListViewTest
               features::IsPlayStoreAppSearchEnabled());
 
     // Sets up the views.
-    textfield_ = base::MakeUnique<views::Textfield>();
-    view_ = base::MakeUnique<SearchResultTileItemListView>(textfield_.get(),
-                                                           &view_delegate_);
+    textfield_ = std::make_unique<views::Textfield>();
+    view_ = std::make_unique<SearchResultTileItemListView>(
+        nullptr, textfield_.get(), &view_delegate_);
     view_->SetResults(view_delegate_.GetModel()->results());
   }
 
@@ -75,7 +75,7 @@ class SearchResultTileItemListViewTest
     // Populate results for installed applications.
     for (int i = 0; i < kInstalledApps; ++i) {
       std::unique_ptr<TestSearchResult> result =
-          base::MakeUnique<TestSearchResult>();
+          std::make_unique<TestSearchResult>();
       result->set_display_type(SearchResult::DISPLAY_TILE);
       result->set_result_type(SearchResult::RESULT_INSTALLED_APP);
       result->set_title(
@@ -87,7 +87,7 @@ class SearchResultTileItemListViewTest
     if (IsPlayStoreAppSearchEnabled()) {
       for (int i = 0; i < kPlayStoreApps; ++i) {
         std::unique_ptr<TestSearchResult> result =
-            base::MakeUnique<TestSearchResult>();
+            std::make_unique<TestSearchResult>();
         result->set_display_type(SearchResult::DISPLAY_TILE);
         result->set_result_type(SearchResult::RESULT_PLAYSTORE_APP);
         result->set_title(
@@ -170,7 +170,7 @@ TEST_P(SearchResultTileItemListViewTest, Basic) {
         ->child_at(first_child + i * child_step)
         ->GetAccessibleNodeData(&node_data);
     EXPECT_EQ(ui::AX_ROLE_BUTTON, node_data.role);
-    EXPECT_EQ(base::StringPrintf("PlayStoreApp %d, %d.0, Price %d",
+    EXPECT_EQ(base::StringPrintf("PlayStoreApp %d, Star rating %d.0, Price %d",
                                  i - kInstalledApps, i + 1 - kInstalledApps,
                                  i - kInstalledApps),
               node_data.GetStringAttribute(ui::AX_ATTR_NAME));

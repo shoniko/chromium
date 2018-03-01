@@ -98,7 +98,7 @@ const int kMaxStackedCount = 4;
 const int kStackedPadding = 6;
 
 // See UpdateLayoutTypeFromMouseEvent() for a description of these.
-#if !defined(USE_ASH)
+#if !defined(OS_CHROMEOS)
 const int kMouseMoveTimeMS = 200;
 const int kMouseMoveCountBeforeConsiderReal = 3;
 #endif
@@ -279,8 +279,8 @@ void TabStrip::RemoveTabDelegate::AnimationCanceled(
 ///////////////////////////////////////////////////////////////////////////////
 // TabStrip, public:
 
-TabStrip::TabStrip(TabStripController* controller)
-    : controller_(controller),
+TabStrip::TabStrip(std::unique_ptr<TabStripController> controller)
+    : controller_(std::move(controller)),
       new_tab_button_(NULL),
       current_inactive_width_(Tab::GetStandardSize().width()),
       current_active_width_(Tab::GetStandardSize().width()),
@@ -640,11 +640,11 @@ void TabStrip::SetSelection(const ui::ListSelectionModel& old_selection,
 void TabStrip::TabTitleChangedNotLoading(int model_index) {
   Tab* tab = tab_at(model_index);
   if (tab->data().pinned && !tab->IsActive())
-    tab->SetTabNeedsAttention(true);
+    tab->TabTitleChangedNotLoading();
 }
 
-void TabStrip::SetTabNeedsAttention(int model_index) {
-  tab_at(model_index)->SetTabNeedsAttention(true);
+void TabStrip::SetTabNeedsAttention(int model_index, bool attention) {
+  tab_at(model_index)->SetTabNeedsAttention(attention);
 }
 
 int TabStrip::GetModelIndexOfTab(const Tab* tab) const {
@@ -720,7 +720,7 @@ void TabStrip::SetBackgroundOffset(const gfx::Point& offset) {
 }
 
 SkAlpha TabStrip::GetInactiveAlpha(bool for_new_tab_button) const {
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
   static const SkAlpha kInactiveTabAlphaAsh = 230;
   const SkAlpha base_alpha = kInactiveTabAlphaAsh;
 #else
@@ -728,7 +728,7 @@ SkAlpha TabStrip::GetInactiveAlpha(bool for_new_tab_button) const {
   static const SkAlpha kInactiveTabAlphaOpaque = 255;
   const SkAlpha base_alpha = GetWidget()->ShouldWindowContentsBeTransparent() ?
       kInactiveTabAlphaGlass : kInactiveTabAlphaOpaque;
-#endif  // USE_ASH
+#endif  // OS_CHROMEOS
   static const double kMultiSelectionMultiplier = 0.6;
   return (for_new_tab_button || (GetSelectionModel().size() <= 1)) ?
       base_alpha : static_cast<SkAlpha>(kMultiSelectionMultiplier * base_alpha);
@@ -1833,7 +1833,7 @@ void TabStrip::UpdateStackedLayoutFromMouseEvent(views::View* source,
       break;
 
     case ui::ET_MOUSE_MOVED: {
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
       // Ash does not synthesize mouse events from touch events.
       SetResetToShrinkOnExit(true);
 #else

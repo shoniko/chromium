@@ -201,11 +201,6 @@ class TabSpecificContentSettings
   // only tracks cookies.
   bool IsContentAllowed(ContentSettingsType content_type) const;
 
-  // Returns the names of plugins that have been blocked for this tab.
-  const std::vector<base::string16>& blocked_plugin_names() const {
-    return blocked_plugin_names_;
-  }
-
   const GURL& media_stream_access_origin() const {
     return media_stream_access_origin_;
   }
@@ -366,6 +361,9 @@ class TabSpecificContentSettings
   // Block all content. Used for testing content setting bubbles.
   void BlockAllContentForTesting();
 
+  // This method is called to update the sound status.
+  void OnAudioStateChanged(bool is_audible);
+
  private:
   friend class content::WebContentsUserData<TabSpecificContentSettings>;
 
@@ -404,6 +402,15 @@ class TabSpecificContentSettings
   // Updates MIDI settings on navigation.
   void MidiDidNavigate(content::NavigationHandle* navigation_handle);
 
+  // Checks whether sound has been blocked when the sound setting is updated.
+  void OnSoundContentSettingUpdated();
+
+  // Sets sound as blocked if site is muted and sound is playing.
+  void CheckSoundBlocked(bool is_audible);
+
+  // Gets the current sound setting state.
+  ContentSetting GetSoundContentSetting() const;
+
   // All currently registered |SiteDataObserver|s.
   base::ObserverList<SiteDataObserver> observer_list_;
 
@@ -439,9 +446,6 @@ class TabSpecificContentSettings
   // The setting on the pending protocol handler registration. Persisted in case
   // the user opens the bubble and makes changes multiple times.
   ContentSetting pending_protocol_handler_setting_;
-
-  // The name(s) of the plugin(s) being blocked.
-  std::vector<base::string16> blocked_plugin_names_;
 
   // Stores whether the user can load blocked plugins on this page.
   bool load_plugins_link_enabled_;

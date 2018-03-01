@@ -125,12 +125,8 @@ bool StyleSheetContents::IsCacheableForResource() const {
   // This would require dealing with multiple clients for load callbacks.
   if (!LoadCompleted())
     return false;
-  // FIXME: StyleSheets with media queries can't be cached because their RuleSet
-  // is processed differently based off the media queries, which might resolve
-  // differently depending on the context of the parent CSSStyleSheet (e.g.
-  // if they are in differently sized iframes). Once RuleSets are media query
-  // agnostic, we can restore sharing of StyleSheetContents with medea queries.
-  if (has_media_queries_)
+  if (has_media_queries_ &&
+      !RuntimeEnabledFeatures::CacheStyleSheetWithMediaQueriesEnabled())
     return false;
   // FIXME: Support copying import rules.
   if (!import_rules_.IsEmpty())
@@ -297,7 +293,7 @@ bool StyleSheetContents::WrapperDeleteRule(unsigned index) {
     import_rules_[index]->ClearParentStyleSheet();
     if (import_rules_[index]->IsFontFaceRule())
       NotifyRemoveFontFaceRule(ToStyleRuleFontFace(import_rules_[index].Get()));
-    import_rules_.erase(index);
+    import_rules_.EraseAt(index);
     return true;
   }
   index -= import_rules_.size();
@@ -305,14 +301,14 @@ bool StyleSheetContents::WrapperDeleteRule(unsigned index) {
   if (index < namespace_rules_.size()) {
     if (!child_rules_.IsEmpty())
       return false;
-    namespace_rules_.erase(index);
+    namespace_rules_.EraseAt(index);
     return true;
   }
   index -= namespace_rules_.size();
 
   if (child_rules_[index]->IsFontFaceRule())
     NotifyRemoveFontFaceRule(ToStyleRuleFontFace(child_rules_[index].Get()));
-  child_rules_.erase(index);
+  child_rules_.EraseAt(index);
   return true;
 }
 
@@ -698,7 +694,7 @@ void StyleSheetContents::FindFontFaceRules(
   FindFontFaceRulesFromRules(ChildRules(), font_face_rules);
 }
 
-DEFINE_TRACE(StyleSheetContents) {
+void StyleSheetContents::Trace(blink::Visitor* visitor) {
   visitor->Trace(owner_rule_);
   visitor->Trace(import_rules_);
   visitor->Trace(namespace_rules_);

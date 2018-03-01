@@ -15,7 +15,6 @@ GlobalScopeCreationParams::GlobalScopeCreationParams(
     const String& user_agent,
     const String& source_code,
     std::unique_ptr<Vector<char>> cached_meta_data,
-    WorkerThreadStartMode start_mode,
     const Vector<CSPHeaderAndType>* content_security_policy_parsed_headers,
     const String& referrer_policy,
     const SecurityOrigin* starter_origin,
@@ -23,19 +22,20 @@ GlobalScopeCreationParams::GlobalScopeCreationParams(
     WebAddressSpace address_space,
     const Vector<String>* origin_trial_tokens,
     std::unique_ptr<WorkerSettings> worker_settings,
-    V8CacheOptions v8_cache_options)
+    V8CacheOptions v8_cache_options,
+    service_manager::mojom::blink::InterfaceProviderPtrInfo
+        interface_provider_info)
     : script_url(script_url.Copy()),
       user_agent(user_agent.IsolatedCopy()),
       source_code(source_code.IsolatedCopy()),
       cached_meta_data(std::move(cached_meta_data)),
-      start_mode(start_mode),
       referrer_policy(referrer_policy.IsolatedCopy()),
-      starter_origin_privilege_data(
-          starter_origin ? starter_origin->CreatePrivilegeData() : nullptr),
+      starter_origin(starter_origin ? starter_origin->IsolatedCopy() : nullptr),
       worker_clients(worker_clients),
       address_space(address_space),
       worker_settings(std::move(worker_settings)),
-      v8_cache_options(v8_cache_options) {
+      v8_cache_options(v8_cache_options),
+      interface_provider(std::move(interface_provider_info)) {
   this->content_security_policy_parsed_headers =
       WTF::MakeUnique<Vector<CSPHeaderAndType>>();
   if (content_security_policy_parsed_headers) {

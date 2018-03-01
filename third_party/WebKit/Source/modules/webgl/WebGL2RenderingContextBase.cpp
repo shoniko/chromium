@@ -8,8 +8,8 @@
 #include "bindings/modules/v8/WebGLAny.h"
 #include "core/html/HTMLCanvasElement.h"
 #include "core/html/HTMLImageElement.h"
-#include "core/html/HTMLVideoElement.h"
 #include "core/html/ImageData.h"
+#include "core/html/media/HTMLVideoElement.h"
 #include "core/imagebitmap/ImageBitmap.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "modules/webgl/WebGLActiveInfo.h"
@@ -393,10 +393,12 @@ void WebGL2RenderingContextBase::blitFramebuffer(GLint src_x0,
   if (isContextLost())
     return;
 
+  bool user_framebuffer_bound = GetFramebufferBinding(GL_DRAW_FRAMEBUFFER);
   DrawingBuffer::ScopedRGBEmulationForBlitFramebuffer emulation(
-      GetDrawingBuffer(), !!GetFramebufferBinding(GL_DRAW_FRAMEBUFFER));
+      GetDrawingBuffer(), user_framebuffer_bound);
   ContextGL()->BlitFramebufferCHROMIUM(src_x0, src_y0, src_x1, src_y1, dst_x0,
                                        dst_y0, dst_x1, dst_y1, mask, filter);
+  MarkContextChanged(kCanvasChanged);
 }
 
 bool WebGL2RenderingContextBase::ValidateTexFuncLayer(const char* function_name,
@@ -3376,7 +3378,7 @@ void WebGL2RenderingContextBase::drawArraysInstanced(GLenum mode,
   }
 
   ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
-                                                   drawing_buffer_.Get());
+                                                   drawing_buffer_.get());
   ClearIfComposited();
   ContextGL()->DrawArraysInstancedANGLE(mode, first, count, instance_count);
   MarkContextChanged(kCanvasChanged);
@@ -3397,7 +3399,7 @@ void WebGL2RenderingContextBase::drawElementsInstanced(GLenum mode,
   }
 
   ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
-                                                   drawing_buffer_.Get());
+                                                   drawing_buffer_.get());
   ClearIfComposited();
   ContextGL()->DrawElementsInstancedANGLE(
       mode, count, type, reinterpret_cast<void*>(static_cast<intptr_t>(offset)),
@@ -3421,7 +3423,7 @@ void WebGL2RenderingContextBase::drawRangeElements(GLenum mode,
   }
 
   ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
-                                                   drawing_buffer_.Get());
+                                                   drawing_buffer_.get());
   ClearIfComposited();
   ContextGL()->DrawRangeElements(
       mode, start, end, count, type,
@@ -3434,7 +3436,7 @@ void WebGL2RenderingContextBase::drawBuffers(const Vector<GLenum>& buffers) {
     return;
 
   ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
-                                                   drawing_buffer_.Get());
+                                                   drawing_buffer_.get());
   GLsizei n = buffers.size();
   const GLenum* bufs = buffers.data();
   for (GLsizei i = 0; i < n; ++i) {
@@ -3537,6 +3539,9 @@ void WebGL2RenderingContextBase::clearBufferiv(GLenum buffer,
                            src_offset))
     return;
 
+  ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
+                                                   drawing_buffer_.get());
+
   ContextGL()->ClearBufferiv(buffer, drawbuffer,
                              value.View()->DataMaybeShared() + src_offset);
 }
@@ -3548,6 +3553,9 @@ void WebGL2RenderingContextBase::clearBufferiv(GLenum buffer,
   if (isContextLost() ||
       !ValidateClearBuffer("clearBufferiv", buffer, value.size(), src_offset))
     return;
+
+  ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
+                                                   drawing_buffer_.get());
 
   ContextGL()->ClearBufferiv(buffer, drawbuffer, value.data() + src_offset);
 }
@@ -3562,6 +3570,9 @@ void WebGL2RenderingContextBase::clearBufferuiv(
                            src_offset))
     return;
 
+  ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
+                                                   drawing_buffer_.get());
+
   ContextGL()->ClearBufferuiv(buffer, drawbuffer,
                               value.View()->DataMaybeShared() + src_offset);
 }
@@ -3573,6 +3584,9 @@ void WebGL2RenderingContextBase::clearBufferuiv(GLenum buffer,
   if (isContextLost() ||
       !ValidateClearBuffer("clearBufferuiv", buffer, value.size(), src_offset))
     return;
+
+  ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
+                                                   drawing_buffer_.get());
 
   ContextGL()->ClearBufferuiv(buffer, drawbuffer, value.data() + src_offset);
 }
@@ -3587,8 +3601,22 @@ void WebGL2RenderingContextBase::clearBufferfv(
                            src_offset))
     return;
 
+  // As of this writing the default back buffer will always have an
+  // RGB(A)/UNSIGNED_BYTE color attachment, so only clearBufferfv can
+  // be used with it and consequently the emulation should only be
+  // needed here. However, as support for extended color spaces is
+  // added, the type of the back buffer might change, so do the
+  // emulation for all clearBuffer entry points instead of just here.
+  ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
+                                                   drawing_buffer_.get());
+
   ContextGL()->ClearBufferfv(buffer, drawbuffer,
                              value.View()->DataMaybeShared() + src_offset);
+  // The other clearBuffer entry points will currently generate an
+  // error if they're called against the default back buffer. If
+  // support for extended canvas color spaces is added, this call
+  // might need to be added to the other versions.
+  MarkContextChanged(kCanvasChanged);
 }
 
 void WebGL2RenderingContextBase::clearBufferfv(GLenum buffer,
@@ -3599,7 +3627,21 @@ void WebGL2RenderingContextBase::clearBufferfv(GLenum buffer,
       !ValidateClearBuffer("clearBufferfv", buffer, value.size(), src_offset))
     return;
 
+  // As of this writing the default back buffer will always have an
+  // RGB(A)/UNSIGNED_BYTE color attachment, so only clearBufferfv can
+  // be used with it and consequently the emulation should only be
+  // needed here. However, as support for extended color spaces is
+  // added, the type of the back buffer might change, so do the
+  // emulation for all clearBuffer entry points instead of just here.
+  ScopedRGBEmulationColorMask emulation_color_mask(this, color_mask_,
+                                                   drawing_buffer_.get());
+
   ContextGL()->ClearBufferfv(buffer, drawbuffer, value.data() + src_offset);
+  // The other clearBuffer entry points will currently generate an
+  // error if they're called against the default back buffer. If
+  // support for extended canvas color spaces is added, this call
+  // might need to be added to the other versions.
+  MarkContextChanged(kCanvasChanged);
 }
 
 void WebGL2RenderingContextBase::clearBufferfi(GLenum buffer,
@@ -4673,7 +4715,7 @@ void WebGL2RenderingContextBase::bindVertexArray(
     return;
 
   if (vertex_array &&
-      (vertex_array->IsDeleted() || !vertex_array->Validate(0, this))) {
+      (vertex_array->IsDeleted() || !vertex_array->Validate(nullptr, this))) {
     SynthesizeGLError(GL_INVALID_OPERATION, "bindVertexArray",
                       "invalid vertexArray");
     return;
@@ -5453,7 +5495,7 @@ ScriptValue WebGL2RenderingContextBase::getFramebufferAttachmentParameter(
   return ScriptValue::CreateNull(script_state);
 }
 
-DEFINE_TRACE(WebGL2RenderingContextBase) {
+void WebGL2RenderingContextBase::Trace(blink::Visitor* visitor) {
   visitor->Trace(read_framebuffer_binding_);
   visitor->Trace(transform_feedback_binding_);
   visitor->Trace(default_transform_feedback_);
@@ -5471,7 +5513,8 @@ DEFINE_TRACE(WebGL2RenderingContextBase) {
   WebGLRenderingContextBase::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(WebGL2RenderingContextBase) {
+void WebGL2RenderingContextBase::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(read_framebuffer_binding_);
   visitor->TraceWrappers(transform_feedback_binding_);
   visitor->TraceWrappers(bound_copy_read_buffer_);

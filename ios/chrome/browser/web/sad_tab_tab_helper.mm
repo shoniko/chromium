@@ -68,21 +68,19 @@ void SadTabTabHelper::CreateForWebState(web::WebState* web_state,
   }
 }
 
-void SadTabTabHelper::WasShown() {
-  is_visible_ = true;
+void SadTabTabHelper::SetDelegate(id<SadTabTabHelperDelegate> delegate) {
+  delegate_ = delegate;
+}
 
+void SadTabTabHelper::WasShown(web::WebState* web_state) {
   if (requires_reload_on_becoming_visible_) {
     ReloadTab();
     requires_reload_on_becoming_visible_ = false;
   }
 }
 
-void SadTabTabHelper::WasHidden() {
-  is_visible_ = false;
-}
-
-void SadTabTabHelper::RenderProcessGone() {
-  if (!is_visible_) {
+void SadTabTabHelper::RenderProcessGone(web::WebState* web_state) {
+  if (!web_state->IsVisible()) {
     requires_reload_on_becoming_visible_ = true;
     return;
   }
@@ -95,10 +93,11 @@ void SadTabTabHelper::RenderProcessGone() {
   // Only show Sad Tab if renderer has crashed in a tab currently visible to the
   // user and only if application is active. Otherwise simpy reloading the page
   // is a better user experience.
-  PresentSadTab(web_state()->GetLastCommittedURL());
+  PresentSadTab(web_state->GetLastCommittedURL());
 }
 
 void SadTabTabHelper::DidFinishNavigation(
+    web::WebState* web_state,
     web::NavigationContext* navigation_context) {
   if (navigation_context->GetUrl().host() == kChromeUICrashHost &&
       navigation_context->GetUrl().scheme() == kChromeUIScheme) {
@@ -106,7 +105,7 @@ void SadTabTabHelper::DidFinishNavigation(
   }
 }
 
-void SadTabTabHelper::WebStateDestroyed() {
+void SadTabTabHelper::WebStateDestroyed(web::WebState* web_state) {
   RemoveApplicationDidBecomeActiveObserver();
 }
 
@@ -120,8 +119,7 @@ void SadTabTabHelper::PresentSadTab(const GURL& url_causing_failure) {
       (url_causing_failure.EqualsIgnoringRef(last_failed_url_) &&
        seconds_since_last_failure < repeat_failure_interval_);
 
-  [delegate_ sadTabHelper:this
-      presentSadTabForRepeatedFailure:repeated_failure];
+  [delegate_ presentSadTabForRepeatedFailure:repeated_failure];
 
   last_failed_url_ = url_causing_failure;
   last_failed_timer_ = base::MakeUnique<base::ElapsedTimer>();
@@ -136,7 +134,7 @@ void SadTabTabHelper::ReloadTab() {
 void SadTabTabHelper::OnAppDidBecomeActive() {
   if (!requires_reload_on_becoming_active_)
     return;
-  if (is_visible_) {
+  if (web_state()->IsVisible()) {
     ReloadTab();
   } else {
     requires_reload_on_becoming_visible_ = true;

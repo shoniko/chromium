@@ -102,17 +102,11 @@ void WebApkUpdateDataFetcher::FetchInstallableData() {
     return;
 
   InstallableParams params;
-  params.ideal_primary_icon_size_in_px =
-      ShortcutHelper::GetIdealHomescreenIconSizeInPx();
-  params.minimum_primary_icon_size_in_px =
-      ShortcutHelper::GetMinimumHomescreenIconSizeInPx();
-  params.ideal_badge_icon_size_in_px =
-      ShortcutHelper::GetIdealBadgeIconSizeInPx();
-  params.minimum_badge_icon_size_in_px =
-      ShortcutHelper::GetIdealBadgeIconSizeInPx();
-  params.check_installable = true;
-  params.fetch_valid_primary_icon = true;
-  params.fetch_valid_badge_icon = true;
+  params.valid_manifest = true;
+  params.has_worker = true;
+  params.valid_primary_icon = true;
+  params.valid_badge_icon = true;
+  params.wait_for_worker = true;
   InstallableManager* installable_manager =
       InstallableManager::FromWebContents(web_contents());
   installable_manager->GetData(

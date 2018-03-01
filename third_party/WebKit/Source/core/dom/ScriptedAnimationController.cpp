@@ -27,7 +27,6 @@
 
 #include "core/css/MediaQueryListListener.h"
 #include "core/dom/Document.h"
-#include "core/dom/FrameRequestCallback.h"
 #include "core/dom/events/Event.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrameView.h"
@@ -44,12 +43,17 @@ std::pair<EventTarget*, StringImpl*> EventTargetKey(const Event* event) {
 ScriptedAnimationController::ScriptedAnimationController(Document* document)
     : document_(document), callback_collection_(document), suspend_count_(0) {}
 
-DEFINE_TRACE(ScriptedAnimationController) {
+void ScriptedAnimationController::Trace(blink::Visitor* visitor) {
   visitor->Trace(document_);
   visitor->Trace(callback_collection_);
   visitor->Trace(event_queue_);
   visitor->Trace(media_query_list_listeners_);
   visitor->Trace(per_frame_events_);
+}
+
+void ScriptedAnimationController::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
+  visitor->TraceWrappers(callback_collection_);
 }
 
 void ScriptedAnimationController::Suspend() {
@@ -71,7 +75,8 @@ void ScriptedAnimationController::DispatchEventsAndCallbacksForPrinting() {
 }
 
 ScriptedAnimationController::CallbackId
-ScriptedAnimationController::RegisterCallback(FrameRequestCallback* callback) {
+ScriptedAnimationController::RegisterCallback(
+    FrameRequestCallbackCollection::FrameCallback* callback) {
   CallbackId id = callback_collection_.RegisterCallback(callback);
   ScheduleAnimationIfNeeded();
   return id;

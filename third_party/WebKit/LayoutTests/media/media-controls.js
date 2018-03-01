@@ -49,6 +49,33 @@ function overlayCastButton(videoElement)
     return button;
 }
 
+function overflowButton(videoElement)
+{
+    var controlID = '-internal-media-controls-overflow-button';
+    var button = mediaControlsElement(window.internals.shadowRoot(videoElement).firstChild, controlID);
+    if (!button)
+        throw 'Failed to find cast button';
+    return button;
+}
+
+function textTrackMenu(video)
+{
+  var controlID = '-internal-media-controls-text-track-list';
+  var element = mediaControlsElement(window.internals.shadowRoot(video).firstChild, controlID);
+  if (!element)
+    throw 'Failed to find the overflow menu';
+  return element;
+}
+
+function overflowMenu(video)
+{
+  var controlID = '-internal-media-controls-overflow-menu-list';
+  var element = mediaControlsElement(window.internals.shadowRoot(video).firstChild, controlID);
+  if (!element)
+    throw 'Failed to find the overflow menu';
+  return element;
+}
+
 function mediaControlsElement(first, id)
 {
     for (var element = first; element; element = element.nextSibling) {
@@ -154,6 +181,18 @@ function isClosedCaptionsButtonVisible(currentMediaElement)
     return false;
 }
 
+function toggleClosedCaptionsButton(videoElement) {
+    return mediaControlsButton(videoElement, 'toggle-closed-captions-button');
+}
+
+function playButton(videoElement) {
+    return mediaControlsButton(videoElement, 'play-button');
+}
+
+function muteButton(videoElement) {
+    return mediaControlsButton(videoElement, 'mute-button');
+}
+
 function clickAtCoordinates(x, y)
 {
     eventSender.mouseMoveTo(x, y);
@@ -163,13 +202,7 @@ function clickAtCoordinates(x, y)
 
 function textTrackListItemAtIndex(video, index)
 {
-    var textTrackListElementID = "-internal-media-controls-text-track-list";
-    var textTrackListElement = mediaControlsElement(
-            internals.shadowRoot(video).firstChild, textTrackListElementID);
-    if (!textTrackListElement)
-        throw "Failed to find text track list element";
-
-    var trackListItems = textTrackListElement.childNodes;
+    var trackListItems = textTrackMenu(video).childNodes;
     for (var i = 0; i < trackListItems.length; i++) {
         var trackListItem = trackListItems[i];
         if (trackListItem.firstChild.getAttribute("data-track-index") == index)
@@ -240,4 +273,16 @@ function isVisible(button) {
     var computedStyle = getComputedStyle(button);
     return computedStyle.display !== "none" &&
            computedStyle.visibility === "visible";
+}
+
+function checkButtonHasClass(button, className) {
+  assert_true(button.classList.contains(className));
+}
+
+function checkButtonNotHasClass(button, className) {
+  assert_false(button.classList.contains(className));
+}
+
+function checkControlsClassName(videoElement, className) {
+  assert_equals(window.internals.shadowRoot(videoElement).firstChild.className, className);
 }

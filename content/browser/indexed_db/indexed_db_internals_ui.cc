@@ -69,7 +69,7 @@ IndexedDBInternalsUI::IndexedDBInternalsUI(WebUI* web_ui)
   source->AddResourcePath("indexeddb_internals.css",
                           IDR_INDEXED_DB_INTERNALS_CSS);
   source->SetDefaultResource(IDR_INDEXED_DB_INTERNALS_HTML);
-  source->UseGzip(std::unordered_set<std::string>());
+  source->UseGzip();
 
   BrowserContext* browser_context =
       web_ui->GetWebContents()->GetBrowserContext();
@@ -151,7 +151,7 @@ bool IndexedDBInternalsUI::GetOriginData(
   if (!args->GetString(1, &url_string))
     return false;
 
-  *origin = Origin(GURL(url_string));
+  *origin = Origin::Create(GURL(url_string));
 
   return GetOriginContext(*partition_path, *origin, context);
 }

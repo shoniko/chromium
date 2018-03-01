@@ -24,7 +24,6 @@ class GURL;
 
 namespace content {
 
-class DevToolsCPUThrottler;
 class RenderFrameImpl;
 struct Manifest;
 struct ManifestDebugInfo;
@@ -80,10 +79,8 @@ class CONTENT_EXPORT DevToolsAgent : public RenderFrameObserver,
 
   void SetCPUThrottlingRate(double rate) override;
 
-  void OnAttach(const std::string& host_id, int session_id);
-  void OnReattach(const std::string& host_id,
-                  int session_id,
-                  const std::string& agent_state);
+  void OnAttach(int session_id);
+  void OnReattach(int session_id, const std::string& agent_state);
   void OnDetach(int session_id);
   void OnDispatchOnInspectorBackend(int session_id,
                                     int call_id,
@@ -106,7 +103,6 @@ class CONTENT_EXPORT DevToolsAgent : public RenderFrameObserver,
   RenderFrameImpl* frame_;
   base::Callback<void(int, int, const std::string&, const std::string&)>
       send_protocol_message_callback_for_test_;
-  std::unique_ptr<DevToolsCPUThrottler> cpu_throttler_;
   base::WeakPtrFactory<DevToolsAgent> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DevToolsAgent);

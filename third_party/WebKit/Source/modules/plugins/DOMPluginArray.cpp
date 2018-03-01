@@ -27,7 +27,6 @@
 #include "core/page/Page.h"
 #include "modules/plugins/DOMMimeTypeArray.h"
 #include "modules/plugins/NavigatorPlugins.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/plugins/PluginData.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/debug/Alias.h"
@@ -41,10 +40,11 @@ DOMPluginArray::DOMPluginArray(LocalFrame* frame)
   UpdatePluginData();
 }
 
-DEFINE_TRACE(DOMPluginArray) {
+void DOMPluginArray::Trace(blink::Visitor* visitor) {
+  visitor->Trace(dom_plugins_);
+  ScriptWrappable::Trace(visitor);
   ContextLifecycleObserver::Trace(visitor);
   PluginsChangedObserver::Trace(visitor);
-  visitor->Trace(dom_plugins_);
 }
 
 unsigned DOMPluginArray::length() const {
@@ -75,6 +75,24 @@ DOMPlugin* DOMPluginArray::namedItem(const AtomicString& property_name) {
     }
   }
   return nullptr;
+}
+
+void DOMPluginArray::NamedPropertyEnumerator(Vector<String>& property_names,
+                                             ExceptionState&) const {
+  PluginData* data = GetPluginData();
+  if (!data)
+    return;
+  property_names.ReserveInitialCapacity(data->Plugins().size());
+  for (const PluginInfo* plugin_info : data->Plugins()) {
+    property_names.UncheckedAppend(plugin_info->Name());
+  }
+}
+
+bool DOMPluginArray::NamedPropertyQuery(const AtomicString& property_name,
+                                        ExceptionState& exception_state) const {
+  Vector<String> properties;
+  NamedPropertyEnumerator(properties, exception_state);
+  return properties.Contains(property_name);
 }
 
 void DOMPluginArray::refresh(bool reload) {

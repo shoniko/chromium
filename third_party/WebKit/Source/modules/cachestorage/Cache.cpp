@@ -21,10 +21,10 @@
 #include "modules/fetch/GlobalFetch.h"
 #include "modules/fetch/Request.h"
 #include "modules/fetch/Response.h"
-#include "platform/HTTPNames.h"
 #include "platform/Histogram.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/bindings/V8ThrowException.h"
+#include "platform/network/http_names.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerCache.h"
 
 namespace blink {
@@ -263,7 +263,7 @@ class Cache::FetchResolvedForAdd final : public ScriptFunction {
     return ScriptValue(GetScriptState(), put_promise.V8Value());
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(cache_);
     visitor->Trace(requests_);
     ScriptFunction::Trace(visitor);
@@ -322,7 +322,7 @@ class Cache::BarrierCallbackForPut final
         V8ThrowException::CreateTypeError(state->GetIsolate(), error_message));
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(cache_);
     visitor->Trace(resolver_);
   }
@@ -352,7 +352,7 @@ class Cache::BlobHandleCallbackForPut final
   ~BlobHandleCallbackForPut() override {}
 
   void DidFetchDataLoadedBlobHandle(
-      PassRefPtr<BlobDataHandle> handle) override {
+      scoped_refptr<BlobDataHandle> handle) override {
     WebServiceWorkerCache::BatchOperation batch_operation;
     batch_operation.operation_type = WebServiceWorkerCache::kOperationTypePut;
     batch_operation.request = web_request_;
@@ -365,7 +365,7 @@ class Cache::BlobHandleCallbackForPut final
     barrier_callback_->OnError("network error");
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(barrier_callback_);
     FetchDataLoader::Client::Trace(visitor);
   }
@@ -387,11 +387,11 @@ ScriptPromise Cache::match(ScriptState* script_state,
                            const RequestInfo& request,
                            const CacheQueryOptions& options,
                            ExceptionState& exception_state) {
-  DCHECK(!request.isNull());
-  if (request.isRequest())
-    return MatchImpl(script_state, request.getAsRequest(), options);
+  DCHECK(!request.IsNull());
+  if (request.IsRequest())
+    return MatchImpl(script_state, request.GetAsRequest(), options);
   Request* new_request =
-      Request::Create(script_state, request.getAsUSVString(), exception_state);
+      Request::Create(script_state, request.GetAsUSVString(), exception_state);
   if (exception_state.HadException())
     return ScriptPromise();
   return MatchImpl(script_state, new_request, options);
@@ -406,11 +406,11 @@ ScriptPromise Cache::matchAll(ScriptState* script_state,
                               const RequestInfo& request,
                               const CacheQueryOptions& options,
                               ExceptionState& exception_state) {
-  DCHECK(!request.isNull());
-  if (request.isRequest())
-    return MatchAllImpl(script_state, request.getAsRequest(), options);
+  DCHECK(!request.IsNull());
+  if (request.IsRequest())
+    return MatchAllImpl(script_state, request.GetAsRequest(), options);
   Request* new_request =
-      Request::Create(script_state, request.getAsUSVString(), exception_state);
+      Request::Create(script_state, request.GetAsUSVString(), exception_state);
   if (exception_state.HadException())
     return ScriptPromise();
   return MatchAllImpl(script_state, new_request, options);
@@ -419,12 +419,12 @@ ScriptPromise Cache::matchAll(ScriptState* script_state,
 ScriptPromise Cache::add(ScriptState* script_state,
                          const RequestInfo& request,
                          ExceptionState& exception_state) {
-  DCHECK(!request.isNull());
+  DCHECK(!request.IsNull());
   HeapVector<Member<Request>> requests;
-  if (request.isRequest()) {
-    requests.push_back(request.getAsRequest());
+  if (request.IsRequest()) {
+    requests.push_back(request.GetAsRequest());
   } else {
-    requests.push_back(Request::Create(script_state, request.getAsUSVString(),
+    requests.push_back(Request::Create(script_state, request.GetAsUSVString(),
                                        exception_state));
     if (exception_state.HadException())
       return ScriptPromise();
@@ -438,10 +438,10 @@ ScriptPromise Cache::addAll(ScriptState* script_state,
                             ExceptionState& exception_state) {
   HeapVector<Member<Request>> requests;
   for (RequestInfo request : raw_requests) {
-    if (request.isRequest()) {
-      requests.push_back(request.getAsRequest());
+    if (request.IsRequest()) {
+      requests.push_back(request.GetAsRequest());
     } else {
-      requests.push_back(Request::Create(script_state, request.getAsUSVString(),
+      requests.push_back(Request::Create(script_state, request.GetAsUSVString(),
                                          exception_state));
       if (exception_state.HadException())
         return ScriptPromise();
@@ -455,11 +455,11 @@ ScriptPromise Cache::deleteFunction(ScriptState* script_state,
                                     const RequestInfo& request,
                                     const CacheQueryOptions& options,
                                     ExceptionState& exception_state) {
-  DCHECK(!request.isNull());
-  if (request.isRequest())
-    return DeleteImpl(script_state, request.getAsRequest(), options);
+  DCHECK(!request.IsNull());
+  if (request.IsRequest())
+    return DeleteImpl(script_state, request.GetAsRequest(), options);
   Request* new_request =
-      Request::Create(script_state, request.getAsUSVString(), exception_state);
+      Request::Create(script_state, request.GetAsUSVString(), exception_state);
   if (exception_state.HadException())
     return ScriptPromise();
   return DeleteImpl(script_state, new_request, options);
@@ -469,13 +469,13 @@ ScriptPromise Cache::put(ScriptState* script_state,
                          const RequestInfo& request,
                          Response* response,
                          ExceptionState& exception_state) {
-  DCHECK(!request.isNull());
-  if (request.isRequest())
+  DCHECK(!request.IsNull());
+  if (request.IsRequest())
     return PutImpl(script_state,
-                   HeapVector<Member<Request>>(1, request.getAsRequest()),
+                   HeapVector<Member<Request>>(1, request.GetAsRequest()),
                    HeapVector<Member<Response>>(1, response));
   Request* new_request =
-      Request::Create(script_state, request.getAsUSVString(), exception_state);
+      Request::Create(script_state, request.GetAsUSVString(), exception_state);
   if (exception_state.HadException())
     return ScriptPromise();
   return PutImpl(script_state, HeapVector<Member<Request>>(1, new_request),
@@ -490,11 +490,11 @@ ScriptPromise Cache::keys(ScriptState* script_state,
                           const RequestInfo& request,
                           const CacheQueryOptions& options,
                           ExceptionState& exception_state) {
-  DCHECK(!request.isNull());
-  if (request.isRequest())
-    return KeysImpl(script_state, request.getAsRequest(), options);
+  DCHECK(!request.IsNull());
+  if (request.IsRequest())
+    return KeysImpl(script_state, request.GetAsRequest(), options);
   Request* new_request =
-      Request::Create(script_state, request.getAsUSVString(), exception_state);
+      Request::Create(script_state, request.GetAsUSVString(), exception_state);
   if (exception_state.HadException())
     return ScriptPromise();
   return KeysImpl(script_state, new_request, options);
@@ -515,8 +515,9 @@ Cache::Cache(GlobalFetch::ScopedFetcher* fetcher,
              std::unique_ptr<WebServiceWorkerCache> web_cache)
     : scoped_fetcher_(fetcher), web_cache_(std::move(web_cache)) {}
 
-DEFINE_TRACE(Cache) {
+void Cache::Trace(blink::Visitor* visitor) {
   visitor->Trace(scoped_fetcher_);
+  ScriptWrappable::Trace(visitor);
 }
 
 ScriptPromise Cache::MatchImpl(ScriptState* script_state,
@@ -586,7 +587,7 @@ ScriptPromise Cache::AddAllImpl(ScriptState* script_state,
           V8ThrowException::CreateTypeError(
               script_state->GetIsolate(),
               "Add/AddAll only supports the GET request method."));
-    request_infos[i].setRequest(requests[i]);
+    request_infos[i].SetRequest(requests[i]);
 
     promises[i] = scoped_fetcher_->Fetch(script_state, request_infos[i],
                                          Dictionary(), exception_state);

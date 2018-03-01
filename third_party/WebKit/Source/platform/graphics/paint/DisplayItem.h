@@ -6,15 +6,15 @@
 #define DisplayItem_h
 
 #include "platform/PlatformExport.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/graphics/ContiguousContainer.h"
 #include "platform/graphics/paint/DisplayItemClient.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/Noncopyable.h"
 
 #ifndef NDEBUG
-#include "platform/wtf/text/StringBuilder.h"
+#include "platform/json/JSONValues.h"
 #include "platform/wtf/text/WTFString.h"
 #endif
 
@@ -22,6 +22,7 @@ namespace blink {
 
 class GraphicsContext;
 class LayoutSize;
+enum class PaintPhase;
 class WebDisplayItemList;
 
 class PLATFORM_EXPORT DisplayItem {
@@ -280,14 +281,15 @@ class PLATFORM_EXPORT DisplayItem {
   DEFINE_CATEGORY_METHODS(End##Category)                   \
   DEFINE_CONVERSION_METHODS(Category, category, End##Category, end##Category)
 
-#define DEFINE_PAINT_PHASE_CONVERSION_METHOD(Category)                   \
-  static Type PaintPhaseTo##Category##Type(int paintPhase) {             \
-    static_assert(                                                       \
-        k##Category##PaintPhaseLast - k##Category##PaintPhaseFirst ==    \
-            k##PaintPhaseMax,                                            \
-        "Invalid paint-phase-based category " #Category                  \
-        ". See comments of DisplayItem::Type");                          \
-    return static_cast<Type>(paintPhase + k##Category##PaintPhaseFirst); \
+#define DEFINE_PAINT_PHASE_CONVERSION_METHOD(Category)                \
+  static Type PaintPhaseTo##Category##Type(PaintPhase paint_phase) {  \
+    static_assert(                                                    \
+        k##Category##PaintPhaseLast - k##Category##PaintPhaseFirst == \
+            kPaintPhaseMax,                                           \
+        "Invalid paint-phase-based category " #Category               \
+        ". See comments of DisplayItem::Type");                       \
+    return static_cast<Type>(static_cast<int>(paint_phase) +          \
+                             k##Category##PaintPhaseFirst);           \
   }
 
   DEFINE_CATEGORY_METHODS(Drawing)
@@ -343,7 +345,7 @@ class PLATFORM_EXPORT DisplayItem {
   const WTF::String ClientDebugString() const { return client_debug_string_; }
   void SetClientDebugString(const WTF::String& s) { client_debug_string_ = s; }
   WTF::String AsDebugString() const;
-  virtual void DumpPropertiesAsDebugString(WTF::StringBuilder&) const;
+  virtual void PropertiesAsJSON(JSONObject&) const;
 #endif
 
  private:
@@ -389,7 +391,7 @@ class PLATFORM_EXPORT PairedBeginDisplayItem : public DisplayItem {
                          Type type,
                          size_t derived_size)
       : DisplayItem(client, type, derived_size) {
-    DCHECK(!RuntimeEnabledFeatures::SlimmingPaintV2Enabled());
+    DCHECK(!RuntimeEnabledFeatures::SlimmingPaintV175Enabled());
   }
 
  private:
@@ -402,7 +404,7 @@ class PLATFORM_EXPORT PairedEndDisplayItem : public DisplayItem {
                        Type type,
                        size_t derived_size)
       : DisplayItem(client, type, derived_size) {
-    DCHECK(!RuntimeEnabledFeatures::SlimmingPaintV2Enabled());
+    DCHECK(!RuntimeEnabledFeatures::SlimmingPaintV175Enabled());
   }
 
 #if DCHECK_IS_ON()

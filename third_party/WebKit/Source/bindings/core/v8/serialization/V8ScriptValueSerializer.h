@@ -14,6 +14,7 @@
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/RefPtr.h"
+#include "platform/wtf/Vector.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -41,8 +42,6 @@ class CORE_EXPORT V8ScriptValueSerializer
 
   RefPtr<SerializedScriptValue> Serialize(v8::Local<v8::Value>,
                                           ExceptionState&);
-
-  static const uint32_t kLatestVersion;
 
  protected:
   // Returns true if the DOM object was successfully written.
@@ -113,6 +112,9 @@ class CORE_EXPORT V8ScriptValueSerializer
   bool serialize_invoked_ = false;
 #endif
 };
+
+// For code testing V8ScriptValueSerializer
+RefPtr<SerializedScriptValue> SerializedValue(const Vector<uint8_t>& bytes);
 
 }  // namespace blink
 

@@ -32,8 +32,8 @@ AXSystemCaretWin::~AXSystemCaretWin() {
   caret_ = nullptr;
 }
 
-base::win::ScopedComPtr<IAccessible> AXSystemCaretWin::GetCaret() const {
-  base::win::ScopedComPtr<IAccessible> caret_accessible;
+Microsoft::WRL::ComPtr<IAccessible> AXSystemCaretWin::GetCaret() const {
+  Microsoft::WRL::ComPtr<IAccessible> caret_accessible;
   HRESULT hr = caret_->QueryInterface(
       IID_IAccessible,
       reinterpret_cast<void**>(caret_accessible.GetAddressOf()));
@@ -116,6 +116,10 @@ AXPlatformNode* AXSystemCaretWin::GetFromNodeID(int32_t id) {
 }
 
 bool AXSystemCaretWin::ShouldIgnoreHoveredStateForTesting() {
+  return false;
+}
+
+bool AXSystemCaretWin::IsOffscreen() const {
   return false;
 }
 

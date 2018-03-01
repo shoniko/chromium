@@ -7,13 +7,11 @@
 
 #include <memory>
 
-#include "base/callback.h"
 #include "chrome/browser/vr/elements/textured_element.h"
 #include "third_party/skia/include/core/SkColor.h"
 
 namespace vr {
 
-struct ColorScheme;
 class TextTexture;
 class UiTexture;
 
@@ -21,10 +19,11 @@ class Text : public TexturedElement {
  public:
   Text(int maximum_width_pixels,
        float font_height_meters,
-       float text_width_meters,
-       const base::Callback<SkColor(ColorScheme)>& color_callback,
-       int resource_id);
+       float text_width_meters);
   ~Text() override;
+
+  void SetText(const base::string16& text);
+  void SetColor(SkColor color);
 
  private:
   UiTexture* GetTexture() const override;

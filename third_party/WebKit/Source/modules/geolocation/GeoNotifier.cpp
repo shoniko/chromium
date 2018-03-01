@@ -4,6 +4,7 @@
 
 #include "modules/geolocation/GeoNotifier.h"
 
+#include "core/dom/TaskRunnerHelper.h"
 #include "modules/geolocation/Geolocation.h"
 #include "modules/geolocation/PositionError.h"
 #include "modules/geolocation/PositionOptions.h"
@@ -13,14 +14,17 @@
 namespace blink {
 
 GeoNotifier::GeoNotifier(Geolocation* geolocation,
-                         PositionCallback* success_callback,
+                         V8PositionCallback* success_callback,
                          PositionErrorCallback* error_callback,
                          const PositionOptions& options)
     : geolocation_(geolocation),
       success_callback_(success_callback),
       error_callback_(error_callback),
       options_(options),
-      timer_(this, &GeoNotifier::TimerFired),
+      timer_(TaskRunnerHelper::Get(TaskType::kMiscPlatformAPI,
+                                   geolocation->GetDocument()),
+             this,
+             &GeoNotifier::TimerFired),
       use_cached_position_(false) {
   DCHECK(geolocation_);
   DCHECK(success_callback_);
@@ -31,11 +35,15 @@ GeoNotifier::GeoNotifier(Geolocation* geolocation,
   timeout_histogram.Count(options_.timeout());
 }
 
-DEFINE_TRACE(GeoNotifier) {
+void GeoNotifier::Trace(blink::Visitor* visitor) {
   visitor->Trace(geolocation_);
   visitor->Trace(success_callback_);
   visitor->Trace(error_callback_);
   visitor->Trace(fatal_error_);
+}
+
+void GeoNotifier::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
+  visitor->TraceWrappers(success_callback_);
 }
 
 void GeoNotifier::SetFatalError(PositionError* error) {
@@ -57,7 +65,7 @@ void GeoNotifier::SetUseCachedPosition() {
 }
 
 void GeoNotifier::RunSuccessCallback(Geoposition* position) {
-  success_callback_->handleEvent(position);
+  success_callback_->call(nullptr, position);
 }
 
 void GeoNotifier::RunErrorCallback(PositionError* error) {

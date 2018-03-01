@@ -246,17 +246,18 @@ void TrayBubbleView::InitializeAndShowBubble() {
 
   ++g_current_tray_bubble_showing_count_;
 
-  // If TrayBubbleView cannot be activated, register pre target event handler to
-  // reroute key events to the widget for activating the view or closing it.
-  if (!CanActivate()) {
-    reroute_event_handler_ = base::MakeUnique<RerouteEventHandler>(this);
+  // If TrayBubbleView cannot be activated and is shown by clicking on the
+  // corresponding tray view, register pre target event handler to reroute key
+  // events to the widget for activating the view or closing it.
+  if (!CanActivate() && params_.show_by_click) {
+    reroute_event_handler_ = std::make_unique<RerouteEventHandler>(this);
   }
 }
 
 void TrayBubbleView::UpdateBubble() {
   if (GetWidget()) {
     SizeToContents();
-    bubble_content_mask_->layer()->SetBounds(layer()->bounds());
+    bubble_content_mask_->layer()->SetBounds(GetBubbleBounds());
     GetWidget()->GetRootView()->SchedulePaint();
 
     // When extra keyboard accessibility is enabled, focus the default item if
@@ -301,7 +302,7 @@ int TrayBubbleView::GetDialogButtons() const {
 
 void TrayBubbleView::SizeToContents() {
   BubbleDialogDelegateView::SizeToContents();
-  bubble_content_mask_->layer()->SetBounds(layer()->bounds());
+  bubble_content_mask_->layer()->SetBounds(GetBubbleBounds());
 }
 
 void TrayBubbleView::OnBeforeBubbleWidgetInit(Widget::InitParams* params,

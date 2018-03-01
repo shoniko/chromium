@@ -78,6 +78,7 @@ NotificationDatabaseData CreateDatabaseData(
       l10n_util::GetStringUTF16(IDS_PUSH_MESSAGING_GENERIC_NOTIFICATION_BODY);
   notification_data.tag = kPushMessagingForcedNotificationTag;
   notification_data.icon = GURL();
+  notification_data.timestamp = base::Time::Now();
   notification_data.silent = true;
 
   NotificationDatabaseData database_data;
@@ -194,7 +195,8 @@ void PushMessagingNotificationManager::DidGetNotificationsFromDatabase(
     // push was allowed.
     BudgetManager* manager = BudgetManagerFactory::GetForProfile(profile_);
     manager->Consume(
-        url::Origin(origin), blink::mojom::BudgetOperationType::SILENT_PUSH,
+        url::Origin::Create(origin),
+        blink::mojom::BudgetOperationType::SILENT_PUSH,
         base::Bind(&PushMessagingNotificationManager::ProcessSilentPush,
                    weak_factory_.GetWeakPtr(), origin,
                    service_worker_registration_id, message_handled_closure));

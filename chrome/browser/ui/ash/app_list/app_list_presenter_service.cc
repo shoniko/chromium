@@ -79,6 +79,14 @@ void AppListPresenterService::EndDragFromShelf(
   GetPresenter()->EndDragFromShelf(app_list_state);
 }
 
+void AppListPresenterService::ProcessMouseWheelOffset(int y_scroll_offset) {
+  GetPresenter()->ProcessMouseWheelOffset(y_scroll_offset);
+}
+
+void AppListPresenterService::FlushForTesting() {
+  binding_.FlushForTesting();
+}
+
 app_list::AppListPresenterImpl* AppListPresenterService::GetPresenter() {
   return AppListServiceAsh::GetInstance()->GetAppListPresenter();
 }

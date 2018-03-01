@@ -8,15 +8,18 @@
 #include <GLES2/gl2ext.h>
 #include <GLES2/gl2extchromium.h>
 
+#include <memory>
+
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
+#include "ash/shell_observer.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "cc/base/math_util.h"
-#include "cc/output/compositor_frame.h"
-#include "cc/output/layer_tree_frame_sink.h"
-#include "cc/output/layer_tree_frame_sink_client.h"
-#include "cc/quads/texture_draw_quad.h"
+#include "cc/trees/layer_tree_frame_sink.h"
+#include "cc/trees/layer_tree_frame_sink_client.h"
 #include "components/viz/common/gpu/context_provider.h"
+#include "components/viz/common/quads/compositor_frame.h"
+#include "components/viz/common/quads/texture_draw_quad.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/client/gpu_memory_buffer_manager.h"
 #include "ui/aura/env.h"
@@ -24,42 +27,131 @@
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/layout.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/geometry/dip_util.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/views/widget/widget.h"
 
 namespace ash {
+namespace {
 
-class FastInkLayerTreeFrameSinkHolder : public cc::LayerTreeFrameSinkClient {
+// The outset used to expand the surface damage rectangle in order to
+// allow single buffer updates while a frame is in-flight.
+const int kSurfaceDamageOutsetDIP = 100;
+
+}  // namespace
+
+struct FastInkView::Resource {
+  Resource() {}
+  ~Resource() {
+    // context_provider might be null in unit tests when ran with --mash
+    // TODO(kaznacheev) Have MASH provide a context provider for tests
+    // when crbug/772562 is fixed
+    if (!context_provider)
+      return;
+    gpu::gles2::GLES2Interface* gles2 = context_provider->ContextGL();
+    if (sync_token.HasData())
+      gles2->WaitSyncTokenCHROMIUM(sync_token.GetConstData());
+    if (texture)
+      gles2->DeleteTextures(1, &texture);
+    if (image)
+      gles2->DestroyImageCHROMIUM(image);
+  }
+  scoped_refptr<viz::ContextProvider> context_provider;
+  uint32_t texture = 0;
+  uint32_t image = 0;
+  gpu::Mailbox mailbox;
+  gpu::SyncToken sync_token;
+};
+
+class FastInkView::LayerTreeFrameSinkHolder
+    : public cc::LayerTreeFrameSinkClient,
+      public ash::ShellObserver {
  public:
-  FastInkLayerTreeFrameSinkHolder(
-      FastInkView* view,
-      std::unique_ptr<cc::LayerTreeFrameSink> frame_sink)
+  LayerTreeFrameSinkHolder(FastInkView* view,
+                           std::unique_ptr<cc::LayerTreeFrameSink> frame_sink)
       : view_(view), frame_sink_(std::move(frame_sink)) {
     frame_sink_->BindToClient(this);
   }
-  ~FastInkLayerTreeFrameSinkHolder() override {
-    frame_sink_->DetachFromClient();
+  ~LayerTreeFrameSinkHolder() override {
+    if (frame_sink_)
+      frame_sink_->DetachFromClient();
+    if (shell_)
+      shell_->RemoveShellObserver(this);
   }
 
-  cc::LayerTreeFrameSink* frame_sink() { return frame_sink_.get(); }
+  // Delete frame sink after having reclaimed all exported resources.
+  // TODO(reveman): Find a better way to handle deletion of in-flight resources.
+  // crbug.com/765763
+  static void DeleteWhenLastResourceHasBeenReclaimed(
+      std::unique_ptr<LayerTreeFrameSinkHolder> holder) {
+    // Submit an empty frame to ensure that pending release callbacks will be
+    // processed in a finite amount of time.
+    viz::CompositorFrame frame;
+    frame.metadata.begin_frame_ack.source_id =
+        viz::BeginFrameArgs::kManualSourceId;
+    frame.metadata.begin_frame_ack.sequence_number =
+        viz::BeginFrameArgs::kStartingFrameNumber;
+    frame.metadata.begin_frame_ack.has_damage = true;
+    frame.metadata.device_scale_factor =
+        holder->last_frame_device_scale_factor_;
+    std::unique_ptr<viz::RenderPass> pass = viz::RenderPass::Create();
+    pass->SetNew(1, gfx::Rect(holder->last_frame_size_in_pixels_), gfx::Rect(),
+                 gfx::Transform());
+    frame.render_pass_list.push_back(std::move(pass));
+    holder->frame_sink_->SubmitCompositorFrame(std::move(frame));
 
-  // Called before fast ink view is destroyed.
-  void OnFastInkViewDestroying() { view_ = nullptr; }
+    // Delete sink holder immediately if not waiting for exported resources to
+    // be reclaimed.
+    if (holder->exported_resources_.empty())
+      return;
+
+    ash::Shell* shell = ash::Shell::Get();
+    holder->shell_ = shell;
+    holder->view_ = nullptr;
+
+    // If we have exported resources to reclaim then extend the lifetime of
+    // holder by adding it as a shell observer. The holder will delete itself
+    // when shell shuts down or when all exported resources have been reclaimed.
+    shell->AddShellObserver(holder.release());
+  }
+
+  void SubmitCompositorFrame(viz::CompositorFrame frame,
+                             viz::ResourceId resource_id,
+                             std::unique_ptr<Resource> resource) {
+    exported_resources_[resource_id] = std::move(resource);
+    last_frame_size_in_pixels_ = frame.size_in_pixels();
+    last_frame_device_scale_factor_ = frame.metadata.device_scale_factor;
+    frame_sink_->SubmitCompositorFrame(std::move(frame));
+  }
 
   // Overridden from cc::LayerTreeFrameSinkClient:
   void SetBeginFrameSource(viz::BeginFrameSource* source) override {}
   void ReclaimResources(
       const std::vector<viz::ReturnedResource>& resources) override {
-    if (view_)
-      view_->ReclaimResources(resources);
+    for (auto& entry : resources) {
+      auto it = exported_resources_.find(entry.id);
+      DCHECK(it != exported_resources_.end());
+      std::unique_ptr<Resource> resource = std::move(it->second);
+      exported_resources_.erase(it);
+      resource->sync_token = entry.sync_token;
+      if (view_ && !entry.lost)
+        view_->ReclaimResource(std::move(resource));
+    }
+
+    if (shell_ && exported_resources_.empty())
+      ScheduleDelete();
   }
   void SetTreeActivationCallback(const base::Closure& callback) override {}
   void DidReceiveCompositorFrameAck() override {
     if (view_)
       view_->DidReceiveCompositorFrameAck();
   }
-  void DidLoseLayerTreeFrameSink() override {}
+  void DidLoseLayerTreeFrameSink() override {
+    exported_resources_.clear();
+    if (shell_)
+      ScheduleDelete();
+  }
   void OnDraw(const gfx::Transform& transform,
               const gfx::Rect& viewport,
               bool resourceless_software_draw) override {}
@@ -68,32 +160,36 @@ class FastInkLayerTreeFrameSinkHolder : public cc::LayerTreeFrameSinkClient {
       const gfx::Rect& viewport_rect,
       const gfx::Transform& transform) override {}
 
+  // Overridden from ash::ShellObserver:
+  void OnShellDestroyed() override {
+    shell_->RemoveShellObserver(this);
+    shell_ = nullptr;
+    // Make sure frame sink never outlives the shell.
+    frame_sink_->DetachFromClient();
+    frame_sink_.reset();
+    ScheduleDelete();
+  }
+
  private:
+  void ScheduleDelete() {
+    if (delete_pending_)
+      return;
+    delete_pending_ = true;
+    base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, this);
+  }
+
   FastInkView* view_;
   std::unique_ptr<cc::LayerTreeFrameSink> frame_sink_;
+  base::flat_map<viz::ResourceId, std::unique_ptr<Resource>>
+      exported_resources_;
+  gfx::Size last_frame_size_in_pixels_;
+  float last_frame_device_scale_factor_ = 1.0f;
+  ash::Shell* shell_ = nullptr;
+  bool delete_pending_ = false;
 
-  DISALLOW_COPY_AND_ASSIGN(FastInkLayerTreeFrameSinkHolder);
+  DISALLOW_COPY_AND_ASSIGN(LayerTreeFrameSinkHolder);
 };
 
-// This struct contains the resources associated with a fast ink frame.
-struct FastInkResource {
-  FastInkResource() {}
-  ~FastInkResource() {
-    if (context_provider) {
-      gpu::gles2::GLES2Interface* gles2 = context_provider->ContextGL();
-      if (texture)
-        gles2->DeleteTextures(1, &texture);
-      if (image)
-        gles2->DestroyImageCHROMIUM(image);
-    }
-  }
-  scoped_refptr<viz::ContextProvider> context_provider;
-  uint32_t texture = 0;
-  uint32_t image = 0;
-  gpu::Mailbox mailbox;
-};
-
-// FastInkView
 FastInkView::FastInkView(aura::Window* root_window) : weak_ptr_factory_(this) {
   widget_.reset(new views::Widget);
   views::Widget::InitParams params;
@@ -122,35 +218,13 @@ FastInkView::FastInkView(aura::Window* root_window) : weak_ptr_factory_(this) {
   screen_to_buffer_transform_ =
       widget_->GetNativeWindow()->GetHost()->GetRootTransform();
 
-  frame_sink_holder_ = base::MakeUnique<FastInkLayerTreeFrameSinkHolder>(
+  frame_sink_holder_ = std::make_unique<LayerTreeFrameSinkHolder>(
       this, widget_->GetNativeView()->CreateLayerTreeFrameSink());
 }
 
 FastInkView::~FastInkView() {
-  frame_sink_holder_->OnFastInkViewDestroying();
-}
-
-void FastInkView::DidReceiveCompositorFrameAck() {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&FastInkView::OnDidDrawSurface,
-                            weak_ptr_factory_.GetWeakPtr()));
-}
-
-void FastInkView::ReclaimResources(
-    const std::vector<viz::ReturnedResource>& resources) {
-  for (auto& entry : resources) {
-    auto it = resources_.find(entry.id);
-    DCHECK(it != resources_.end());
-    std::unique_ptr<FastInkResource> resource = std::move(it->second);
-    resources_.erase(it);
-
-    gpu::gles2::GLES2Interface* gles2 = resource->context_provider->ContextGL();
-    if (entry.sync_token.HasData())
-      gles2->WaitSyncTokenCHROMIUM(entry.sync_token.GetConstData());
-
-    if (!entry.lost)
-      returned_resources_.push_back(std::move(resource));
-  }
+  LayerTreeFrameSinkHolder::DeleteWhenLastResourceHasBeenReclaimed(
+      std::move(frame_sink_holder_));
 }
 
 void FastInkView::UpdateDamageRect(const gfx::Rect& rect) {
@@ -158,21 +232,41 @@ void FastInkView::UpdateDamageRect(const gfx::Rect& rect) {
 }
 
 void FastInkView::RequestRedraw() {
-  if (pending_update_buffer_)
+  if (pending_redraw_)
     return;
 
-  pending_update_buffer_ = true;
+  pending_redraw_ = true;
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&FastInkView::UpdateBuffer, weak_ptr_factory_.GetWeakPtr()));
+      base::Bind(&FastInkView::Redraw, weak_ptr_factory_.GetWeakPtr()));
+}
+
+void FastInkView::Redraw() {
+  DCHECK(pending_redraw_);
+  pending_redraw_ = false;
+
+  if (!buffer_damage_rect_.IsEmpty()) {
+    // Defer buffer update if damage exceeds the bounds of the pending
+    // draw surface rectangle. This prevents visible artifacts at the
+    // border of the draw surface rectangle when compositing.
+    // Note: Draw surface rectangle is expanded to prevent this from
+    // causing a performance problem during normal usage.
+    if (pending_draw_surface_rect_.IsEmpty() ||
+        pending_draw_surface_rect_.Contains(buffer_damage_rect_)) {
+      UpdateBuffer();
+    }
+  }
+
+  if (!surface_damage_rect_.IsEmpty()) {
+    // Defer surface update if a frame is already in-flight.
+    if (!pending_draw_surface_)
+      UpdateSurface();
+  }
 }
 
 void FastInkView::UpdateBuffer() {
   TRACE_EVENT1("ui", "FastInkView::UpdateBuffer", "damage",
                buffer_damage_rect_.ToString());
-
-  DCHECK(pending_update_buffer_);
-  pending_update_buffer_ = false;
 
   gfx::Rect screen_bounds = widget_->GetNativeView()->GetBoundsInScreen();
   gfx::Rect update_rect = buffer_damage_rect_;
@@ -255,24 +349,13 @@ void FastInkView::UpdateBuffer() {
 
   // Update surface damage rectangle.
   surface_damage_rect_.Union(update_rect);
-
-  needs_update_surface_ = true;
-
-  // Early out if waiting for last surface update to be drawn.
-  if (pending_draw_surface_)
-    return;
-
-  UpdateSurface();
 }
 
 void FastInkView::UpdateSurface() {
   TRACE_EVENT1("ui", "FastInkView::UpdateSurface", "damage",
                surface_damage_rect_.ToString());
 
-  DCHECK(needs_update_surface_);
-  needs_update_surface_ = false;
-
-  std::unique_ptr<FastInkResource> resource;
+  std::unique_ptr<Resource> resource;
   // Reuse returned resource if available.
   if (!returned_resources_.empty()) {
     resource = std::move(returned_resources_.back());
@@ -281,7 +364,7 @@ void FastInkView::UpdateSurface() {
 
   // Create new resource if needed.
   if (!resource)
-    resource = base::MakeUnique<FastInkResource>();
+    resource = std::make_unique<Resource>();
 
   // Acquire context provider for resource if needed.
   // Note: We make no attempts to recover if the context provider is later
@@ -299,6 +382,11 @@ void FastInkView::UpdateSurface() {
   }
 
   gpu::gles2::GLES2Interface* gles2 = resource->context_provider->ContextGL();
+
+  if (resource->sync_token.HasData()) {
+    gles2->WaitSyncTokenCHROMIUM(resource->sync_token.GetConstData());
+    resource->sync_token = gpu::SyncToken();
+  }
 
   if (resource->texture) {
     gles2->ActiveTexture(GL_TEXTURE0);
@@ -353,17 +441,28 @@ void FastInkView::UpdateSurface() {
   bool rv = target_to_buffer_transform.GetInverse(&buffer_to_target_transform);
   DCHECK(rv);
 
-  gfx::Rect output_rect(gfx::ScaleToEnclosingRect(
-      gfx::Rect(widget_->GetNativeView()->GetBoundsInScreen().size()),
-      device_scale_factor));
+  gfx::Rect output_rect(gfx::ConvertSizeToPixel(
+      device_scale_factor,
+      widget_->GetNativeView()->GetBoundsInScreen().size()));
   gfx::Rect quad_rect(buffer_size);
   bool needs_blending = true;
 
-  const int kRenderPassId = 1;
-  std::unique_ptr<cc::RenderPass> render_pass = cc::RenderPass::Create();
-  render_pass->SetNew(kRenderPassId, output_rect, surface_damage_rect_,
-                      buffer_to_target_transform);
+  // Expand surface damage to allow single buffer updates while frame
+  // is in-flight.
+  surface_damage_rect_.Inset(-kSurfaceDamageOutsetDIP,
+                             -kSurfaceDamageOutsetDIP);
+  pending_draw_surface_rect_ = surface_damage_rect_;
+
+  gfx::Rect damage_rect =
+      gfx::ConvertRectToPixel(device_scale_factor, surface_damage_rect_);
   surface_damage_rect_ = gfx::Rect();
+  // Constrain damage rectangle to output rectangle.
+  damage_rect.Intersect(output_rect);
+
+  const int kRenderPassId = 1;
+  std::unique_ptr<viz::RenderPass> render_pass = viz::RenderPass::Create();
+  render_pass->SetNew(kRenderPassId, output_rect, damage_rect,
+                      buffer_to_target_transform);
 
   viz::SharedQuadState* quad_state =
       render_pass->CreateAndAppendSharedQuadState();
@@ -375,14 +474,14 @@ void FastInkView::UpdateSurface() {
       /*is_clipped=*/false, /*are_contents_opaque=*/false, /*opacity=*/1.f,
       /*blend_mode=*/SkBlendMode::kSrcOver, /*sorting_context_id=*/0);
 
-  cc::CompositorFrame frame;
+  viz::CompositorFrame frame;
   // TODO(eseckler): FastInkView should use BeginFrames and set the ack
   // accordingly.
   frame.metadata.begin_frame_ack =
       viz::BeginFrameAck::CreateManualAckWithDamage();
   frame.metadata.device_scale_factor = device_scale_factor;
-  cc::TextureDrawQuad* texture_quad =
-      render_pass->CreateAndAppendDrawQuad<cc::TextureDrawQuad>();
+  viz::TextureDrawQuad* texture_quad =
+      render_pass->CreateAndAppendDrawQuad<viz::TextureDrawQuad>();
   float vertex_opacity[4] = {1.0, 1.0, 1.0, 1.0};
   gfx::PointF uv_top_left(0.f, 0.f);
   gfx::PointF uv_bottom_right(1.f, 1.f);
@@ -394,17 +493,29 @@ void FastInkView::UpdateSurface() {
   frame.resource_list.push_back(transferable_resource);
   frame.render_pass_list.push_back(std::move(render_pass));
 
-  frame_sink_holder_->frame_sink()->SubmitCompositorFrame(std::move(frame));
-
-  resources_[transferable_resource.id] = std::move(resource);
+  frame_sink_holder_->SubmitCompositorFrame(
+      std::move(frame), transferable_resource.id, std::move(resource));
 
   DCHECK(!pending_draw_surface_);
   pending_draw_surface_ = true;
 }
 
+void FastInkView::DidReceiveCompositorFrameAck() {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&FastInkView::OnDidDrawSurface,
+                            weak_ptr_factory_.GetWeakPtr()));
+}
+
+void FastInkView::ReclaimResource(std::unique_ptr<Resource> resource) {
+  returned_resources_.push_back(std::move(resource));
+}
+
 void FastInkView::OnDidDrawSurface() {
   pending_draw_surface_ = false;
-  if (needs_update_surface_)
+  pending_draw_surface_rect_ = gfx::Rect();
+  if (!buffer_damage_rect_.IsEmpty())
+    UpdateBuffer();
+  if (!surface_damage_rect_.IsEmpty())
     UpdateSurface();
 }
 

@@ -25,20 +25,20 @@
 #include "core/css/StyleSheetContents.h"
 #include "core/dom/Document.h"
 #include "core/loader/resource/CSSStyleSheetResource.h"
-#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
 #include "platform/loader/fetch/FetchParameters.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
+#include "platform/loader/fetch/fetch_initiator_type_names.h"
 
 namespace blink {
 
 StyleRuleImport* StyleRuleImport::Create(const String& href,
-                                         RefPtr<MediaQuerySet> media) {
+                                         scoped_refptr<MediaQuerySet> media) {
   return new StyleRuleImport(href, media);
 }
 
 StyleRuleImport::StyleRuleImport(const String& href,
-                                 RefPtr<MediaQuerySet> media)
+                                 scoped_refptr<MediaQuerySet> media)
     : StyleRuleBase(kImport),
       parent_style_sheet_(nullptr),
       style_sheet_client_(new ImportedStyleSheetClient(this)),
@@ -57,7 +57,7 @@ void StyleRuleImport::Dispose() {
   resource_ = nullptr;
 }
 
-DEFINE_TRACE_AFTER_DISPATCH(StyleRuleImport) {
+void StyleRuleImport::TraceAfterDispatch(blink::Visitor* visitor) {
   visitor->Trace(style_sheet_client_);
   visitor->Trace(parent_style_sheet_);
   visitor->Trace(style_sheet_);
@@ -86,7 +86,7 @@ void StyleRuleImport::SetCSSStyleSheet(
   style_sheet_ = StyleSheetContents::Create(this, href, context);
 
   style_sheet_->ParseAuthorStyleSheet(
-      cached_style_sheet, document ? document->GetSecurityOrigin() : 0);
+      cached_style_sheet, document ? document->GetSecurityOrigin() : nullptr);
 
   loading_ = false;
 

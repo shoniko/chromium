@@ -28,13 +28,12 @@
 
 #include "core/css/resolver/ScopedStyleResolver.h"
 
-#include "core/HTMLNames.h"
 #include "core/animation/DocumentTimeline.h"
 #include "core/css/CSSFontSelector.h"
 #include "core/css/CSSStyleSheet.h"
 #include "core/css/FontFace.h"
 #include "core/css/PageRuleCollector.h"
-#include "core/css/RuleFeature.h"
+#include "core/css/RuleFeatureSet.h"
 #include "core/css/StyleChangeReason.h"
 #include "core/css/StyleEngine.h"
 #include "core/css/StyleRule.h"
@@ -44,6 +43,7 @@
 #include "core/dom/ElementShadow.h"
 #include "core/dom/ShadowRoot.h"
 #include "core/html/HTMLStyleElement.h"
+#include "core/html_names.h"
 #include "core/svg/SVGStyleElement.h"
 
 namespace blink {
@@ -272,7 +272,7 @@ void ScopedStyleResolver::MatchPageRules(PageRuleCollector& collector) {
         &author_style_sheets_[i]->Contents()->GetRuleSet());
 }
 
-DEFINE_TRACE(ScopedStyleResolver) {
+void ScopedStyleResolver::Trace(blink::Visitor* visitor) {
   visitor->Trace(scope_);
   visitor->Trace(author_style_sheets_);
   visitor->Trace(keyframes_rule_map_);
@@ -374,7 +374,7 @@ bool ScopedStyleResolver::HaveSameStyles(const ScopedStyleResolver* first,
   return true;
 }
 
-DEFINE_TRACE(ScopedStyleResolver::RuleSubSet) {
+void ScopedStyleResolver::RuleSubSet::Trace(blink::Visitor* visitor) {
   visitor->Trace(parent_style_sheet_);
   visitor->Trace(rule_set_);
 }

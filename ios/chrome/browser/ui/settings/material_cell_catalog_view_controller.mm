@@ -111,6 +111,8 @@ const CGFloat kCardIssuerNetworkIconDimension = 25.0;
   self =
       [super initWithLayout:layout style:CollectionViewControllerStyleAppBar];
   if (self) {
+    // TODO(crbug.com/764578): -loadModel should not be called from
+    // initializer. A possible fix is to move this call to -viewDidLoad.
     [self loadModel];
   }
   return self;
@@ -556,7 +558,7 @@ const CGFloat kCardIssuerNetworkIconDimension = 25.0;
       [[PaymentsTextItem alloc] initWithType:ItemTypePaymentsDynamicHeight];
   item.text = @"If you want to display a long text that wraps to the next line "
               @"and may need to feature an image this is the cell to use.";
-  item.image = [UIImage imageNamed:@"app_icon_placeholder"];
+  item.leadingImage = [UIImage imageNamed:@"app_icon_placeholder"];
   return item;
 }
 

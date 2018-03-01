@@ -64,7 +64,7 @@ class LoadFontPromiseResolver final
   void NotifyLoaded(FontFace*) override;
   void NotifyError(FontFace*) override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   LoadFontPromiseResolver(FontFaceArray faces, ScriptState* script_state)
@@ -106,7 +106,7 @@ void LoadFontPromiseResolver::NotifyError(FontFace* font_face) {
   }
 }
 
-DEFINE_TRACE(LoadFontPromiseResolver) {
+void LoadFontPromiseResolver::Trace(blink::Visitor* visitor) {
   visitor->Trace(font_faces_);
   visitor->Trace(resolver_);
   LoadFontCallback::Trace(visitor);
@@ -464,7 +464,7 @@ bool FontFaceSetDocument::ResolveFontStyle(const String& font_string,
   if (font_value == "inherit" || font_value == "initial")
     return false;
 
-  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
 
   FontFamily font_family;
   font_family.SetFamily(kDefaultFontFamily);
@@ -479,7 +479,7 @@ bool FontFaceSetDocument::ResolveFontStyle(const String& font_string,
   style->GetFont().Update(style->GetFont().GetFontSelector());
 
   GetDocument()->UpdateActiveStyle();
-  GetDocument()->EnsureStyleResolver().ComputeFont(style.Get(), *parsed_style);
+  GetDocument()->EnsureStyleResolver().ComputeFont(style.get(), *parsed_style);
 
   font = style->GetFont();
   font.Update(GetDocument()->GetStyleEngine().GetFontSelector());
@@ -564,18 +564,23 @@ bool FontFaceSetDocument::IterationSource::Next(ScriptState*,
   return true;
 }
 
-DEFINE_TRACE(FontFaceSetDocument) {
+void FontFaceSetDocument::Trace(blink::Visitor* visitor) {
   visitor->Trace(ready_);
   visitor->Trace(loading_fonts_);
   visitor->Trace(loaded_fonts_);
   visitor->Trace(failed_fonts_);
   visitor->Trace(non_css_connected_faces_);
   visitor->Trace(async_runner_);
-  EventTargetWithInlineData::Trace(visitor);
   Supplement<Document>::Trace(visitor);
   SuspendableObject::Trace(visitor);
   FontFace::LoadFontCallback::Trace(visitor);
   FontFaceSet::Trace(visitor);
+}
+
+void FontFaceSetDocument::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
+  FontFaceSet::TraceWrappers(visitor);
+  Supplement<Document>::TraceWrappers(visitor);
 }
 
 }  // namespace blink

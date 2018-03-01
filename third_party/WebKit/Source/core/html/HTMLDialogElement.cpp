@@ -33,8 +33,8 @@
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/UseCounter.h"
 #include "core/fullscreen/Fullscreen.h"
-#include "core/html/HTMLFormControlElement.h"
 #include "core/html/HTMLFrameOwnerElement.h"
+#include "core/html/forms/HTMLFormControlElement.h"
 
 namespace blink {
 
@@ -50,7 +50,7 @@ static void SetFocusForDialog(HTMLDialogElement* dialog) {
   // currently specified.  This may change at any time.
   // See crbug/383230 and https://github.com/whatwg/html/issues/2393 .
   for (Node* node = FlatTreeTraversal::FirstChild(*dialog); node; node = next) {
-    next = isHTMLDialogElement(*node)
+    next = IsHTMLDialogElement(*node)
                ? FlatTreeTraversal::NextSkippingChildren(*node, dialog)
                : FlatTreeTraversal::Next(*node, dialog);
 

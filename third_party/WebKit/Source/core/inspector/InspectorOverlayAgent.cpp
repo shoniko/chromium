@@ -60,7 +60,7 @@
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "core/page/PageOverlay.h"
-#include "platform/ScriptForbiddenScope.h"
+#include "platform/bindings/ScriptForbiddenScope.h"
 #include "platform/graphics/Color.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/paint/CullRect.h"
@@ -166,8 +166,9 @@ class InspectorOverlayAgent::InspectorPageOverlayDelegate final
 
     LocalFrameView* view = overlay_->OverlayMainFrame()->View();
     DCHECK(!view->NeedsLayout());
-    view->Paint(graphics_context,
-                CullRect(IntRect(0, 0, view->Width(), view->Height())));
+    view->PaintWithLifecycleUpdate(
+        graphics_context, kGlobalPaintNormalPhase,
+        CullRect(IntRect(0, 0, view->Width(), view->Height())));
   }
 
  private:
@@ -182,7 +183,7 @@ class InspectorOverlayAgent::InspectorOverlayChromeClient final
     return new InspectorOverlayChromeClient(client, overlay);
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(client_);
     visitor->Trace(overlay_);
     EmptyChromeClient::Trace(visitor);
@@ -249,7 +250,7 @@ InspectorOverlayAgent::~InspectorOverlayAgent() {
   DCHECK(!overlay_page_);
 }
 
-DEFINE_TRACE(InspectorOverlayAgent) {
+void InspectorOverlayAgent::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_impl_);
   visitor->Trace(inspected_frames_);
   visitor->Trace(highlight_node_);
@@ -846,18 +847,16 @@ Page* InspectorOverlayAgent::OverlayPage() {
   overlay_settings.SetAcceleratedCompositingEnabled(false);
 
   LocalFrame* frame =
-      LocalFrame::Create(&dummy_local_frame_client, *overlay_page_, 0);
+      LocalFrame::Create(&dummy_local_frame_client, *overlay_page_, nullptr);
   frame->SetView(LocalFrameView::Create(*frame));
   frame->Init();
-  FrameLoader& loader = frame->Loader();
   frame->View()->SetCanHaveScrollbars(false);
   frame->View()->SetBaseBackgroundColor(Color::kTransparent);
 
   const WebData& overlay_page_html_resource =
       Platform::Current()->GetDataResource("InspectorOverlayPage.html");
-  loader.Load(FrameLoadRequest(
-      0, ResourceRequest(BlankURL()),
-      SubstituteData(overlay_page_html_resource, kForceSynchronousLoad)));
+  frame->ForceSynchronousDocumentInstall("text/html",
+                                         overlay_page_html_resource);
   v8::Isolate* isolate = ToIsolate(frame);
   ScriptState* script_state = ToScriptStateForMainWorld(frame);
   DCHECK(script_state);
@@ -948,7 +947,7 @@ String InspectorOverlayAgent::EvaluateInOverlayForTest(const String& script) {
       ToLocalFrame(OverlayPage()->MainFrame())
           ->GetScriptController()
           .ExecuteScriptInMainWorldAndReturnValue(
-              ScriptSourceCode(script),
+              ScriptSourceCode(script), ScriptFetchOptions(),
               ScriptController::kExecuteScriptWhenScriptsDisabled);
   return ToCoreStringWithUndefinedOrNullCheck(string);
 }

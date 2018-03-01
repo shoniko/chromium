@@ -59,6 +59,7 @@ TEST_F(AccessibilityObjectModelTest, SetAccessibleNodeRole) {
   button->accessibleNode()->setRole("slider");
   EXPECT_EQ("slider", button->accessibleNode()->role());
 
+  axButton = cache->GetOrCreate(button);
   EXPECT_EQ(kSliderRole, axButton->RoleValue());
 }
 
@@ -120,6 +121,7 @@ TEST_F(AccessibilityObjectModelTest, AOMPropertiesCanBeCleared) {
   button->accessibleNode()->setDisabled(false, false);
 
   // Assert that the AX object was affected by AOM properties.
+  axButton = cache->GetOrCreate(button);
   EXPECT_EQ(kRadioButtonRole, axButton->RoleValue());
   EXPECT_EQ("Radio", axButton->GetName(name_from, &name_objects));
   EXPECT_EQ(axButton->Restriction(), kNone);
@@ -130,6 +132,7 @@ TEST_F(AccessibilityObjectModelTest, AOMPropertiesCanBeCleared) {
   button->accessibleNode()->setDisabled(false, true);
 
   // The AX Object should now revert to ARIA.
+  axButton = cache->GetOrCreate(button);
   EXPECT_EQ(kCheckBoxRole, axButton->RoleValue());
   EXPECT_EQ("Check", axButton->GetName(name_from, &name_objects));
   EXPECT_EQ(axButton->Restriction(), kDisabled);
@@ -149,9 +152,13 @@ TEST_F(AccessibilityObjectModelTest, RangeProperties) {
   auto* cache = AXObjectCache();
   ASSERT_NE(nullptr, cache);
   auto* ax_slider = cache->GetOrCreate(slider);
-  EXPECT_EQ(-0.5f, ax_slider->MinValueForRange());
-  EXPECT_EQ(0.5f, ax_slider->MaxValueForRange());
-  EXPECT_EQ(0.1f, ax_slider->ValueForRange());
+  float value = 0.0f;
+  EXPECT_TRUE(ax_slider->MinValueForRange(&value));
+  EXPECT_EQ(-0.5f, value);
+  EXPECT_TRUE(ax_slider->MaxValueForRange(&value));
+  EXPECT_EQ(0.5f, value);
+  EXPECT_TRUE(ax_slider->ValueForRange(&value));
+  EXPECT_EQ(0.1f, value);
 }
 
 TEST_F(AccessibilityObjectModelTest, Level) {

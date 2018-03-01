@@ -13,6 +13,10 @@
 // numbers. Writing JSON with such types would violate the spec. If you need
 // something like this, either use a double or make a string value containing
 // the number you want.
+//
+// NOTE: A Value parameter that is always a Value::STRING should just be passed
+// as a std::string. Similarly for Values that are always Value::DICTIONARY
+// (should be flat_map), Value::LIST (should be std::vector), et cetera.
 
 #ifndef BASE_VALUES_H_
 #define BASE_VALUES_H_
@@ -32,7 +36,6 @@
 #include "base/containers/flat_map.h"
 #include "base/containers/span.h"
 #include "base/macros.h"
-#include "base/memory/manual_constructor.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 #include "base/value_iterators.h"
@@ -102,6 +105,10 @@ class BASE_EXPORT Value {
   static std::unique_ptr<Value> CreateWithCopiedBuffer(const char* buffer,
                                                        size_t size);
 
+  // Adaptors for converting from the old way to the new way and vice versa.
+  static Value FromUniquePtrValue(std::unique_ptr<Value> val);
+  static std::unique_ptr<Value> ToUniquePtrValue(Value val);
+
   Value(Value&& that) noexcept;
   Value() noexcept;  // A null value.
 
@@ -115,17 +122,14 @@ class BASE_EXPORT Value {
   explicit Value(double in_double);
 
   // Value(const char*) and Value(const char16*) are required despite
-  // Value(const std::string&) and Value(const string16&) because otherwise the
+  // Value(StringPiece) and Value(StringPiece16) because otherwise the
   // compiler will choose the Value(bool) constructor for these arguments.
   // Value(std::string&&) allow for efficient move construction.
-  // Value(StringPiece) exists due to many callsites passing StringPieces as
-  // arguments.
   explicit Value(const char* in_string);
-  explicit Value(const std::string& in_string);
-  explicit Value(std::string&& in_string) noexcept;
-  explicit Value(const char16* in_string);
-  explicit Value(const string16& in_string);
   explicit Value(StringPiece in_string);
+  explicit Value(std::string&& in_string) noexcept;
+  explicit Value(const char16* in_string16);
+  explicit Value(StringPiece16 in_string16);
 
   explicit Value(const BlobStorage& in_blob);
   explicit Value(BlobStorage&& in_blob) noexcept;
@@ -344,10 +348,10 @@ class BASE_EXPORT Value {
     bool bool_value_;
     int int_value_;
     double double_value_;
-    ManualConstructor<std::string> string_value_;
-    ManualConstructor<BlobStorage> binary_value_;
-    ManualConstructor<DictStorage> dict_;
-    ManualConstructor<ListStorage> list_;
+    std::string string_value_;
+    BlobStorage binary_value_;
+    DictStorage dict_;
+    ListStorage list_;
   };
 
  private:
@@ -377,10 +381,10 @@ class BASE_EXPORT DictionaryValue : public Value {
   bool HasKey(StringPiece key) const;
 
   // Returns the number of Values in this dictionary.
-  size_t size() const { return dict_->size(); }
+  size_t size() const { return dict_.size(); }
 
   // Returns whether the dictionary is empty.
-  bool empty() const { return dict_->empty(); }
+  bool empty() const { return dict_.empty(); }
 
   // Clears any current contents of this dictionary.
   void Clear();
@@ -550,7 +554,7 @@ class BASE_EXPORT DictionaryValue : public Value {
     Iterator(const Iterator& other);
     ~Iterator();
 
-    bool IsAtEnd() const { return it_ == target_.dict_->end(); }
+    bool IsAtEnd() const { return it_ == target_.dict_.end(); }
     void Advance() { ++it_; }
 
     const std::string& key() const { return it_->first; }
@@ -563,12 +567,12 @@ class BASE_EXPORT DictionaryValue : public Value {
 
   // Iteration.
   // DEPRECATED, use Value::DictItems() instead.
-  iterator begin() { return dict_->begin(); }
-  iterator end() { return dict_->end(); }
+  iterator begin() { return dict_.begin(); }
+  iterator end() { return dict_.end(); }
 
   // DEPRECATED, use Value::DictItems() instead.
-  const_iterator begin() const { return dict_->begin(); }
-  const_iterator end() const { return dict_->end(); }
+  const_iterator begin() const { return dict_.begin(); }
+  const_iterator end() const { return dict_.end(); }
 
   // DEPRECATED, use Value::Clone() instead.
   // TODO(crbug.com/646113): Delete this and migrate callsites.
@@ -597,15 +601,15 @@ class BASE_EXPORT ListValue : public Value {
 
   // Returns the number of Values in this list.
   // DEPRECATED, use GetList()::size() instead.
-  size_t GetSize() const { return list_->size(); }
+  size_t GetSize() const { return list_.size(); }
 
   // Returns the capacity of storage for Values in this list.
   // DEPRECATED, use GetList()::capacity() instead.
-  size_t capacity() const { return list_->capacity(); }
+  size_t capacity() const { return list_.capacity(); }
 
   // Returns whether the list is empty.
   // DEPRECATED, use GetList()::empty() instead.
-  bool empty() const { return list_->empty(); }
+  bool empty() const { return list_.empty(); }
 
   // Reserves storage for at least |n| values.
   // DEPRECATED, use GetList()::reserve() instead.
@@ -712,14 +716,14 @@ class BASE_EXPORT ListValue : public Value {
 
   // Iteration.
   // DEPRECATED, use GetList()::begin() instead.
-  iterator begin() { return list_->begin(); }
+  iterator begin() { return list_.begin(); }
   // DEPRECATED, use GetList()::end() instead.
-  iterator end() { return list_->end(); }
+  iterator end() { return list_.end(); }
 
   // DEPRECATED, use GetList()::begin() instead.
-  const_iterator begin() const { return list_->begin(); }
+  const_iterator begin() const { return list_.begin(); }
   // DEPRECATED, use GetList()::end() instead.
-  const_iterator end() const { return list_->end(); }
+  const_iterator end() const { return list_.end(); }
 
   // DEPRECATED, use Value::Clone() instead.
   // TODO(crbug.com/646113): Delete this and migrate callsites.

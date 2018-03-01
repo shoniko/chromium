@@ -11,15 +11,13 @@
 
 #include "ash/accelerators/magnifier_key_scroller.h"
 #include "ash/accelerators/spoken_feedback_toggler.h"
-#include "ash/accessibility_delegate.h"
+#include "ash/accessibility/accessibility_delegate.h"
 #include "ash/accessibility_types.h"
 #include "ash/content/gpu_support_impl.h"
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray_controller.h"
 #include "ash/wallpaper/wallpaper_delegate.h"
 #include "ash/wm/mru_window_tracker.h"
-#include "ash/wm/window_state.h"
-#include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
@@ -37,9 +35,6 @@
 #include "chrome/browser/chromeos/display/display_preferences.h"
 #include "chrome/browser/chromeos/policy/display_rotation_default_handler.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/chromeos/system/input_device_settings.h"
-#include "chrome/browser/chromeos/ui/accessibility_focus_ring_controller.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/signin_error_notifier_factory_ash.h"
@@ -49,7 +44,6 @@
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/ash/networking_config_delegate_chromeos.h"
-#include "chrome/browser/ui/ash/palette_delegate_chromeos.h"
 #include "chrome/browser/ui/ash/session_controller_client.h"
 #include "chrome/browser/ui/ash/session_util.h"
 #include "chrome/browser/ui/aura/accessibility/automation_manager_aura.h"
@@ -246,12 +240,6 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
     TtsController::GetInstance()->Stop();
   }
 
-  void ClearFocusHighlight() const override {
-    chromeos::AccessibilityFocusRingController::GetInstance()->SetFocusRing(
-        std::vector<gfx::Rect>(),
-        chromeos::AccessibilityFocusRingController::PERSIST_FOCUS_RING);
-  }
-
   void SaveScreenMagnifierScale(double scale) override {
     if (chromeos::MagnificationManager::Get())
       chromeos::MagnificationManager::Get()->SaveScreenMagnifierScale(scale);
@@ -373,14 +361,6 @@ service_manager::Connector* ChromeShellDelegate::GetShellConnector() const {
   return content::ServiceManagerConnection::GetForProcess()->GetConnector();
 }
 
-bool ChromeShellDelegate::IsMultiProfilesEnabled() const {
-  return SessionControllerClient::IsMultiProfileEnabled();
-}
-
-bool ChromeShellDelegate::IsIncognitoAllowed() const {
-  return AccessibilityManager::Get()->IsIncognitoAllowed();
-}
-
 bool ChromeShellDelegate::IsRunningInForcedAppMode() const {
   return chrome::IsRunningInForcedAppMode();
 }
@@ -421,10 +401,6 @@ void ChromeShellDelegate::PreShutdown() {
   display_configuration_observer_.reset();
 }
 
-void ChromeShellDelegate::Exit() {
-  chrome::AttemptUserExit();
-}
-
 void ChromeShellDelegate::OpenUrlFromArc(const GURL& url) {
   if (!url.is_valid())
     return;
@@ -458,18 +434,6 @@ void ChromeShellDelegate::OpenUrlFromArc(const GURL& url) {
       displayer.browser()->window()->GetNativeWindow());
 }
 
-void ChromeShellDelegate::ShelfInit() {
-  if (!launcher_controller_) {
-    launcher_controller_ = base::MakeUnique<ChromeLauncherController>(
-        nullptr, ash::Shell::Get()->shelf_model());
-    launcher_controller_->Init();
-  }
-}
-
-void ChromeShellDelegate::ShelfShutdown() {
-  launcher_controller_.reset();
-}
-
 ash::GPUSupport* ChromeShellDelegate::CreateGPUSupport() {
   // Chrome uses real GPU support.
   return new ash::GPUSupportImpl;
@@ -501,23 +465,6 @@ gfx::Image ChromeShellDelegate::GetDeprecatedAcceleratorImage() const {
       IDR_BLUETOOTH_KEYBOARD);
 }
 
-bool ChromeShellDelegate::GetTouchscreenEnabled(
-    ash::TouchscreenEnabledSource source) const {
-  return chromeos::system::InputDeviceSettings::Get()->GetTouchscreenEnabled(
-      source);
-}
-
-void ChromeShellDelegate::SetTouchscreenEnabled(
-    bool enabled,
-    ash::TouchscreenEnabledSource source) {
-  chromeos::system::InputDeviceSettings::Get()->SetTouchscreenEnabled(enabled,
-                                                                      source);
-}
-
-void ChromeShellDelegate::ToggleTouchpad() {
-  chromeos::system::InputDeviceSettings::Get()->ToggleTouchpad();
-}
-
 std::unique_ptr<keyboard::KeyboardUI> ChromeShellDelegate::CreateKeyboardUI() {
   return base::MakeUnique<ChromeKeyboardUI>(
       ProfileManager::GetActiveUserProfile());
@@ -525,11 +472,6 @@ std::unique_ptr<keyboard::KeyboardUI> ChromeShellDelegate::CreateKeyboardUI() {
 
 ash::AccessibilityDelegate* ChromeShellDelegate::CreateAccessibilityDelegate() {
   return new AccessibilityDelegateImpl;
-}
-
-std::unique_ptr<ash::PaletteDelegate>
-ChromeShellDelegate::CreatePaletteDelegate() {
-  return base::MakeUnique<chromeos::PaletteDelegateChromeOS>();
 }
 
 ash::NetworkingConfigDelegate*
@@ -563,8 +505,10 @@ void ChromeShellDelegate::Observe(int type,
       // Do not use chrome::NOTIFICATION_PROFILE_ADDED because the
       // profile is not fully initialized by user_manager.  Use
       // chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED instead.
-      if (launcher_controller_)
-        launcher_controller_->OnUserProfileReadyToSwitch(profile);
+      if (ChromeLauncherController::instance()) {
+        ChromeLauncherController::instance()->OnUserProfileReadyToSwitch(
+            profile);
+      }
       break;
     }
     case chrome::NOTIFICATION_SESSION_STARTED:

@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "ash/accessibility/accessibility_controller.h"
-#include "ash/accessibility_delegate.h"
+#include "ash/accessibility/accessibility_delegate.h"
 #include "ash/accessibility_types.h"
 #include "ash/ash_view_ids.h"
 #include "ash/resources/vector_icons/vector_icons.h"
@@ -30,6 +30,8 @@
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/vector_icon_types.h"
 #include "ui/message_center/message_center.h"
+#include "ui/message_center/notifier_settings.h"
+#include "ui/message_center/public/cpp/message_center_switches.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/controls/separator.h"
 #include "ui/views/widget/widget.h"
@@ -98,13 +100,13 @@ LoginStatus GetCurrentLoginStatus() {
 const gfx::VectorIcon& GetNotificationIcon(uint32_t enabled_accessibility) {
   if ((enabled_accessibility & A11Y_BRAILLE_DISPLAY_CONNECTED) &&
       (enabled_accessibility & A11Y_SPOKEN_FEEDBACK)) {
-    return message_center::MessageCenter::IsNewStyleNotificationEnabled()
+    return message_center::IsNewStyleNotificationEnabled()
                ? kNotificationAccessibilityIcon
                : kSystemMenuAccessibilityIcon;
   }
   if (enabled_accessibility & A11Y_BRAILLE_DISPLAY_CONNECTED)
     return kNotificationAccessibilityBrailleIcon;
-  return message_center::MessageCenter::IsNewStyleNotificationEnabled()
+  return message_center::IsNewStyleNotificationEnabled()
              ? kNotificationChromevoxIcon
              : kSystemMenuAccessibilityChromevoxIcon;
 }
@@ -148,6 +150,62 @@ AccessibilityDetailedView::AccessibilityDetailedView(SystemTrayItem* owner)
   AppendAccessibilityList();
   CreateTitleRow(IDS_ASH_STATUS_TRAY_ACCESSIBILITY_TITLE);
   Layout();
+}
+
+void AccessibilityDetailedView::OnAccessibilityStatusChanged() {
+  AccessibilityDelegate* delegate = Shell::Get()->accessibility_delegate();
+  AccessibilityController* controller =
+      Shell::Get()->accessibility_controller();
+
+  spoken_feedback_enabled_ = delegate->IsSpokenFeedbackEnabled();
+  TrayPopupUtils::UpdateCheckMarkVisibility(spoken_feedback_view_,
+                                            spoken_feedback_enabled_);
+
+  high_contrast_enabled_ = controller->IsHighContrastEnabled();
+  TrayPopupUtils::UpdateCheckMarkVisibility(high_contrast_view_,
+                                            high_contrast_enabled_);
+
+  screen_magnifier_enabled_ = delegate->IsMagnifierEnabled();
+  TrayPopupUtils::UpdateCheckMarkVisibility(screen_magnifier_view_,
+                                            screen_magnifier_enabled_);
+
+  autoclick_enabled_ = delegate->IsAutoclickEnabled();
+  TrayPopupUtils::UpdateCheckMarkVisibility(autoclick_view_,
+                                            autoclick_enabled_);
+
+  virtual_keyboard_enabled_ = delegate->IsVirtualKeyboardEnabled();
+  TrayPopupUtils::UpdateCheckMarkVisibility(virtual_keyboard_view_,
+                                            virtual_keyboard_enabled_);
+
+  large_cursor_enabled_ = controller->IsLargeCursorEnabled();
+  TrayPopupUtils::UpdateCheckMarkVisibility(large_cursor_view_,
+                                            large_cursor_enabled_);
+
+  mono_audio_enabled_ = delegate->IsMonoAudioEnabled();
+  TrayPopupUtils::UpdateCheckMarkVisibility(mono_audio_view_,
+                                            mono_audio_enabled_);
+
+  caret_highlight_enabled_ = delegate->IsCaretHighlightEnabled();
+  TrayPopupUtils::UpdateCheckMarkVisibility(caret_highlight_view_,
+                                            caret_highlight_enabled_);
+
+  highlight_mouse_cursor_enabled_ = delegate->IsCursorHighlightEnabled();
+  TrayPopupUtils::UpdateCheckMarkVisibility(highlight_mouse_cursor_view_,
+                                            highlight_mouse_cursor_enabled_);
+
+  if (highlight_keyboard_focus_view_) {
+    highlight_keyboard_focus_enabled_ = delegate->IsFocusHighlightEnabled();
+    TrayPopupUtils::UpdateCheckMarkVisibility(
+        highlight_keyboard_focus_view_, highlight_keyboard_focus_enabled_);
+  }
+
+  sticky_keys_enabled_ = delegate->IsStickyKeysEnabled();
+  TrayPopupUtils::UpdateCheckMarkVisibility(sticky_keys_view_,
+                                            sticky_keys_enabled_);
+
+  tap_dragging_enabled_ = delegate->IsTapDraggingEnabled();
+  TrayPopupUtils::UpdateCheckMarkVisibility(tap_dragging_view_,
+                                            tap_dragging_enabled_);
 }
 
 void AccessibilityDetailedView::AppendAccessibilityList() {
@@ -449,7 +507,7 @@ void TrayAccessibility::OnAccessibilityStatusChanged(
     return;
 
   if (detailed_menu_)
-    detailed_menu_->GetWidget()->Close();
+    detailed_menu_->OnAccessibilityStatusChanged();
 
   message_center::MessageCenter* message_center =
       message_center::MessageCenter::Get();
@@ -486,7 +544,7 @@ void TrayAccessibility::OnAccessibilityStatusChanged(
   }
 
   std::unique_ptr<message_center::Notification> notification;
-  if (message_center::MessageCenter::IsNewStyleNotificationEnabled()) {
+  if (message_center::IsNewStyleNotificationEnabled()) {
     notification = message_center::Notification::CreateSystemNotification(
         message_center::NOTIFICATION_TYPE_SIMPLE, kNotificationId, title, text,
         gfx::Image(), base::string16(), GURL(),
@@ -496,7 +554,7 @@ void TrayAccessibility::OnAccessibilityStatusChanged(
         GetNotificationIcon(being_enabled),
         message_center::SystemNotificationWarningLevel::NORMAL);
   } else {
-    notification = base::MakeUnique<message_center::Notification>(
+    notification = std::make_unique<message_center::Notification>(
         message_center::NOTIFICATION_TYPE_SIMPLE, kNotificationId, title, text,
         gfx::Image(gfx::CreateVectorIcon(GetNotificationIcon(being_enabled),
                                          kMenuIconSize, kMenuIconColor)),

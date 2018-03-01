@@ -66,7 +66,9 @@ class MockWebSocketChannelClient
                     unsigned short,
                     const String&));
 
-  DEFINE_INLINE_VIRTUAL_TRACE() { WebSocketChannelClient::Trace(visitor); }
+  virtual void Trace(blink::Visitor* visitor) {
+    WebSocketChannelClient::Trace(visitor);
+  }
 };
 
 class MockWebSocketHandle : public WebSocketHandle {
@@ -84,13 +86,14 @@ class MockWebSocketHandle : public WebSocketHandle {
     DoInitialize(&websocket);
   }
 
-  MOCK_METHOD6(Connect,
+  MOCK_METHOD7(Connect,
                void(const KURL&,
                     const Vector<String>&,
                     SecurityOrigin*,
                     const KURL&,
                     const String&,
-                    WebSocketHandleClient*));
+                    WebSocketHandleClient*,
+                    WebTaskRunner*));
   MOCK_METHOD4(Send,
                void(bool, WebSocketHandle::MessageType, const char*, size_t));
   MOCK_METHOD1(FlowControl, void(int64_t));
@@ -128,7 +131,7 @@ class DocumentWebSocketChannelTest : public ::testing::Test {
             this, &DocumentWebSocketChannelTest::DidConsumeBufferedAmount));
   }
 
-  ~DocumentWebSocketChannelTest() { Channel()->Disconnect(); }
+  ~DocumentWebSocketChannelTest() override { Channel()->Disconnect(); }
 
   void SetUp() override {
     channel_ = DocumentWebSocketChannel::CreateForTesting(
@@ -162,7 +165,7 @@ class DocumentWebSocketChannelTest : public ::testing::Test {
       InSequence s;
       EXPECT_CALL(*Handle(), DoInitialize(_));
       EXPECT_CALL(*Handle(), Connect(KURL(NullURL(), "ws://localhost/"), _, _,
-                                     _, _, HandleClient()));
+                                     _, _, HandleClient(), _));
       EXPECT_CALL(*Handle(), FlowControl(65536));
       EXPECT_CALL(*ChannelClient(), DidConnect(String("a"), String("b")));
     }
@@ -205,7 +208,7 @@ MATCHER_P(KURLEq,
 
 TEST_F(DocumentWebSocketChannelTest, connectSuccess) {
   Vector<String> protocols;
-  RefPtr<SecurityOrigin> origin;
+  scoped_refptr<SecurityOrigin> origin;
 
   Checkpoint checkpoint;
   {
@@ -213,7 +216,7 @@ TEST_F(DocumentWebSocketChannelTest, connectSuccess) {
     EXPECT_CALL(*Handle(), DoInitialize(_));
     EXPECT_CALL(*Handle(),
                 Connect(KURLEq("ws://localhost/"), _, _,
-                        KURLEq("http://example.com/"), _, HandleClient()))
+                        KURLEq("http://example.com/"), _, HandleClient(), _))
         .WillOnce(DoAll(SaveArg<1>(&protocols), SaveArg<2>(&origin)));
     EXPECT_CALL(*Handle(), FlowControl(65536));
     EXPECT_CALL(checkpoint, Call(1));
@@ -562,7 +565,7 @@ TEST_F(DocumentWebSocketChannelTest,
   EXPECT_EQ(18ul, sum_of_consumed_buffered_amount_);
 }
 
-// FIXME: Add tests for WebSocketChannel::send(PassRefPtr<BlobDataHandle>)
+// FIXME: Add tests for WebSocketChannel::send(scoped_refptr<BlobDataHandle>)
 
 TEST_F(DocumentWebSocketChannelTest, receiveText) {
   Connect();
@@ -822,7 +825,7 @@ class DocumentWebSocketChannelHandshakeThrottleTest
   // non-null throttle.
   void NormalHandshakeExpectations() {
     EXPECT_CALL(*Handle(), DoInitialize(_));
-    EXPECT_CALL(*Handle(), Connect(_, _, _, _, _, _));
+    EXPECT_CALL(*Handle(), Connect(_, _, _, _, _, _, _));
     EXPECT_CALL(*Handle(), FlowControl(_));
     EXPECT_CALL(*handshake_throttle_, ThrottleHandshake(_, _, _));
   }
@@ -832,7 +835,7 @@ class DocumentWebSocketChannelHandshakeThrottleTest
 
 TEST_F(DocumentWebSocketChannelHandshakeThrottleTest, ThrottleArguments) {
   EXPECT_CALL(*Handle(), DoInitialize(_));
-  EXPECT_CALL(*Handle(), Connect(_, _, _, _, _, _));
+  EXPECT_CALL(*Handle(), Connect(_, _, _, _, _, _, _));
   EXPECT_CALL(*Handle(), FlowControl(_));
   EXPECT_CALL(*handshake_throttle_,
               ThrottleHandshake(WebURL(url()), _, WebCallbacks()));

@@ -51,6 +51,7 @@
 #include "content/public/test/test_navigation_observer.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_browser_context.h"
+#include "content/shell/browser/shell_content_browser_client.h"
 #include "content/shell/browser/shell_download_manager_delegate.h"
 #include "content/test/content_browser_test_utils_internal.h"
 #include "net/dns/mock_host_resolver.h"
@@ -123,8 +124,7 @@ class TestJavaScriptDialogManager : public JavaScriptDialogManager,
 
   void Handle() {
     if (!callback_.is_null()) {
-      callback_.Run(true, base::string16());
-      callback_.Reset();
+      std::move(callback_).Run(true, base::string16());
     } else {
       handle_ = true;
     }
@@ -142,19 +142,19 @@ class TestJavaScriptDialogManager : public JavaScriptDialogManager,
                            JavaScriptDialogType dialog_type,
                            const base::string16& message_text,
                            const base::string16& default_prompt_text,
-                           const DialogClosedCallback& callback,
+                           DialogClosedCallback callback,
                            bool* did_suppress_message) override {
     if (handle_) {
       handle_ = false;
-      callback.Run(true, base::string16());
+      std::move(callback).Run(true, base::string16());
     } else {
-      callback_ = callback;
+      callback_ = std::move(callback);
     }
   };
 
   void RunBeforeUnloadDialog(WebContents* web_contents,
                              bool is_reload,
-                             const DialogClosedCallback& callback) override {}
+                             DialogClosedCallback callback) override {}
 
   bool HandleJavaScriptDialog(WebContents* web_contents,
                               bool accept,
@@ -243,7 +243,7 @@ class DevToolsProtocolTest : public ContentBrowserTest,
       return result_.get();
     }
     in_dispatch_ = false;
-    return nullptr;
+    return result_.get();
   }
 
   void WaitForResponse() {
@@ -560,25 +560,25 @@ IN_PROC_BROWSER_TEST_F(SyntheticKeyEventTest, KeyboardEventAck) {
   Attach();
   ASSERT_TRUE(content::ExecuteScript(
       shell()->web_contents()->GetRenderViewHost(),
-      "document.body.addEventListener('keydown', () => console.log('x'));"));
+      "document.body.addEventListener('keydown', () => {debugger;});"));
 
-  scoped_refptr<InputMsgWatcher> filter = new InputMsgWatcher(
+  auto filter = std::make_unique<InputMsgWatcher>(
       RenderWidgetHostImpl::From(
           shell()->web_contents()->GetRenderViewHost()->GetWidget()),
-      blink::WebInputEvent::kMouseMove);
+      blink::WebInputEvent::kRawKeyDown);
 
-  SendCommand("Runtime.enable", nullptr);
+  SendCommand("Debugger.enable", nullptr);
   SendKeyEvent("rawKeyDown", 0, 13, 13, "Enter", false);
 
-  // We expect that the console log message event arrives *before* the input
+  // We expect that the debugger message event arrives *before* the input
   // event ack, and the subsequent command response for Input.dispatchKeyEvent.
-  WaitForNotification("Runtime.consoleAPICalled");
-  EXPECT_THAT(console_messages_, ElementsAre("x"));
+  WaitForNotification("Debugger.paused");
   EXPECT_FALSE(filter->HasReceivedAck());
   EXPECT_EQ(1u, result_ids_.size());
 
-  WaitForResponse();
-  EXPECT_EQ(2u, result_ids_.size());
+  SendCommand("Debugger.resume", nullptr);
+  filter->WaitForAck();
+  EXPECT_EQ(3u, result_ids_.size());
 }
 
 IN_PROC_BROWSER_TEST_F(SyntheticMouseEventTest, MouseEventAck) {
@@ -586,26 +586,26 @@ IN_PROC_BROWSER_TEST_F(SyntheticMouseEventTest, MouseEventAck) {
   Attach();
   ASSERT_TRUE(content::ExecuteScript(
       shell()->web_contents()->GetRenderViewHost(),
-      "document.body.addEventListener('mousemove', () => console.log('x'));"));
+      "document.body.addEventListener('mousemove', () => {debugger;});"));
 
-  scoped_refptr<InputMsgWatcher> filter = new InputMsgWatcher(
+  auto filter = std::make_unique<InputMsgWatcher>(
       RenderWidgetHostImpl::From(
           shell()->web_contents()->GetRenderViewHost()->GetWidget()),
       blink::WebInputEvent::kMouseMove);
 
-  SendCommand("Runtime.enable", nullptr);
+  SendCommand("Debugger.enable", nullptr);
   SendMouseEvent("mouseMoved", 15, 15, false);
 
-  // We expect that the console log message event arrives *before* the input
+  // We expect that the debugger message event arrives *before* the input
   // event ack, and the subsequent command response for
   // Input.dispatchMouseEvent.
-  WaitForNotification("Runtime.consoleAPICalled");
-  EXPECT_THAT(console_messages_, ElementsAre("x"));
+  WaitForNotification("Debugger.paused");
   EXPECT_FALSE(filter->HasReceivedAck());
   EXPECT_EQ(1u, result_ids_.size());
 
-  WaitForResponse();
-  EXPECT_EQ(2u, result_ids_.size());
+  SendCommand("Debugger.resume", nullptr);
+  filter->WaitForAck();
+  EXPECT_EQ(3u, result_ids_.size());
 }
 
 namespace {
@@ -857,7 +857,7 @@ IN_PROC_BROWSER_TEST_F(CaptureScreenshotTest, CaptureScreenshotJpeg) {
 }
 
 // Setting frame size (through RWHV) is not supported on Android.
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_LINUX)
 #define MAYBE_CaptureScreenshotArea DISABLED_CaptureScreenshotArea
 #else
 #define MAYBE_CaptureScreenshotArea CaptureScreenshotArea
@@ -1031,8 +1031,8 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, NavigationPreservesMessages) {
   bool enough_results = result_ids_.size() >= 2u;
   EXPECT_TRUE(enough_results);
   if (enough_results) {
-    EXPECT_EQ(1, result_ids_[0]);  // Page.enable
-    EXPECT_EQ(2, result_ids_[1]);  // Page.navigate
+    EXPECT_EQ(2, result_ids_[0]);  // Page.navigate
+    EXPECT_EQ(1, result_ids_[1]);  // Page.enable
   }
 
   enough_results = notifications_.size() >= 1u;
@@ -1297,6 +1297,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, JavaScriptDialogInterop) {
   WebContentsImpl* wc = static_cast<WebContentsImpl*>(shell()->web_contents());
   wc->SetDelegate(&dialog_manager);
   SendCommand("Page.enable", nullptr, true);
+  SendCommand("Runtime.enable", nullptr, true);
 
   std::unique_ptr<base::DictionaryValue> params(new base::DictionaryValue());
   params->SetString("expression", "alert('42')");
@@ -1307,6 +1308,56 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, JavaScriptDialogInterop) {
   WaitForNotification("Page.javascriptDialogClosed", true);
   wc->SetDelegate(nullptr);
   wc->SetJavaScriptDialogManagerForTesting(nullptr);
+}
+
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, PageDisableWithOpenedDialog) {
+  NavigateToURLBlockUntilNavigationsComplete(shell(), GURL("about:blank"), 1);
+  Attach();
+  TestJavaScriptDialogManager dialog_manager;
+  WebContentsImpl* wc = static_cast<WebContentsImpl*>(shell()->web_contents());
+  wc->SetDelegate(&dialog_manager);
+
+  SendCommand("Page.enable", nullptr, true);
+  SendCommand("Runtime.enable", nullptr, true);
+
+  std::unique_ptr<base::DictionaryValue> params(new base::DictionaryValue());
+  params->SetString("expression", "alert('42')");
+  SendCommand("Runtime.evaluate", std::move(params), false);
+  WaitForNotification("Page.javascriptDialogOpening");
+  EXPECT_TRUE(wc->IsJavaScriptDialogShowing());
+
+  EXPECT_FALSE(dialog_manager.is_handled());
+  SendCommand("Page.disable", nullptr, false);
+  EXPECT_TRUE(wc->IsJavaScriptDialogShowing());
+  EXPECT_FALSE(dialog_manager.is_handled());
+  dialog_manager.Handle();
+  EXPECT_FALSE(wc->IsJavaScriptDialogShowing());
+
+  params.reset(new base::DictionaryValue());
+  params->SetString("expression", "42");
+  SendCommand("Runtime.evaluate", std::move(params), true);
+
+  wc->SetDelegate(nullptr);
+  wc->SetJavaScriptDialogManagerForTesting(nullptr);
+}
+
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, PageDisableWithNoDialogManager) {
+  NavigateToURLBlockUntilNavigationsComplete(shell(), GURL("about:blank"), 1);
+  Attach();
+  WebContentsImpl* wc = static_cast<WebContentsImpl*>(shell()->web_contents());
+  wc->SetDelegate(nullptr);
+
+  SendCommand("Page.enable", nullptr, true);
+  SendCommand("Runtime.enable", nullptr, true);
+
+  std::unique_ptr<base::DictionaryValue> params(new base::DictionaryValue());
+  params->SetString("expression", "alert('42');");
+  SendCommand("Runtime.evaluate", std::move(params), false);
+  WaitForNotification("Page.javascriptDialogOpening");
+  EXPECT_TRUE(wc->IsJavaScriptDialogShowing());
+
+  SendCommand("Page.disable", nullptr, true);
+  EXPECT_FALSE(wc->IsJavaScriptDialogShowing());
 }
 
 IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, BeforeUnloadDialog) {
@@ -1449,19 +1500,21 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, PageStopLoading) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   // Navigate to about:blank first so we can make sure there is a target page we
-  // can attach to, and have Network.setRequestInterceptionEnabled complete
+  // can attach to, and have Network.setRequestInterception complete
   // before we start the navigations we're interested in.
   NavigateToURLBlockUntilNavigationsComplete(shell(), GURL("about:blank"), 1);
   Attach();
 
   std::unique_ptr<base::DictionaryValue> params(new base::DictionaryValue());
-  params->SetBoolean("enabled", true);
-  SendCommand("Network.setRequestInterceptionEnabled", std::move(params), true);
+  std::unique_ptr<base::ListValue> patterns(new base::ListValue());
+  patterns->Append(std::make_unique<base::DictionaryValue>());
+  params->Set("patterns", std::move(patterns));
+  SendCommand("Network.setRequestInterception", std::move(params), true);
 
   LoadFinishedObserver load_finished_observer(shell()->web_contents());
 
   // The page will try to navigate twice, however since
-  // Network.setRequestInterceptionEnabled is true,
+  // Network.setRequestInterception is true,
   // it'll wait for confirmation before committing to the navigation.
   GURL test_url = embedded_test_server()->GetURL(
       "/devtools/control_navigations/meta_tag.html");
@@ -1478,14 +1531,16 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, ControlNavigationsMainFrame) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   // Navigate to about:blank first so we can make sure there is a target page we
-  // can attach to, and have Network.setRequestInterceptionEnabled complete
+  // can attach to, and have Network.setRequestInterception complete
   // before we start the navigations we're interested in.
   NavigateToURLBlockUntilNavigationsComplete(shell(), GURL("about:blank"), 1);
   Attach();
 
   std::unique_ptr<base::DictionaryValue> params(new base::DictionaryValue());
-  params->SetBoolean("enabled", true);
-  SendCommand("Network.setRequestInterceptionEnabled", std::move(params), true);
+  std::unique_ptr<base::ListValue> patterns(new base::ListValue());
+  patterns->Append(std::make_unique<base::DictionaryValue>());
+  params->Set("patterns", std::move(patterns));
+  SendCommand("Network.setRequestInterception", std::move(params), true);
 
   NavigationFinishedObserver navigation_finished_observer(
       shell()->web_contents());
@@ -1528,14 +1583,16 @@ IN_PROC_BROWSER_TEST_F(IsolatedDevToolsProtocolTest,
   ASSERT_TRUE(embedded_test_server()->Start());
 
   // Navigate to about:blank first so we can make sure there is a target page we
-  // can attach to, and have Network.setRequestInterceptionEnabled complete
+  // can attach to, and have Network.setRequestInterception complete
   // before we start the navigations we're interested in.
   NavigateToURLBlockUntilNavigationsComplete(shell(), GURL("about:blank"), 1);
   Attach();
 
   std::unique_ptr<base::DictionaryValue> params(new base::DictionaryValue());
-  params->SetBoolean("enabled", true);
-  SendCommand("Network.setRequestInterceptionEnabled", std::move(params), true);
+  std::unique_ptr<base::ListValue> patterns(new base::ListValue());
+  patterns->Append(std::make_unique<base::DictionaryValue>());
+  params->Set("patterns", std::move(patterns));
+  SendCommand("Network.setRequestInterception", std::move(params), true);
 
   NavigationFinishedObserver navigation_finished_observer(
       shell()->web_contents());
@@ -1779,6 +1836,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, TargetDiscovery) {
   GURL third_url = embedded_test_server()->GetURL("/devtools/navigation.html");
   Shell* third = CreateBrowser();
   NavigateToURLBlockUntilNavigationsComplete(third, third_url, 1);
+
   params = WaitForNotification("Target.targetCreated", true);
   EXPECT_TRUE(params->GetString("targetInfo.type", &temp));
   EXPECT_EQ("page", temp);
@@ -1788,6 +1846,14 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, TargetDiscovery) {
   EXPECT_FALSE(is_attached);
   std::string attached_id = temp;
   ids.insert(temp);
+
+  params = WaitForNotification("Target.targetInfoChanged", true);
+  EXPECT_TRUE(params->GetString("targetInfo.url", &temp));
+  EXPECT_EQ("about:blank", temp);
+
+  params = WaitForNotification("Target.targetInfoChanged", true);
+  EXPECT_TRUE(params->GetString("targetInfo.url", &temp));
+  EXPECT_EQ(third_url, temp);
   EXPECT_TRUE(notifications_.empty());
 
   second->Close();
@@ -1811,6 +1877,18 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, TargetDiscovery) {
   EXPECT_TRUE(params->GetString("sessionId", &session_id));
   EXPECT_TRUE(params->GetString("targetInfo.targetId", &temp));
   EXPECT_EQ(attached_id, temp);
+  EXPECT_TRUE(notifications_.empty());
+
+  WebContents::CreateParams create_params(
+      ShellContentBrowserClient::Get()->browser_context(), NULL);
+  std::unique_ptr<content::WebContents> web_contents(
+      content::WebContents::Create(create_params));
+  EXPECT_TRUE(notifications_.empty());
+
+  web_contents->SetDelegate(this);
+  params = WaitForNotification("Target.targetCreated", true);
+  EXPECT_TRUE(params->GetString("targetInfo.type", &temp));
+  EXPECT_EQ("page", temp);
   EXPECT_TRUE(notifications_.empty());
 
   command_params.reset(new base::DictionaryValue());
@@ -2007,9 +2085,13 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTouchTest, EnableTouch) {
   std::unique_ptr<base::DictionaryValue> params;
   bool result;
 
+  content::SetupCrossSiteRedirector(embedded_test_server());
   ASSERT_TRUE(embedded_test_server()->Start());
-  GURL test_url = embedded_test_server()->GetURL("/devtools/enable_touch.html");
-  NavigateToURLBlockUntilNavigationsComplete(shell(), test_url, 1);
+  GURL test_url1 =
+      embedded_test_server()->GetURL("A.com", "/devtools/enable_touch.html");
+  GURL test_url2 =
+      embedded_test_server()->GetURL("B.com", "/devtools/enable_touch.html");
+  NavigateToURLBlockUntilNavigationsComplete(shell(), test_url1, 1);
   Attach();
 
   params.reset(new base::DictionaryValue());
@@ -2029,7 +2111,8 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTouchTest, EnableTouch) {
   EXPECT_TRUE(result);
 
   params.reset(new base::DictionaryValue());
-  SendCommand("Page.reload", std::move(params), false);
+  params->SetString("url", test_url2.spec());
+  SendCommand("Page.navigate", std::move(params), false);
   WaitForNotification("Page.frameStoppedLoading");
   ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
       shell()->web_contents(),

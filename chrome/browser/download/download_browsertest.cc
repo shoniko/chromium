@@ -103,10 +103,12 @@
 #include "content/public/common/quarantine.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
+#include "content/public/test/test_download_request_handler.h"
 #include "content/public/test/test_file_error_injector.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "extensions/browser/extension_dialog_auto_confirm.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/scoped_ignore_content_verifier_for_test.h"
 #include "net/base/filename_util.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -503,12 +505,6 @@ class DownloadTest : public InProcessBrowserTest {
     return GetDownloadDirectory(browser).Append(file.BaseName());
   }
 
-  base::FilePath TemporaryFile(const base::FilePath& file) {
-    base::FilePath tmp;
-    base::GetTempDir(&tmp);
-    return tmp.Append(file.BaseName());
-  }
-
   // Must be called after browser creation.  Creates a temporary
   // directory for downloads that is auto-deleted on destruction.
   // Returning false indicates a failure of the function, and should be asserted
@@ -517,7 +513,7 @@ class DownloadTest : public InProcessBrowserTest {
     if (!browser)
       return false;
 
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     if (!downloads_directory_.CreateUniqueTempDir())
       return false;
 
@@ -646,7 +642,7 @@ class DownloadTest : public InProcessBrowserTest {
   bool CheckDownloadFullPaths(Browser* browser,
                               const base::FilePath& downloaded_file,
                               const base::FilePath& origin_file) {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     bool origin_file_exists = base::PathExists(origin_file);
     EXPECT_TRUE(origin_file_exists) << origin_file.value();
     if (!origin_file_exists)
@@ -713,7 +709,7 @@ class DownloadTest : public InProcessBrowserTest {
                    SizeTestType type,
                    const std::string& partial_indication,
                    const std::string& total_indication) {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     EXPECT_TRUE(type == SIZE_TEST_TYPE_UNKNOWN || type == SIZE_TEST_TYPE_KNOWN);
     if (type != SIZE_TEST_TYPE_KNOWN && type != SIZE_TEST_TYPE_UNKNOWN)
       return false;
@@ -809,7 +805,7 @@ class DownloadTest : public InProcessBrowserTest {
                   const int64_t file_size) {
     std::string file_contents;
 
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     bool read = base::ReadFileToString(path, &file_contents);
     EXPECT_TRUE(read) << "Failed reading file: " << path.value() << std::endl;
     if (!read)
@@ -924,7 +920,7 @@ class DownloadTest : public InProcessBrowserTest {
     }
 
     // Wait till the |DownloadFile|s are destroyed.
-    content::RunAllBlockingPoolTasksUntilIdle();
+    content::RunAllTasksUntilIdle();
 
     // Validate that the correct files were downloaded.
     download_items.clear();
@@ -944,7 +940,7 @@ class DownloadTest : public InProcessBrowserTest {
 
       if (item->GetState() == content::DownloadItem::COMPLETE) {
         // Clean up the file, in case it ended up in the My Documents folder.
-        base::ThreadRestrictions::ScopedAllowIO allow_io;
+        base::ScopedAllowBlockingForTesting allow_blocking;
         base::FilePath destination_folder = GetDownloadDirectory(browser());
         base::FilePath my_downloaded_file = item->GetTargetFilePath();
         EXPECT_TRUE(base::PathExists(my_downloaded_file));
@@ -1085,6 +1081,7 @@ class DownloadTest : public InProcessBrowserTest {
   base::ScopedTempDir downloads_directory_;
 
   std::unique_ptr<DownloadTestFileActivityObserver> file_activity_observer_;
+  extensions::ScopedIgnoreContentVerifierForTest ignore_content_verifier_;
 };
 
 namespace {
@@ -1218,7 +1215,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, Quarantine_DependsOnLocalConfig) {
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
   base::FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
   base::FilePath downloaded_file(DestinationFile(browser(), file));
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_TRUE(content::IsFileQuarantined(downloaded_file, url, GURL()));
   CheckDownload(browser(), file, file);
 }
@@ -1300,7 +1297,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, NoDownload) {
   ui_test_utils::NavigateToURL(browser(), url);
 
   // Check that we did not download the web page.
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_FALSE(base::PathExists(file_path));
 
   // Check state.
@@ -1400,7 +1397,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadResourceThrottleCancels) {
   // Check that we did not download the file.
   base::FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
   base::FilePath file_path(DestinationFile(browser(), file));
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_FALSE(base::PathExists(file_path));
 
   // Check state.
@@ -1499,7 +1496,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_IncognitoRegular) {
   // later.
   base::FilePath origin(OriginFile(base::FilePath(FILE_PATH_LITERAL(
       "downloads/a_zip_file.zip"))));
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   ASSERT_TRUE(base::PathExists(origin));
   int64_t origin_file_size = 0;
   EXPECT_TRUE(base::GetFileSize(origin, &origin_file_size));
@@ -2004,7 +2001,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, AnchorDownloadTag) {
   // Confirm the downloaded data exists.
   base::FilePath downloaded_file = GetDownloadDirectory(browser());
   downloaded_file = downloaded_file.Append(FILE_PATH_LITERAL("a_red_dot.png"));
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_TRUE(base::PathExists(downloaded_file));
 }
 
@@ -2032,7 +2029,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, AutoOpen) {
 
   // As long as we're here, confirmed everything else is good.
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
-  CheckDownloadFullPaths(browser(), TemporaryFile(file), OriginFile(file));
+  CheckDownload(browser(), file, file);
 }
 
 // Download an extension. Expect a dangerous download warning.
@@ -2227,7 +2224,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadUrlToPath) {
       browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(web_contents);
 
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
   base::ScopedTempDir other_directory;
   ASSERT_TRUE(other_directory.CreateUniqueTempDir());
@@ -2264,7 +2261,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, TransientDownload) {
       browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(web_contents);
 
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
   base::ScopedTempDir other_directory;
   ASSERT_TRUE(other_directory.CreateUniqueTempDir());
@@ -2939,7 +2936,6 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, TestMultipleDownloadsRequests) {
   PermissionRequestManager* permission_request_manager =
       PermissionRequestManager::FromWebContents(
           browser()->tab_strip_model()->GetActiveWebContents());
-  permission_request_manager->DisplayPendingRequests();
   permission_request_manager->set_auto_response_for_test(
       PermissionRequestManager::ACCEPT_ALL);
 
@@ -2963,7 +2959,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_Renaming) {
   content::DownloadManager* manager = DownloadManagerForBrowser(browser());
   base::FilePath origin_file(OriginFile(base::FilePath(FILE_PATH_LITERAL(
       "downloads/a_zip_file.zip"))));
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   ASSERT_TRUE(base::PathExists(origin_file));
   std::string origin_contents;
   ASSERT_TRUE(base::ReadFileToString(origin_file, &origin_contents));
@@ -2981,7 +2977,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_Renaming) {
         (index == 0 ? std::string(".zip") :
                       base::StringPrintf(" (%d).zip", index)),
               target_path.BaseName().AsUTF8Unsafe());
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     ASSERT_TRUE(base::PathExists(target_path));
     ASSERT_TRUE(VerifyFile(target_path, origin_contents,
                            origin_contents.size()));
@@ -3021,7 +3017,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, MAYBE_DownloadTest_CrazyFilenames) {
   };
 
   std::vector<DownloadItem*> download_items;
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::FilePath origin_directory =
       GetDownloadDirectory(browser()).Append(FILE_PATH_LITERAL("origin"));
   ASSERT_TRUE(base::CreateDirectory(origin_directory));
@@ -3115,45 +3111,37 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_PauseResumeCancel) {
 #define MAYBE_DownloadTest_PercentComplete DownloadTest_PercentComplete
 #endif
 IN_PROC_BROWSER_TEST_F(DownloadTest, MAYBE_DownloadTest_PercentComplete) {
-  // Write a huge file.
-  base::FilePath file_path(
-      GetDownloadDirectory(browser()).AppendASCII("source").AppendASCII(
-          "DownloadTest_BigZip.zip"));
-  int64_t size = 1 << 25;
+  // Write a huge file. Make sure the test harness can supply "Content-Length"
+  // header to indicate the file size, or the download will not have valid
+  // percentage progression.
+  GURL url = GURL("http://example.com/large_file");
+  content::TestDownloadRequestHandler request_handler(url);
+  content::TestDownloadRequestHandler::Parameters parameters;
+  parameters.size = 1024 * 1024 * 32; /* 32MB file. */
+  request_handler.StartServing(parameters);
+
+  // Ensure that we have enough disk space to download the large file.
   {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
-    ASSERT_TRUE(CreateDirectory(file_path.DirName()));
-    base::File file(file_path,
-                    base::File::FLAG_CREATE | base::File::FLAG_WRITE);
-    ASSERT_TRUE(file.IsValid());
-    EXPECT_EQ(1, file.Write(size, "a", 1));
-    file.Close();
-
-#if defined(OS_POSIX)
-    // Make it readable by chronos on chromeos
-    base::SetPosixFilePermissions(file_path, 0755);
-#endif
-
-    // Ensure that we have enough disk space.
+    base::ScopedAllowBlockingForTesting allow_blocking;
     int64_t free_space =
         base::SysInfo::AmountOfFreeDiskSpace(GetDownloadDirectory(browser()));
-    ASSERT_LE(size, free_space)
+    ASSERT_LE(parameters.size, free_space)
         << "Not enough disk space to download. Got " << free_space;
   }
-  GURL file_url(net::FilePathToFileURL(file_path));
+
   std::unique_ptr<content::DownloadTestObserver> progress_waiter(
       CreateInProgressWaiter(browser(), 1));
 
   // Start downloading a file, wait for it to be created.
   ui_test_utils::NavigateToURLWithDisposition(
-      browser(), file_url, WindowOpenDisposition::CURRENT_TAB,
+      browser(), url, WindowOpenDisposition::CURRENT_TAB,
       ui_test_utils::BROWSER_TEST_NONE);
   progress_waiter->WaitForFinished();
   EXPECT_EQ(1u, progress_waiter->NumDownloadsSeenInState(
       DownloadItem::IN_PROGRESS));
   std::vector<DownloadItem*> download_items;
   GetDownloads(browser(), &download_items);
-  ASSERT_EQ(1UL, download_items.size());
+  ASSERT_EQ(1u, download_items.size());
 
   // Wait for the download to complete, checking along the way that the
   // PercentComplete() never regresses.
@@ -3163,13 +3151,11 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, MAYBE_DownloadTest_PercentComplete) {
   ASSERT_EQ(100, download_items[0]->PercentComplete());
 
   // Check that the file downloaded correctly.
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
-  ASSERT_TRUE(base::PathExists(download_items[0]->GetTargetFilePath()));
-  int64_t downloaded_size = 0;
-  ASSERT_TRUE(base::GetFileSize(
-      download_items[0]->GetTargetFilePath(), &downloaded_size));
-  ASSERT_EQ(size + 1, downloaded_size);
-  ASSERT_TRUE(base::DieFileDie(file_path, false));
+  ASSERT_EQ(parameters.size, download_items[0]->GetReceivedBytes());
+  ASSERT_EQ(parameters.size, download_items[0]->GetTotalBytes());
+
+  // Delete the file.
+  base::ScopedAllowBlockingForTesting allow_blocking;
   ASSERT_TRUE(base::DieFileDie(download_items[0]->GetTargetFilePath(), false));
 }
 
@@ -3574,7 +3560,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, FeedbackServiceKeepDownload) {
   GetDownloads(browser(), &updated_downloads);
   ASSERT_EQ(std::size_t(1), updated_downloads.size());
   ASSERT_FALSE(updated_downloads[0]->IsDangerous());
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   ASSERT_TRUE(PathExists(updated_downloads[0]->GetTargetFilePath()));
   updated_downloads[0]->Cancel(true);
 }

@@ -109,7 +109,6 @@
 #import "ui/base/cocoa/cocoa_base_utils.h"
 #import "ui/base/cocoa/nsview_additions.h"
 #import "ui/base/cocoa/touch_bar_forward_declarations.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/display/screen.h"
 #import "ui/gfx/mac/coordinate_conversion.h"
 #include "ui/gfx/mac/scoped_cocoa_disable_screen_updates.h"
@@ -1076,24 +1075,11 @@ bool IsTabDetachingInFullscreenEnabled() {
 
 - (void)onActiveTabChanged:(content::WebContents*)oldContents
                         to:(content::WebContents*)newContents {
-  // No need to remove previous bubble. It will close itself.
-  PermissionRequestManager* manager(nullptr);
-  if (oldContents) {
-    manager = PermissionRequestManager::FromWebContents(oldContents);
-    if (manager)
-      manager->HideBubble();
-  }
-
-  if (newContents) {
-    manager = PermissionRequestManager::FromWebContents(newContents);
-    if (manager)
-      manager->DisplayPendingRequests();
-  }
-
   if ([self isInAnyFullscreenMode]) {
     [[self fullscreenToolbarController] revealToolbarForWebContents:newContents
                                                        inForeground:YES];
   }
+  [self invalidateTouchBar];
 }
 
 - (void)zoomChangedForActiveTab:(BOOL)canShowBubble {
@@ -1208,6 +1194,34 @@ bool IsTabDetachingInFullscreenEnabled() {
 - (void)setIsLoading:(BOOL)isLoading force:(BOOL)force {
   [toolbarController_ setIsLoading:isLoading force:force];
   [touchBar_ setIsPageLoading:isLoading];
+}
+
+- (void)firstResponderUpdated:(NSResponder*)responder {
+  if (![self isInAppKitFullscreen] ||
+      [fullscreenToolbarController_ toolbarStyle] ==
+          FullscreenToolbarStyle::TOOLBAR_NONE) {
+    return;
+  }
+
+  if (!responder) {
+    [self releaseToolbarVisibilityForOwner:self withAnimation:YES];
+    return;
+  }
+
+  if (![responder isKindOfClass:[NSView class]])
+    return;
+
+  // If the view is in the download shelf or the tab content area, don't
+  // lock the toolbar.
+  NSView* view = base::mac::ObjCCastStrict<NSView>(responder);
+  if (![view isDescendantOf:[[self window] contentView]] ||
+      [view isDescendantOf:[downloadShelfController_ view]] ||
+      [view isDescendantOf:[self tabContentArea]]) {
+    [self releaseToolbarVisibilityForOwner:self withAnimation:YES];
+    return;
+  }
+
+  [self lockToolbarVisibilityForOwner:self withAnimation:YES];
 }
 
 // Make the location bar the first responder, if possible.
@@ -1529,14 +1543,6 @@ bool IsTabDetachingInFullscreenEnabled() {
 
 - (void)onTabDetachedWithContents:(WebContents*)contents {
   [infoBarContainerController_ tabDetachedWithContents:contents];
-
-  // If there are permission requests, hide them. This may be checked again in
-  // -onActiveTabChanged:, but not if this was the last tab in the window, in
-  // which case there is nothing to change to.
-  if (PermissionRequestManager* manager =
-          PermissionRequestManager::FromWebContents(contents)) {
-    manager->HideBubble();
-  }
 }
 
 - (void)onTabInsertedWithContents:(content::WebContents*)contents
@@ -1604,7 +1610,7 @@ bool IsTabDetachingInFullscreenEnabled() {
 
   bookmarkBubbleObserver_.reset(new BookmarkBubbleObserverCocoa(self));
 
-  if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
+  if (chrome::ShowPilotDialogsWithViewsToolkit()) {
     chrome::ShowBookmarkBubbleViewsAtPoint(
         gfx::ScreenPointFromNSPoint(ui::ConvertPointFromWindowToScreen(
             [self window], [self bookmarkBubblePoint])),
@@ -1652,7 +1658,7 @@ bool IsTabDetachingInFullscreenEnabled() {
                                      step:(translate::TranslateStep)step
                                 errorType:(translate::TranslateErrors::Type)
                                 errorType {
-  if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
+  if (chrome::ShowAllDialogsWithViewsToolkit()) {
     ShowTranslateBubbleViews([self window], [self locationBarBridge], contents,
                              step, errorType, true);
     return;
@@ -1925,6 +1931,10 @@ willAnimateFromState:(BookmarkBar::State)oldState
   fullscreenToolbarController_.reset([controller retain]);
 }
 
+- (void)setBrowserWindowTouchBar:(BrowserWindowTouchBar*)touchBar {
+  touchBar_.reset(touchBar);
+}
+
 - (void)executeExtensionCommand:(const std::string&)extension_id
                         command:(const extensions::Command&)command {
   // Global commands are handled by the ExtensionCommandsGlobalRegistry
@@ -1974,7 +1984,7 @@ willAnimateFromState:(BookmarkBar::State)oldState
     (ExclusiveAccessContext::TabFullscreenState)state {
   DCHECK([self isInAnyFullscreenMode]);
   [fullscreenToolbarController_
-      updateToolbarStyleExitingTabFullscreen:
+      layoutToolbarStyleIsExitingTabFullscreen:
           state == ExclusiveAccessContext::STATE_EXIT_TAB_FULLSCREEN];
 }
 

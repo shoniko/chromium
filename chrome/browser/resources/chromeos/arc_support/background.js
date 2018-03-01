@@ -8,12 +8,6 @@
  */
 var appWindow = null;
 
-/**
- * Contains web content provided by Google authorization server.
- * @type {WebView}
- */
-var lsoView = null;
-
 /** @type {TermsOfServicePage} */
 var termsPage = null;
 
@@ -194,7 +188,7 @@ class MetricsPreferenceCheckbox extends PreferenceCheckbox {
 
   /** Called when "settings" link is clicked. */
   onSettingsLinkClicked(event) {
-    chrome.browser.openTab({'url': 'chrome://settings'}, function() {});
+    sendNativeMessage('onOpenSettingsPageClicked');
     event.stopPropagation();
   }
 }
@@ -425,6 +419,12 @@ class ActiveDirectoryAuthPage {
 
     this.deviceManagementUrlPrefix_ = null;
 
+    // https://crbug.com/756144: Disable event processing while the page is not
+    // shown. The bug seems to be caused by erroneous onErrorOccurred events
+    // that are fired even though authView_.src is never set. This might be
+    // related to a bug in webview, see also CL:638413.
+    this.process_events_ = false;
+
     container.querySelector('#button-active-directory-auth-cancel')
         .addEventListener('click', () => this.onCancel_());
   }
@@ -442,20 +442,35 @@ class ActiveDirectoryAuthPage {
   }
 
   /**
+   * Toggles onCompleted and onErrorOccurred event processing.
+   * @param {boolean} enabled Process (true) or ignore (false) events.
+   */
+  enableEventProcessing(enabled) {
+    this.process_events_ = enabled;
+  }
+
+  /**
    * Auth view onCompleted event handler. Checks whether the SAML flow
    * reached its endpoint, the device management server.
    * @param {!Object} details Event parameters.
    */
   onAuthViewCompleted_(details) {
+    if (!this.process_events_) {
+      console.error(
+          'Unexpected onAuthViewCompleted_ event from URL ' + details.url);
+      return;
+    }
     // See if we hit the device management server. This should happen at the
     // end of the SAML flow. Before that, we're on the Active Directory
     // Federation Services server.
     if (this.deviceManagementUrlPrefix_ &&
         details.url.startsWith(this.deviceManagementUrlPrefix_)) {
+      // Once we hit the final URL, stop processing further events.
+      this.process_events_ = false;
       // Did it actually work?
       if (details.statusCode == 200) {
         // 'code' is unused, but it needs to be there.
-        sendNativeMessage('onAuthSucceeded', {code: ''});
+        sendNativeMessage('onAuthSucceeded');
       } else {
         sendNativeMessage('onAuthFailed', {
           errorMessage:
@@ -470,13 +485,21 @@ class ActiveDirectoryAuthPage {
    * @param {!Object} details Event parameters.
    */
   onAuthViewErrorOccurred_(details) {
+    if (!this.process_events_) {
+      console.error(
+          'Unexpected onAuthViewErrorOccurred_ event: ' + details.error);
+      return;
+    }
     // Retry triggers net::ERR_ABORTED, so ignore it.
     if (details.error == 'net::ERR_ABORTED')
       return;
+    // Stop processing further events on first error.
+    this.process_events_ = false;
     sendNativeMessage(
         'onAuthFailed', {errorMessage: 'Error occurred: ' + details.error});
   }
 
+  /** Called when the "CANCEL" button is clicked. */
   onCancel_() {
     closeWindow();
   }
@@ -564,16 +587,13 @@ function onNativeMessage(message) {
     termsPage.onLocationServicePreferenceChanged(
         message.enabled, message.managed);
   } else if (message.action == 'showPage') {
-    showPage(message.page);
+    showPage(message.page, message.options);
   } else if (message.action == 'showErrorPage') {
     showErrorPage(message.errorMessage, message.shouldShowSendFeedback);
   } else if (message.action == 'closeWindow') {
     closeWindow();
   } else if (message.action == 'setWindowBounds') {
     setWindowBounds();
-  } else if (message.action == 'setActiveDirectoryAuthUrls') {
-    activeDirectoryAuthPage.setUrls(
-        message.federationUrl, message.deviceManagementUrlPrefix);
   }
 }
 
@@ -590,8 +610,12 @@ function connectPort() {
  * Shows requested page and hide others. Show appWindow if it was hidden before.
  * 'none' hides all views.
  * @param {string} pageDivId id of divider of the page to show.
+ * @param {dictionary=} options Addional options depending on pageDivId. For
+ *     'active-directory-auth', this has to contain keys 'federationUrl' and
+ *     'deviceManagementUrlPrefix' with corresponding values. See
+ *     ActiveDirectoryAuthPage::setUrls for a description of those parameters.
  */
-function showPage(pageDivId) {
+function showPage(pageDivId, options) {
   if (!appWindow) {
     return;
   }
@@ -599,25 +623,20 @@ function showPage(pageDivId) {
   hideOverlay();
   appWindow.contentWindow.stopProgressAnimation();
   var doc = appWindow.contentWindow.document;
-  // If the request is lso-loading and arc-loading page is currently shown,
-  // then we do not switch the view. This is because both pages are saying
-  // "operation in progress", and switching the page looks unwanted message
-  // change from users' point of view.
-  if (pageDivId != 'lso-loading' || doc.getElementById('arc-loading').hidden) {
-    var pages = doc.getElementsByClassName('section');
-    for (var i = 0; i < pages.length; i++) {
-      pages[i].hidden = pages[i].id != pageDivId;
-    }
+
+  var pages = doc.getElementsByClassName('section');
+  for (var i = 0; i < pages.length; i++) {
+    pages[i].hidden = pages[i].id != pageDivId;
   }
 
-  if (pageDivId == 'lso-loading') {
-    lsoView.src = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=' +
-        '1070009224336-sdh77n7uot3oc99ais00jmuft6sk2fg9.apps.' +
-        'googleusercontent.com&response_type=code&redirect_uri=oob&' +
-        'scope=https://www.google.com/accounts/OAuthLogin&' +
-        'device_type=arc_plus_plus&device_id=' + currentDeviceId +
-        '&hl=' + navigator.language;
+  if (pageDivId == 'active-directory-auth') {
+    activeDirectoryAuthPage.enableEventProcessing(true);
+    activeDirectoryAuthPage.setUrls(
+        options.federationUrl, options.deviceManagementUrlPrefix);
+  } else {
+    activeDirectoryAuthPage.enableEventProcessing(false);
   }
+
   appWindow.show();
   if (pageDivId == 'terms') {
     termsPage.onShow();
@@ -625,8 +644,7 @@ function showPage(pageDivId) {
 
   // Start progress bar animation for the page that has the dynamic progress
   // bar. 'error' page has the static progress bar that no need to be animated.
-  if (pageDivId == 'terms' || pageDivId == 'arc-loading' ||
-      pageDivId == 'lso-loading') {
+  if (pageDivId == 'terms' || pageDivId == 'arc-loading') {
     appWindow.contentWindow.startProgressAnimation(pageDivId);
   }
 }
@@ -756,71 +774,6 @@ function closeWindow() {
 
 chrome.app.runtime.onLaunched.addListener(function() {
   var onAppContentLoad = function() {
-    var doc = appWindow.contentWindow.document;
-    lsoView = doc.getElementById('arc-support');
-    lsoView.addContentScripts([{
-      name: 'postProcess',
-      matches: ['https://accounts.google.com/*'],
-      css: {files: ['lso.css']},
-      run_at: 'document_end'
-    }]);
-
-    var isLsoApprovalResponse = function(url) {
-      var resultUrlPrefix = 'https://accounts.google.com/o/oauth2/approval?';
-      return url.substring(0, resultUrlPrefix.length) == resultUrlPrefix;
-    };
-
-    var lsoError = false;
-    var onLsoViewRequestResponseStarted = function(details) {
-      if (isLsoApprovalResponse(details.url)) {
-        showPage('arc-loading');
-      }
-      lsoError = false;
-    };
-
-    var onLsoViewErrorOccurred = function(details) {
-      showErrorPage(
-          appWindow.contentWindow.loadTimeData.getString('serverError'));
-      lsoError = true;
-    };
-
-    var onLsoViewContentLoad = function() {
-      if (lsoError) {
-        return;
-      }
-
-      if (!isLsoApprovalResponse(lsoView.src)) {
-        // Show LSO page when its content is ready.
-        showPage('lso');
-        // We have fixed width for LSO page in css file in order to prevent
-        // unwanted webview resize animation when it is shown first time. Now
-        // it safe to make it up to window width.
-        lsoView.style.width = '100%';
-        return;
-      }
-
-      lsoView.executeScript({code: 'document.title;'}, function(results) {
-        var authCodePrefix = 'Success code=';
-        if (results && results.length == 1 && typeof results[0] == 'string' &&
-            results[0].substring(0, authCodePrefix.length) == authCodePrefix) {
-          var authCode = results[0].substring(authCodePrefix.length);
-          sendNativeMessage('onAuthSucceeded', {code: authCode});
-        } else {
-          sendNativeMessage('onAuthFailed', {errorMessage: 'Bad results.'});
-          showErrorPage(appWindow.contentWindow.loadTimeData.getString(
-              'authorizationFailed'));
-        }
-      });
-    };
-
-    var requestFilter = {urls: ['<all_urls>'], types: ['main_frame']};
-
-    lsoView.request.onResponseStarted.addListener(
-        onLsoViewRequestResponseStarted, requestFilter);
-    lsoView.request.onErrorOccurred.addListener(
-        onLsoViewErrorOccurred, requestFilter);
-    lsoView.addEventListener('contentload', onLsoViewContentLoad);
-
     var onRetry = function() {
       sendNativeMessage('onRetryClicked');
     };
@@ -829,6 +782,7 @@ chrome.app.runtime.onLaunched.addListener(function() {
       sendNativeMessage('onSendFeedbackClicked');
     };
 
+    var doc = appWindow.contentWindow.document;
     doc.getElementById('button-retry').addEventListener('click', onRetry);
     doc.getElementById('button-send-feedback')
         .addEventListener('click', onSendFeedback);
@@ -853,6 +807,9 @@ chrome.app.runtime.onLaunched.addListener(function() {
 
   var onWindowClosed = function() {
     appWindow = null;
+
+    // Turn off event processing.
+    activeDirectoryAuthPage.enableEventProcessing(false);
 
     // Notify to Chrome.
     sendNativeMessage('onWindowClosed');

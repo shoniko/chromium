@@ -6,9 +6,9 @@
 #define NGInlineNode_h
 
 #include "core/CoreExport.h"
+#include "core/layout/LayoutBlockFlow.h"
 #include "core/layout/ng/inline/ng_inline_item.h"
 #include "core/layout/ng/inline/ng_inline_node_data.h"
-#include "core/layout/ng/layout_ng_block_flow.h"
 #include "core/layout/ng/ng_layout_input_node.h"
 #include "platform/wtf/Optional.h"
 #include "platform/wtf/text/WTFString.h"
@@ -19,7 +19,7 @@ template <typename OffsetMappingBuilder>
 class NGInlineItemsBuilderTemplate;
 
 class EmptyOffsetMappingBuilder;
-class LayoutNGBlockFlow;
+class LayoutBlockFlow;
 struct MinMaxSize;
 class NGConstraintSpace;
 class NGInlineItem;
@@ -29,21 +29,20 @@ using NGInlineItemsBuilder =
 struct NGInlineNodeData;
 class NGLayoutResult;
 class NGOffsetMappingResult;
-class NGOffsetMappingUnit;
 
 // Represents an anonymous block box to be laid out, that contains consecutive
 // inline nodes and their descendants.
 class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
  public:
-  NGInlineNode(LayoutNGBlockFlow*);
+  NGInlineNode(LayoutBlockFlow*);
 
-  LayoutNGBlockFlow* GetLayoutBlockFlow() const {
-    return ToLayoutNGBlockFlow(box_);
+  LayoutBlockFlow* GetLayoutBlockFlow() const {
+    return ToLayoutBlockFlow(box_);
   }
   NGLayoutInputNode NextSibling();
 
-  RefPtr<NGLayoutResult> Layout(const NGConstraintSpace&,
-                                NGBreakToken* = nullptr);
+  scoped_refptr<NGLayoutResult> Layout(const NGConstraintSpace&,
+                                       NGBreakToken* = nullptr);
 
   // Computes the value of min-content and max-content for this anonymous block
   // box. min-content is the inline size when lines wrap at every break
@@ -51,10 +50,15 @@ class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
   MinMaxSize ComputeMinMaxSize();
 
   // Copy fragment data of all lines to LayoutBlockFlow.
-  void CopyFragmentDataToLayoutBox(const NGConstraintSpace&, NGLayoutResult*);
+  void CopyFragmentDataToLayoutBox(const NGConstraintSpace&,
+                                   const NGLayoutResult&);
 
   // Instruct to re-compute |PrepareLayout| on the next layout.
   void InvalidatePrepareLayout();
+
+  // Prepare inline and text content for layout. Must be called before
+  // calling the Layout method.
+  void PrepareLayout();
 
   const String& Text() const { return Data().text_content_; }
   StringView Text(unsigned start_offset, unsigned end_offset) const {
@@ -83,21 +87,7 @@ class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
 
   String ToString() const;
 
-  // ------ Offset Mapping APIs -----
-
-  // Returns the NGOffsetMappingUnit that contains the given offset in the DOM
-  // node. If there are multiple qualifying units, returns the last one.
-  const NGOffsetMappingUnit* GetMappingUnitForDOMOffset(const Node&, unsigned);
-
-  // Returns the text content offset corresponding to the given DOM offset.
-  size_t GetTextContentOffset(const Node&, unsigned);
-
-  // TODO(xiaochengh): Add APIs for reverse mapping.
-
  protected:
-  // Prepare inline and text content for layout. Must be called before
-  // calling the Layout method.
-  void PrepareLayout();
   bool IsPrepareLayoutFinished() const { return !Text().IsNull(); }
 
   void CollectInlines();
@@ -107,10 +97,10 @@ class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
   void ShapeTextForFirstLineIfNeeded();
 
   NGInlineNodeData* MutableData() {
-    return ToLayoutNGBlockFlow(box_)->GetNGInlineNodeData();
+    return ToLayoutBlockFlow(box_)->GetNGInlineNodeData();
   }
   const NGInlineNodeData& Data() const {
-    return *ToLayoutNGBlockFlow(box_)->GetNGInlineNodeData();
+    return *ToLayoutBlockFlow(box_)->GetNGInlineNodeData();
   }
 
   friend class NGLineBreakerTest;

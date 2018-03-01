@@ -443,7 +443,7 @@ void DesktopWindowTreeHostX11::OnNativeWidgetCreated(
 
 void DesktopWindowTreeHostX11::OnWidgetInitDone() {}
 
-void DesktopWindowTreeHostX11::OnNativeWidgetActivationChanged(bool active) {}
+void DesktopWindowTreeHostX11::OnActiveWindowChanged(bool active) {}
 
 std::unique_ptr<corewm::Tooltip> DesktopWindowTreeHostX11::CreateTooltip() {
   return base::WrapUnique(new corewm::TooltipAura);
@@ -1916,7 +1916,8 @@ void DesktopWindowTreeHostX11::MapWindow(ui::WindowShowState show_state) {
 }
 
 void DesktopWindowTreeHostX11::SetWindowTransparency() {
-  compositor()->SetHostHasTransparentBackground(use_argb_visual_);
+  compositor()->SetBackgroundColor(use_argb_visual_ ? SK_ColorTRANSPARENT
+                                                    : SK_ColorWHITE);
   window()->SetTransparent(use_argb_visual_);
   content_window_->SetTransparent(use_argb_visual_);
 }
@@ -2304,9 +2305,9 @@ DesktopWindowTreeHostX11::DisableEventListening() {
         std::unique_ptr<ui::EventTargeter>(new ui::NullEventTargeter)));
   }
 
-  return base::MakeUnique<base::Closure>(base::Bind(
-      &DesktopWindowTreeHostX11::EnableEventListening,
-      weak_factory_.GetWeakPtr()));
+  return std::make_unique<base::Closure>(
+      base::Bind(&DesktopWindowTreeHostX11::EnableEventListening,
+                 weak_factory_.GetWeakPtr()));
 }
 
 void DesktopWindowTreeHostX11::EnableEventListening() {

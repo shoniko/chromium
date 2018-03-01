@@ -26,13 +26,12 @@
 #include "core/StylePropertyShorthand.h"
 #include "core/css/CSSCustomPropertyDeclaration.h"
 #include "core/css/CSSIdentifierValue.h"
-#include "core/css/CSSPropertyMetadata.h"
 #include "core/css/StylePropertySerializer.h"
 #include "core/css/StyleSheetContents.h"
 #include "core/css/parser/CSSParser.h"
 #include "core/css/parser/CSSParserContext.h"
+#include "core/css/properties/CSSPropertyAPI.h"
 #include "core/frame/UseCounter.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/wtf/text/StringBuilder.h"
 
 #ifndef NDEBUG
@@ -114,7 +113,10 @@ static bool IsPropertyMatch(const StylePropertyMetadata& metadata,
   DCHECK_EQ(id, property_id);
   bool result = metadata.property_id_ == id;
   // Only enabled properties should be part of the style.
-  DCHECK(!result || CSSPropertyMetadata::IsEnabledProperty(property_id));
+#if DCHECK_IS_ON()
+  DCHECK(!result ||
+         CSSPropertyAPI::Get(resolveCSSPropertyID(property_id)).IsEnabled());
+#endif
   return result;
 }
 
@@ -143,7 +145,7 @@ template CORE_EXPORT int ImmutableStylePropertySet::FindPropertyIndex(
 template CORE_EXPORT int ImmutableStylePropertySet::FindPropertyIndex(
     AtomicString) const;
 
-DEFINE_TRACE_AFTER_DISPATCH(ImmutableStylePropertySet) {
+void ImmutableStylePropertySet::TraceAfterDispatch(blink::Visitor* visitor) {
   const Member<const CSSValue>* values = ValueArray();
   for (unsigned i = 0; i < array_size_; i++)
     visitor->Trace(values[i]);
@@ -196,7 +198,7 @@ template CORE_EXPORT const CSSValue*
 template CORE_EXPORT const CSSValue*
     StylePropertySet::GetPropertyCSSValue<AtomicString>(AtomicString) const;
 
-DEFINE_TRACE(StylePropertySet) {
+void StylePropertySet::Trace(blink::Visitor* visitor) {
   if (is_mutable_)
     ToMutableStylePropertySet(this)->TraceAfterDispatch(visitor);
   else
@@ -232,7 +234,7 @@ bool MutableStylePropertySet::RemovePropertyAtIndex(int property_index,
 
   // A more efficient removal strategy would involve marking entries as empty
   // and sweeping them when the vector grows too big.
-  property_vector_.erase(property_index);
+  property_vector_.EraseAt(property_index);
 
   return true;
 }
@@ -581,7 +583,7 @@ template CORE_EXPORT int MutableStylePropertySet::FindPropertyIndex(
 template CORE_EXPORT int MutableStylePropertySet::FindPropertyIndex(
     AtomicString) const;
 
-DEFINE_TRACE_AFTER_DISPATCH(MutableStylePropertySet) {
+void MutableStylePropertySet::TraceAfterDispatch(blink::Visitor* visitor) {
   visitor->Trace(cssom_wrapper_);
   visitor->Trace(property_vector_);
   StylePropertySet::TraceAfterDispatch(visitor);
@@ -618,6 +620,6 @@ MutableStylePropertySet* MutableStylePropertySet::Create(
   return new MutableStylePropertySet(properties, count);
 }
 
-DEFINE_TRACE(CSSLazyPropertyParser) {}
+void CSSLazyPropertyParser::Trace(blink::Visitor* visitor) {}
 
 }  // namespace blink

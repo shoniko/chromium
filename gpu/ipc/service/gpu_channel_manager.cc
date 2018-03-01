@@ -19,6 +19,7 @@
 #include "build/build_config.h"
 #include "gpu/command_buffer/common/sync_token.h"
 #include "gpu/command_buffer/service/feature_info.h"
+#include "gpu/command_buffer/service/gpu_tracer.h"
 #include "gpu/command_buffer/service/mailbox_manager.h"
 #include "gpu/command_buffer/service/memory_program_cache.h"
 #include "gpu/command_buffer/service/passthrough_program_cache.h"
@@ -104,6 +105,12 @@ GpuChannelManager::~GpuChannelManager() {
   }
 }
 
+gles2::Outputter* GpuChannelManager::outputter() {
+  if (!outputter_)
+    outputter_.reset(new gles2::TraceOutputter("GpuChannelManager Trace"));
+  return outputter_.get();
+}
+
 gles2::ProgramCache* GpuChannelManager::program_cache() {
   if (!program_cache_.get()) {
     const GpuDriverBugWorkarounds& workarounds = gpu_driver_bug_workarounds_;
@@ -139,7 +146,7 @@ GpuChannel* GpuChannelManager::LookupChannel(int32_t client_id) const {
 GpuChannel* GpuChannelManager::EstablishChannel(int client_id,
                                                 uint64_t client_tracing_id,
                                                 bool is_gpu_host) {
-  std::unique_ptr<GpuChannel> gpu_channel = base::MakeUnique<GpuChannel>(
+  std::unique_ptr<GpuChannel> gpu_channel = std::make_unique<GpuChannel>(
       this, scheduler_, sync_point_manager_, share_group_,
       is_gpu_host ? preemption_flag_ : nullptr,
       is_gpu_host ? nullptr : preemption_flag_, task_runner_, io_task_runner_,
@@ -279,6 +286,11 @@ void GpuChannelManager::OnApplicationStateChange(
                  weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromMilliseconds(kDelayToClearContextMs));
   return;
+}
+
+void GpuChannelManager::OnApplicationBackgroundedForTesting() {
+  is_backgrounded_for_testing_ = true;
+  OnApplicationBackgrounded();
 }
 
 void GpuChannelManager::OnApplicationBackgrounded() {

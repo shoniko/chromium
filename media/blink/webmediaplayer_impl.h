@@ -24,6 +24,7 @@
 #include "base/timer/elapsed_timer.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
+#include "components/viz/common/gpu/context_provider.h"
 #include "media/base/media_observer.h"
 #include "media/base/media_tracks.h"
 #include "media/base/overlay_info.h"
@@ -40,7 +41,7 @@
 #include "media/blink/webmediaplayer_util.h"
 #include "media/filters/pipeline_controller.h"
 #include "media/mojo/interfaces/video_decode_stats_recorder.mojom.h"
-#include "media/renderers/skcanvas_video_renderer.h"
+#include "media/renderers/paint_canvas_video_renderer.h"
 #include "third_party/WebKit/public/platform/WebAudioSourceProvider.h"
 #include "third_party/WebKit/public/platform/WebContentDecryptionModuleResult.h"
 #include "third_party/WebKit/public/platform/WebMediaPlayer.h"
@@ -134,7 +135,9 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   // WebGL texImage2D, ImageBitmap, printing and capturing capabilities.
   void Paint(blink::WebCanvas* canvas,
              const blink::WebRect& rect,
-             cc::PaintFlags& flags) override;
+             cc::PaintFlags& flags,
+             int already_uploaded_id,
+             VideoFrameUploadMetadata* out_metadata) override;
 
   // True if the loaded media has a playable video/audio track.
   bool HasVideo() const override;
@@ -145,10 +148,6 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
       override;
   void SelectedVideoTrackChanged(
       blink::WebMediaPlayer::TrackId* selectedTrackId) override;
-
-  bool GetLastUploadedFrameInfo(unsigned* width,
-                                unsigned* height,
-                                double* timestamp) override;
 
   // Dimensions of the video.
   blink::WebSize NaturalSize() const override;
@@ -181,15 +180,23 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   size_t AudioDecodedByteCount() const override;
   size_t VideoDecodedByteCount() const override;
 
-  bool CopyVideoTextureToPlatformTexture(gpu::gles2::GLES2Interface* gl,
-                                         unsigned int target,
-                                         unsigned int texture,
-                                         unsigned internal_format,
-                                         unsigned format,
-                                         unsigned type,
-                                         int level,
-                                         bool premultiply_alpha,
-                                         bool flip_y) override;
+  bool CopyVideoTextureToPlatformTexture(
+      gpu::gles2::GLES2Interface* gl,
+      unsigned int target,
+      unsigned int texture,
+      unsigned internal_format,
+      unsigned format,
+      unsigned type,
+      int level,
+      bool premultiply_alpha,
+      bool flip_y,
+      int already_uploaded_id,
+      VideoFrameUploadMetadata* out_metadata) override;
+
+  static void ComputeFrameUploadMetadata(
+      VideoFrame* frame,
+      int already_uploaded_id,
+      VideoFrameUploadMetadata* out_metadata);
 
   blink::WebAudioSourceProvider* GetAudioSourceProvider() override;
 
@@ -565,6 +572,9 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   // SetPlaybackRate(0) is being executed.
   double playback_rate_;
 
+  // Counter that limits spam to |media_log_| of |playback_rate_| changes.
+  int num_playback_rate_logs_;
+
   // Set while paused. |paused_time_| is only valid when |paused_| is true.
   bool paused_;
   base::TimeDelta paused_time_;
@@ -615,7 +625,6 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   int delegate_id_;
 
   WebMediaPlayerParams::DeferLoadCB defer_load_cb_;
-  WebMediaPlayerParams::Context3DCB context_3d_cb_;
 
   // Members for notifying upstream clients about internal memory usage.  The
   // |adjust_allocated_memory_cb_| must only be called on |main_task_runner_|.
@@ -644,6 +653,7 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
 
   BufferedDataSourceHostImpl buffered_data_source_host_;
   UrlIndex* url_index_;
+  scoped_refptr<viz::ContextProvider> context_provider_;
 
   // Video rendering members.
   // The |compositor_| runs on the compositor thread, or if
@@ -652,7 +662,7 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   scoped_refptr<base::SingleThreadTaskRunner> vfc_task_runner_;
   std::unique_ptr<VideoFrameCompositor>
       compositor_;  // Deleted on |vfc_task_runner_|.
-  SkCanvasVideoRenderer skcanvas_video_renderer_;
+  PaintCanvasVideoRenderer video_renderer_;
 
   // The compositor layer for displaying the video content when using composited
   // playback.

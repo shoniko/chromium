@@ -138,6 +138,7 @@ void PPB_Graphics3D_Impl::ReturnFrontBuffer(const gpu::Mailbox& mailbox,
                                             const gpu::SyncToken& sync_token,
                                             bool is_lost) {
   command_buffer_->ReturnFrontBuffer(mailbox, sync_token, is_lost);
+  mailboxes_to_reuse_.push_back(mailbox);
 }
 
 bool PPB_Graphics3D_Impl::BindToInstance(bool bind) {
@@ -192,7 +193,7 @@ int32_t PPB_Graphics3D_Impl::DoSwapBuffers(const gpu::SyncToken& sync_token,
 #else
         GL_TEXTURE_2D,
 #endif
-        size, is_overlay_candidate, false);
+        size, is_overlay_candidate);
     taken_front_buffer_.SetZero();
     HostGlobals::Get()
         ->GetInstance(pp_instance())
@@ -225,7 +226,7 @@ bool PPB_Graphics3D_Impl::InitRaw(
 
   const WebPreferences& prefs = render_frame->GetWebkitPreferences();
 
-  // 3D access might be disabled or blacklisted.
+  // 3D access might be disabled.
   if (!prefs.pepper_3d_enabled)
     return false;
 
@@ -242,6 +243,12 @@ bool PPB_Graphics3D_Impl::InitRaw(
       render_thread->EstablishGpuChannelSync();
   if (!channel)
     return false;
+  // 3D access might be blacklisted.
+  if (channel->gpu_feature_info()
+          .status_values[gpu::GPU_FEATURE_TYPE_ACCELERATED_WEBGL] ==
+      gpu::kGpuFeatureStatusBlacklisted) {
+    return false;
+  }
 
   has_alpha_ = requested_attribs.alpha_size > 0;
 
@@ -258,11 +265,13 @@ bool PPB_Graphics3D_Impl::InitRaw(
     share_buffer = share_graphics->GetCommandBufferProxy();
   }
 
-  command_buffer_ = gpu::CommandBufferProxyImpl::Create(
-      std::move(channel), gpu::kNullSurfaceHandle, share_buffer,
-      kGpuStreamIdDefault, kGpuStreamPriorityDefault, attrib_helper,
-      GURL::EmptyGURL(), base::ThreadTaskRunnerHandle::Get());
-  if (!command_buffer_)
+  command_buffer_ = std::make_unique<gpu::CommandBufferProxyImpl>(
+      std::move(channel), kGpuStreamIdDefault,
+      base::ThreadTaskRunnerHandle::Get());
+  auto result = command_buffer_->Initialize(
+      gpu::kNullSurfaceHandle, share_buffer, kGpuStreamPriorityDefault,
+      attrib_helper, GURL::EmptyGURL());
+  if (result != gpu::ContextResult::kSuccess)
     return false;
 
   command_buffer_->SetGpuControlClient(this);

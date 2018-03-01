@@ -40,8 +40,6 @@ class MockAudioInputDeviceManagerListener
 
   MOCK_METHOD2(Opened, void(MediaStreamType, const int));
   MOCK_METHOD2(Closed, void(MediaStreamType, const int));
-  MOCK_METHOD2(DevicesEnumerated, void(MediaStreamType,
-                                       const StreamDeviceInfoArray&));
   MOCK_METHOD2(Aborted, void(MediaStreamType, int));
 
  private:
@@ -82,9 +80,11 @@ class MAYBE_AudioInputDeviceManagerTest : public testing::Test {
   void SetUp() override {
     Initialize();
 
-    audio_system_ = media::AudioSystemImpl::Create(audio_manager_.get());
+    audio_system_ =
+        std::make_unique<media::AudioSystemImpl>(audio_manager_.get());
     manager_ = new AudioInputDeviceManager(audio_system_.get());
-    audio_input_listener_.reset(new MockAudioInputDeviceManagerListener());
+    audio_input_listener_ =
+        std::make_unique<MockAudioInputDeviceManagerListener>();
     manager_->RegisterListener(audio_input_listener_.get());
 
     // Wait until we get the list.
@@ -285,7 +285,7 @@ TEST_F(MAYBE_AudioInputDeviceManagerTest, AccessInvalidSession) {
   WaitForOpenCompletion();
 
   // Access a non-opened device.
-  // This should fail and return an empty StreamDeviceInfo.
+  // This should fail and return an empty MediaStreamDevice.
   int invalid_session_id = session_id + 1;
   const MediaStreamDevice* device =
       manager_->GetOpenedDeviceById(invalid_session_id);
@@ -306,8 +306,8 @@ class AudioInputDeviceManagerNoDevicesTest
  protected:
   void Initialize() override {
     // MockAudioManager has no input and no output audio devices.
-    audio_manager_ = base::MakeUnique<media::MockAudioManager>(
-        base::MakeUnique<media::AudioThreadImpl>());
+    audio_manager_ = std::make_unique<media::MockAudioManager>(
+        std::make_unique<media::AudioThreadImpl>());
 
     // Devices to request from AudioInputDeviceManager.
     devices_.emplace_back(MEDIA_TAB_AUDIO_CAPTURE, "tab_capture",

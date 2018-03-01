@@ -50,13 +50,13 @@ class CORE_EXPORT ScriptSourceCode final {
   // Not sure if that matters.
   explicit ScriptSourceCode(ScriptResource*);
   ScriptSourceCode(
-      const String&,
+      const String& source,
       const KURL& = KURL(),
       const TextPosition& start_position = TextPosition::MinimumPosition());
   ScriptSourceCode(ScriptStreamer*, ScriptResource*);
 
   ~ScriptSourceCode();
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   // The null value represents a missing script, created by the nullary
   // constructor, and differs from the empty script.

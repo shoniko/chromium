@@ -16,6 +16,7 @@
 #include "base/guid.h"
 #include "base/json/json_writer.h"
 #include "base/json/string_escape.h"
+#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -68,6 +69,15 @@ Coordinator::Coordinator()
 }
 
 Coordinator::~Coordinator() {
+  if (!stop_and_flush_callback_.is_null())
+    stop_and_flush_callback_.Run(base::MakeUnique<base::DictionaryValue>());
+  if (!start_tracing_callback_.is_null())
+    base::ResetAndReturn(&start_tracing_callback_).Run(false);
+  if (!request_buffer_usage_callback_.is_null())
+    base::ResetAndReturn(&request_buffer_usage_callback_).Run(false, 0, 0);
+  if (!get_categories_callback_.is_null())
+    base::ResetAndReturn(&get_categories_callback_).Run(false, "");
+
   g_coordinator = nullptr;
 }
 
@@ -98,6 +108,7 @@ void Coordinator::StartTracing(const std::string& config,
 
 void Coordinator::SendStartTracingToAgent(
     AgentRegistry::AgentEntry* agent_entry) {
+  DCHECK(!agent_entry->is_tracing());
   agent_entry->AddDisconnectClosure(
       &kStartTracingClosureName,
       base::BindOnce(&Coordinator::OnTracingStarted, base::Unretained(this),
@@ -111,6 +122,7 @@ void Coordinator::SendStartTracingToAgent(
 
 void Coordinator::OnTracingStarted(AgentRegistry::AgentEntry* agent_entry,
                                    bool success) {
+  agent_entry->set_is_tracing(success);
   bool removed =
       agent_entry->RemoveDisconnectClosure(&kStartTracingClosureName);
   DCHECK(removed);
@@ -159,8 +171,10 @@ void Coordinator::StopAndFlushInternal() {
   }
 
   agent_registry_->ForAllAgents([this](AgentRegistry::AgentEntry* agent_entry) {
-    if (!agent_entry->supports_explicit_clock_sync())
+    if (!agent_entry->is_tracing() ||
+        !agent_entry->supports_explicit_clock_sync()) {
       return;
+    }
     const std::string sync_id = base::GenerateGUID();
     agent_entry->AddDisconnectClosure(
         &kRequestClockSyncMarkerClosureName,
@@ -206,14 +220,16 @@ void Coordinator::StopAndFlushAfterClockSync() {
   streaming_label_.clear();
 
   agent_registry_->ForAllAgents([this](AgentRegistry::AgentEntry* agent_entry) {
-    bool data_is_array = agent_entry->type() == mojom::TraceDataType::ARRAY;
+    if (!agent_entry->is_tracing())
+      return;
     mojom::RecorderPtr ptr;
     recorders_[agent_entry->label()].insert(base::MakeUnique<Recorder>(
-        MakeRequest(&ptr), data_is_array,
+        MakeRequest(&ptr), agent_entry->type(),
         base::BindRepeating(&Coordinator::OnRecorderDataChange,
                             base::Unretained(this), agent_entry->label()),
         background_task_runner_));
-    DCHECK(data_is_array || recorders_[agent_entry->label()].size() == 1);
+    DCHECK(agent_entry->type() != mojom::TraceDataType::STRING ||
+           recorders_[agent_entry->label()].size() == 1);
     agent_entry->agent()->StopAndFlush(std::move(ptr));
   });
 
@@ -274,7 +290,8 @@ void Coordinator::OnRecorderDataChange(const std::string& label) {
 bool Coordinator::StreamEventsForCurrentLabel() {
   DCHECK(background_task_runner_->RunsTasksInCurrentSequence());
   bool waiting_for_agents = false;
-  bool data_is_array = (*recorders_[streaming_label_].begin())->data_is_array();
+  mojom::TraceDataType data_type =
+      (*recorders_[streaming_label_].begin())->data_type();
   for (const auto& recorder : recorders_[streaming_label_]) {
     waiting_for_agents |= recorder->is_recording();
     if (!agent_label_.empty() && streaming_label_ != agent_label_)
@@ -284,27 +301,51 @@ bool Coordinator::StreamEventsForCurrentLabel() {
 
     std::string prefix;
     if (!json_field_name_written_ && agent_label_.empty()) {
-      prefix = stream_is_empty_ ? "{\"" : ",\"";
-      prefix += streaming_label_ + "\":" + (data_is_array ? "[" : "\"");
+      prefix = (stream_is_empty_ ? "{\"" : ",\"") + streaming_label_ + "\":";
+      switch (data_type) {
+        case mojom::TraceDataType::ARRAY:
+          prefix += "[";
+          break;
+        case mojom::TraceDataType::OBJECT:
+          prefix += "{";
+          break;
+        case mojom::TraceDataType::STRING:
+          prefix += "\"";
+          break;
+        default:
+          NOTREACHED();
+      }
       json_field_name_written_ = true;
     }
-    if (data_is_array) {
-      if (prefix.empty() && !stream_is_empty_)
-        prefix = ",";
-      mojo::common::BlockingCopyFromString(prefix + recorder->data(), stream_);
-    } else {
+    if (data_type == mojom::TraceDataType::STRING) {
       // Escape characters if needed for string data.
       std::string escaped;
       base::EscapeJSONString(recorder->data(), false /* put_in_quotes */,
                              &escaped);
       mojo::common::BlockingCopyFromString(prefix + escaped, stream_);
+    } else {
+      if (prefix.empty() && !stream_is_empty_)
+        prefix = ",";
+      mojo::common::BlockingCopyFromString(prefix + recorder->data(), stream_);
     }
     stream_is_empty_ = false;
     recorder->clear_data();
   }
   if (!waiting_for_agents) {
     if (json_field_name_written_) {
-      mojo::common::BlockingCopyFromString(data_is_array ? "]" : "\"", stream_);
+      switch (data_type) {
+        case mojom::TraceDataType::ARRAY:
+          mojo::common::BlockingCopyFromString("]", stream_);
+          break;
+        case mojom::TraceDataType::OBJECT:
+          mojo::common::BlockingCopyFromString("}", stream_);
+          break;
+        case mojom::TraceDataType::STRING:
+          mojo::common::BlockingCopyFromString("\"", stream_);
+          break;
+        default:
+          NOTREACHED();
+      }
       stream_is_empty_ = false;
     }
   }
@@ -336,7 +377,10 @@ void Coordinator::StreamMetadata() {
 void Coordinator::OnFlushDone() {
   recorders_.clear();
   stream_.reset();
-  stop_and_flush_callback_.Run(std::move(metadata_));
+  base::ResetAndReturn(&stop_and_flush_callback_).Run(std::move(metadata_));
+  agent_registry_->ForAllAgents([this](AgentRegistry::AgentEntry* agent_entry) {
+    agent_entry->set_is_tracing(false);
+  });
   is_tracing_ = false;
 }
 

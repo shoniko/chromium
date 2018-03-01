@@ -6,7 +6,7 @@
 #define BaseFetchContext_h
 
 #include "core/CoreExport.h"
-#include "core/frame/UseCounter.h"
+#include "core/frame/WebFeatureForward.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "platform/heap/Handle.h"
 #include "platform/loader/fetch/FetchContext.h"
@@ -44,7 +44,7 @@ class CORE_EXPORT BaseFetchContext : public FetchContext {
       SecurityViolationReportingPolicy,
       ResourceRequest::RedirectStatus) const override;
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
   virtual KURL GetSiteForCookies() const = 0;
   virtual void CountUsage(WebFeature) const = 0;
@@ -64,7 +64,8 @@ class CORE_EXPORT BaseFetchContext : public FetchContext {
   virtual bool ShouldBlockRequestByInspector(const KURL&) const = 0;
   virtual void DispatchDidBlockRequest(const ResourceRequest&,
                                        const FetchInitiatorInfo&,
-                                       ResourceRequestBlockedReason) const = 0;
+                                       ResourceRequestBlockedReason,
+                                       Resource::Type) const = 0;
   virtual bool ShouldBypassMainWorldCSP() const = 0;
   virtual bool IsSVGImageChromeClient() const = 0;
   virtual bool ShouldBlockFetchByMixedContentCheck(

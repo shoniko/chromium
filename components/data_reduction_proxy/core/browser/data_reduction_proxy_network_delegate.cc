@@ -318,12 +318,6 @@ void DataReductionProxyNetworkDelegate::OnBeforeURLRequestInternal(
     GURL* new_url) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  // |data_reduction_proxy_io_data_| can be NULL for Webview.
-  if (data_reduction_proxy_io_data_ &&
-      (request->load_flags() & net::LOAD_MAIN_FRAME_DEPRECATED)) {
-    data_reduction_proxy_io_data_->SetLoFiModeActiveOnMainFrame(false);
-  }
-
   if (data_reduction_proxy_io_data_ &&
       data_reduction_proxy_io_data_->lofi_decider() &&
       data_reduction_proxy_io_data_->IsEnabled()) {
@@ -455,13 +449,6 @@ void DataReductionProxyNetworkDelegate::OnBeforeSendHeadersInternal(
   }
 
   DCHECK(data);
-  if (data_reduction_proxy_io_data_ &&
-      (request->load_flags() & net::LOAD_MAIN_FRAME_DEPRECATED)) {
-    data_reduction_proxy_io_data_->SetLoFiModeActiveOnMainFrame(
-        lofi_decider ? lofi_decider->IsSlowPagePreviewRequested(*headers)
-                     : false);
-  }
-
   data->set_lofi_requested(
       lofi_decider ? lofi_decider->ShouldRecordLoFiUMA(*request) : false);
   MaybeAddBrotliToAcceptEncodingHeader(proxy_info, headers, *request);

@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task_scheduler/task_scheduler.h"
 #include "base/threading/thread.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "mojo/edk/embedder/incoming_broker_client_invitation.h"
@@ -21,7 +22,7 @@
 #if defined(OS_LINUX)
 #include "base/rand_util.h"
 #include "base/sys_info.h"
-#include "services/service_manager/public/cpp/standalone_service/linux_sandbox.h"
+#include "services/service_manager/public/cpp/standalone_service/sandbox_linux.h"
 #endif
 
 #if defined(OS_MACOSX)
@@ -32,7 +33,7 @@ namespace service_manager {
 namespace {
 
 #if defined(OS_LINUX)
-std::unique_ptr<LinuxSandbox> InitializeSandbox() {
+std::unique_ptr<SandboxLinux> InitializeSandbox() {
   using sandbox::syscall_broker::BrokerFilePermission;
   // Warm parts of base in the copy of base in the mojo runner.
   base::RandUint64();
@@ -46,7 +47,7 @@ std::unique_ptr<LinuxSandbox> InitializeSandbox() {
   std::vector<BrokerFilePermission> permissions;
   permissions.push_back(
       BrokerFilePermission::ReadWriteCreateUnlinkRecursive("/dev/shm/"));
-  std::unique_ptr<LinuxSandbox> sandbox(new LinuxSandbox(permissions));
+  std::unique_ptr<SandboxLinux> sandbox(new SandboxLinux(permissions));
   sandbox->Warmup();
   sandbox->EngageNamespaceSandbox();
   sandbox->EngageSeccompSandbox();
@@ -66,7 +67,7 @@ void RunStandaloneService(const StandaloneServiceCallback& callback) {
 #endif
 
 #if defined(OS_LINUX)
-  std::unique_ptr<LinuxSandbox> sandbox;
+  std::unique_ptr<SandboxLinux> sandbox;
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kEnableSandbox))
@@ -75,6 +76,7 @@ void RunStandaloneService(const StandaloneServiceCallback& callback) {
 
   mojo::edk::Init();
 
+  base::TaskScheduler::CreateAndStartWithDefaultParams("StandaloneService");
   base::Thread io_thread("io_thread");
   io_thread.StartWithOptions(
       base::Thread::Options(base::MessageLoop::TYPE_IO, 0));

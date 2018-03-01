@@ -42,8 +42,7 @@ public class BookmarkItemRow extends BookmarkRow implements LargeIconCallback {
         int iconColor = ApiCompatibilityUtils.getColor(
                 getResources(), R.color.default_favicon_background_color);
         mIconGenerator = new RoundedIconGenerator(mDisplayedIconSize, mDisplayedIconSize,
-                FeatureUtilities.isChromeHomeModernEnabled() ? mDisplayedIconSize / 2
-                                                             : mCornerRadius,
+                FeatureUtilities.isChromeHomeEnabled() ? mDisplayedIconSize / 2 : mCornerRadius,
                 iconColor, textSize);
     }
 
@@ -89,14 +88,13 @@ public class BookmarkItemRow extends BookmarkRow implements LargeIconCallback {
         if (icon == null) {
             mIconGenerator.setBackgroundColor(fallbackColor);
             icon = mIconGenerator.generateIconForUrl(mUrl);
-            mIconView.setImageDrawable(new BitmapDrawable(getResources(), icon));
+            setIconDrawable(new BitmapDrawable(getResources(), icon));
         } else {
             RoundedBitmapDrawable roundedIcon = RoundedBitmapDrawableFactory.create(
                     getResources(),
                     Bitmap.createScaledBitmap(icon, mDisplayedIconSize, mDisplayedIconSize, false));
             roundedIcon.setCornerRadius(mCornerRadius);
-            mIconView.setImageDrawable(roundedIcon);
+            setIconDrawable(roundedIcon);
         }
-        onIconDrawableChanged();
     }
 }

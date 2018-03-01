@@ -52,15 +52,26 @@ class PixelExpectations(GpuTestExpectations):
     self.Flaky('Pixel_OffscreenCanvas2DResizeOnWorker',
         ['win10', ('intel', 0x1912)], bug=690663)
 
-    self.Flaky('Pixel_OffscreenCanvasTransferBeforeStyleResize',
-              ['mac', 'linux', 'win', 'android'], bug=735228)
-    self.Flaky('Pixel_OffscreenCanvasTransferAfterStyleResize',
-              ['mac', 'linux', 'win', 'android'], bug=735171)
-
     self.Flaky('Pixel_OffscreenCanvasWebGLSoftwareCompositingWorker',
         ['mac', ('nvidia', 0xfe9), 'debug'], bug=751328)
 
-    self.Fail('Pixel_DirectComposition_Video_MP4', bug=760132)
-    self.Fail('Pixel_Video_MP4', bug=760132)
-    self.Fail('Pixel_DirectComposition_Video_VP9', bug=760132)
-    self.Fail('Pixel_Video_VP9', bug=760132)
+    # Failing on Nexus 5; haven't investigated why yet.
+    self.Skip('Pixel_WebGL2_BlitFramebuffer_Result_Displayed',
+        ['android', ('qualcomm', 'Adreno (TM) 330')], bug=773293)
+    self.Skip('Pixel_WebGL2_ClearBufferfv_Result_Displayed',
+        ['android', ('qualcomm', 'Adreno (TM) 330')], bug=773293)
+
+    # Failing on Nexus 5 and 5X
+    self.Fail('Pixel_CSS3DBlueBox',
+        ['android', ('qualcomm', 'Adreno (TM) 330')], bug=774354)
+    self.Fail('Pixel_CSS3DBlueBox',
+        ['android', ('qualcomm', 'Adreno (TM) 418')], bug=774354)
+
+    # Failing on Mac Intel HighSierra
+    self.Fail('Pixel_Video_MP4',
+        ['highsierra', ('intel', 0xa2e)], bug=774809)
+    self.Fail('Pixel_Video_VP9',
+        ['highsierra', ('intel', 0xa2e)], bug=774809)
+    self.Fail('Pixel_WebGLGreenTriangle_NonChromiumImage_NoAA_NoAlpha',
+        ['highsierra', ('intel', 0xa2e)], bug=774809)
+

@@ -68,9 +68,11 @@ class NET_EXPORT NetworkQualityEstimatorParams {
   // Returns the minimum number of requests in-flight to consider the network
   // fully utilized. A throughput observation is taken only when the network is
   // considered as fully utilized.
-  size_t throughput_min_requests_in_flight() const {
-    return throughput_min_requests_in_flight_;
-  }
+  size_t throughput_min_requests_in_flight() const;
+
+  // Tiny transfer sizes may give inaccurate throughput results.
+  // Minimum size of the transfer over which the throughput is computed.
+  int64_t GetThroughputMinTransferSizeBits() const;
 
   // Returns the weight multiplier per second, which represents the factor by
   // which the weight of an observation reduces every second.
@@ -173,12 +175,44 @@ class NET_EXPORT NetworkQualityEstimatorParams {
     return historical_time_threshold_;
   }
 
+  // Determines if the responses smaller than |kMinTransferSizeInBytes|
+  // or shorter than |kMinTransferSizeInBytes| can be used in estimating the
+  // network quality. Set to true only for tests.
+  bool use_small_responses() const;
+
+  // |use_small_responses| should only be true when testing.
+  // Allows the responses smaller than |kMinTransferSizeInBits| to be used for
+  // network quality estimation.
+  void SetUseSmallResponsesForTesting(bool use_small_responses);
+
+  // If an in-flight request does not receive any data for a duration longer
+  // than the value of this multiplier times the current HTTP RTT estimate, then
+  // the request should be considered as hanging. If this multiplier has a
+  // negative or a zero value, then none of the request should be considered as
+  // hanging.
+  int hanging_request_duration_http_rtt_multiplier() const {
+    return hanging_request_duration_http_rtt_multiplier_;
+  }
+
+  // An in-flight request may be marked as hanging only if it does not receive
+  // any data for at least this duration.
+  base::TimeDelta hanging_request_min_duration() const {
+    return hanging_request_min_duration_;
+  }
+
+  // Returns true if default values provided by the platform should be used for
+  // estimation. Set to false only for testing.
+  bool add_default_platform_observations() const {
+    return add_default_platform_observations_;
+  }
+
  private:
   // Map containing all field trial parameters related to
   // NetworkQualityEstimator field trial.
   const std::map<std::string, std::string> params_;
 
   const size_t throughput_min_requests_in_flight_;
+  const int throughput_min_transfer_size_kilobytes_;
   const double weight_multiplier_per_second_;
   const double weight_multiplier_per_signal_strength_level_;
   const double correlation_uma_logging_probability_;
@@ -190,6 +224,11 @@ class NET_EXPORT NetworkQualityEstimatorParams {
   const base::TimeDelta increase_in_transport_rtt_logging_interval_;
   const base::TimeDelta recent_time_threshold_;
   const base::TimeDelta historical_time_threshold_;
+  const int hanging_request_duration_http_rtt_multiplier_;
+  const base::TimeDelta hanging_request_min_duration_;
+  const bool add_default_platform_observations_;
+
+  bool use_small_responses_;
 
   EffectiveConnectionTypeAlgorithm effective_connection_type_algorithm_;
 

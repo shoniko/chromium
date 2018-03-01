@@ -106,6 +106,11 @@ class AuraLinuxApplication
     return nullptr;
   }
 
+  bool IsOffscreen() const override {
+    // TODO: need to implement.
+    return false;
+  }
+
   int GetIndexInParent() const override { return -1; }
 
   ui::AXPlatformNode* GetFromNodeID(int32_t id) override { return nullptr; }
@@ -155,7 +160,7 @@ class AuraLinuxApplication
 std::unique_ptr<NativeViewAccessibility> NativeViewAccessibility::Create(
     View* view) {
   AuraLinuxApplication::GetInstance()->RegisterWidget(view->GetWidget());
-  return base::MakeUnique<NativeViewAccessibilityAuraLinux>(view);
+  return std::make_unique<NativeViewAccessibilityAuraLinux>(view);
 }
 
 NativeViewAccessibilityAuraLinux::NativeViewAccessibilityAuraLinux(View* view)

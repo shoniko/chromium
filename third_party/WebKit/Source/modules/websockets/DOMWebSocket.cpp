@@ -152,7 +152,7 @@ void DOMWebSocket::EventQueue::ResumeTimerFired(TimerBase*) {
   DispatchQueuedEvents();
 }
 
-DEFINE_TRACE(DOMWebSocket::EventQueue) {
+void DOMWebSocket::EventQueue::Trace(blink::Visitor* visitor) {
   visitor->Trace(target_);
   visitor->Trace(events_);
 }
@@ -266,16 +266,16 @@ DOMWebSocket* DOMWebSocket::Create(ExecutionContext* context,
   DOMWebSocket* web_socket = new DOMWebSocket(context);
   web_socket->SuspendIfNeeded();
 
-  if (protocols.isNull()) {
+  if (protocols.IsNull()) {
     Vector<String> protocols_vector;
     web_socket->Connect(url, protocols_vector, exception_state);
-  } else if (protocols.isString()) {
+  } else if (protocols.IsString()) {
     Vector<String> protocols_vector;
-    protocols_vector.push_back(protocols.getAsString());
+    protocols_vector.push_back(protocols.GetAsString());
     web_socket->Connect(url, protocols_vector, exception_state);
   } else {
-    DCHECK(protocols.isStringSequence());
-    web_socket->Connect(url, protocols.getAsStringSequence(), exception_state);
+    DCHECK(protocols.IsStringSequence());
+    web_socket->Connect(url, protocols.GetAsStringSequence(), exception_state);
   }
 
   if (exception_state.HadException())
@@ -695,7 +695,7 @@ void DOMWebSocket::DidReceiveBinaryMessage(
   switch (binary_type_) {
     case kBinaryTypeBlob: {
       size_t size = binary_data->size();
-      RefPtr<RawData> raw_data = RawData::Create();
+      scoped_refptr<RawData> raw_data = RawData::Create();
       binary_data->swap(*raw_data->MutableData());
       std::unique_ptr<BlobData> blob_data = BlobData::Create();
       blob_data->AppendData(std::move(raw_data), 0, BlobDataItem::kToEndOfFile);
@@ -838,7 +838,7 @@ void DOMWebSocket::RecordReceiveMessageSizeHistogram(WebSocketReceiveType type,
   }
 }
 
-DEFINE_TRACE(DOMWebSocket) {
+void DOMWebSocket::Trace(blink::Visitor* visitor) {
   visitor->Trace(channel_);
   visitor->Trace(event_queue_);
   WebSocketChannelClient::Trace(visitor);

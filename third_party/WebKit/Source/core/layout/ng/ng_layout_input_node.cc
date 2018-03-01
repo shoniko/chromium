@@ -77,17 +77,30 @@ bool NGLayoutInputNode::IsReplaced() const {
   return box_->IsLayoutReplaced();
 }
 
+bool NGLayoutInputNode::ShouldBeConsideredAsReplaced() const {
+  return box_->ShouldBeConsideredAsReplaced();
+}
+
 bool NGLayoutInputNode::IsQuirkyContainer() const {
   return box_->GetDocument().InQuirksMode() &&
          (box_->IsBody() || box_->IsTableCell());
+}
+
+bool NGLayoutInputNode::IsAbsoluteContainer() const {
+  return box_->CanContainAbsolutePositionObjects();
+}
+
+bool NGLayoutInputNode::IsFixedContainer() const {
+  return box_->CanContainFixedPositionObjects();
 }
 
 bool NGLayoutInputNode::CreatesNewFormattingContext() const {
   return IsBlock() && box_->AvoidsFloats();
 }
 
-RefPtr<NGLayoutResult> NGLayoutInputNode::Layout(const NGConstraintSpace& space,
-                                                 NGBreakToken* break_token) {
+scoped_refptr<NGLayoutResult> NGLayoutInputNode::Layout(
+    const NGConstraintSpace& space,
+    NGBreakToken* break_token) {
   return IsInline() ? ToNGInlineNode(*this).Layout(space, break_token)
                     : ToNGBlockNode(*this).Layout(space, break_token);
 }

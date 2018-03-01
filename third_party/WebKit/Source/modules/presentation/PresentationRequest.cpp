@@ -181,7 +181,7 @@ ScriptPromise PresentationRequest::reconnect(ScriptState* script_state,
       PresentationController::FromContext(GetExecutionContext());
   DCHECK(controller);
 
-  PresentationConnection* existing_connection =
+  ControllerPresentationConnection* existing_connection =
       controller->FindExistingConnection(urls_, id);
   if (existing_connection) {
     client->ReconnectPresentation(
@@ -222,7 +222,7 @@ const Vector<KURL>& PresentationRequest::Urls() const {
   return urls_;
 }
 
-DEFINE_TRACE(PresentationRequest) {
+void PresentationRequest::Trace(blink::Visitor* visitor) {
   visitor->Trace(availability_property_);
   EventTargetWithInlineData::Trace(visitor);
   ContextClient::Trace(visitor);

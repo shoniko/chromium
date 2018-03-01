@@ -97,8 +97,7 @@ class WebRemotePlaybackClient;
 class WebRTCPeerConnectionHandler;
 class WebServiceWorkerProvider;
 class WebSpellCheckPanelHostClient;
-class WebTaskRunner;
-class WebURLLoader;
+struct WebRemoteScrollProperties;
 
 class CORE_EXPORT LocalFrameClient : public FrameClient {
  public:
@@ -181,6 +180,11 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
   virtual void DidDisplayContentWithCertificateErrors(const KURL&) = 0;
   // The frame ran content with certificate errors with the given URL.
   virtual void DidRunContentWithCertificateErrors(const KURL&) = 0;
+
+  // The frame loaded a resource with an otherwise-valid legacy Symantec
+  // certificate that is slated for distrust. Prints a console message (possibly
+  // overridden by the embedder) to warn about the certificate.
+  virtual void ReportLegacySymantecCert(const KURL&, Time) {}
 
   // Will be called when |PerformanceTiming| events are updated
   virtual void DidChangePerformanceTiming() {}
@@ -285,9 +289,7 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
   virtual void DispatchWillStartUsingPeerConnectionHandler(
       WebRTCPeerConnectionHandler*) {}
 
-  virtual bool AllowWebGL(bool enabled_per_settings) {
-    return enabled_per_settings;
-  }
+  virtual bool ShouldBlockWebGL() { return false; }
 
   // If an HTML document is being loaded, informs the embedder that the document
   // will have its <body> attached soon.
@@ -319,6 +321,9 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
   virtual WebEffectiveConnectionType GetEffectiveConnectionType() {
     return WebEffectiveConnectionType::kTypeUnknown;
   }
+  // Overrides the effective connection type for testing.
+  virtual void SetEffectiveConnectionTypeForTesting(
+      WebEffectiveConnectionType) {}
 
   // Returns whether or not Client Lo-Fi is enabled for the frame
   // (and so image requests may be replaced with a placeholder).
@@ -342,20 +347,25 @@ class CORE_EXPORT LocalFrameClient : public FrameClient {
 
   virtual void SetHasReceivedUserGesture(bool received_previously) {}
 
-  virtual void SetDevToolsFrameId(const String& devtools_frame_id) {}
-
   virtual void AbortClientNavigation() {}
 
   virtual WebSpellCheckPanelHostClient* SpellCheckPanelHostClient() const = 0;
 
   virtual TextCheckerClient& GetTextCheckerClient() const = 0;
 
-  virtual std::unique_ptr<WebURLLoader> CreateURLLoader(const ResourceRequest&,
-                                                        WebTaskRunner*) = 0;
+  virtual std::unique_ptr<WebURLLoaderFactory> CreateURLLoaderFactory() = 0;
 
   virtual void AnnotatedRegionsChanged() = 0;
 
   virtual void DidBlockFramebust(const KURL&) {}
+
+  virtual String GetInstrumentationToken() = 0;
+
+  // Called when the corresponding frame should be scrolled in a remote parent
+  // frame.
+  virtual void ScrollRectToVisibleInParentFrame(
+      const WebRect&,
+      const WebRemoteScrollProperties&) {}
 };
 
 }  // namespace blink

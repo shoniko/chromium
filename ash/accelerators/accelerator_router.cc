@@ -9,6 +9,7 @@
 #include "ash/wm/window_state.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
+#include "ui/app_list/presenter/app_list.h"
 #include "ui/aura/window.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/events/event.h"
@@ -21,6 +22,7 @@ namespace {
 // Returns true if |key_code| is a key usually handled directly by the shell.
 bool IsSystemKey(ui::KeyboardCode key_code) {
   switch (key_code) {
+    case ui::VKEY_ASSISTANT:
     case ui::VKEY_MEDIA_LAUNCH_APP2:  // Fullscreen button.
     case ui::VKEY_MEDIA_LAUNCH_APP1:  // Overview button.
     case ui::VKEY_BRIGHTNESS_DOWN:
@@ -129,7 +131,7 @@ bool AcceleratorRouter::ShouldProcessAcceleratorNow(
   if (accelerator_controller->IsPreferred(accelerator))
     return true;
 
-  return Shell::Get()->GetAppListTargetVisibility();
+  return Shell::Get()->app_list()->GetTargetVisibility();
 }
 
 }  // namespace ash

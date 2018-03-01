@@ -36,6 +36,7 @@
 #ifndef LayoutBlockFlow_h
 #define LayoutBlockFlow_h
 
+#include <memory>
 #include "core/CoreExport.h"
 #include "core/layout/FloatingObjects.h"
 #include "core/layout/LayoutBlock.h"
@@ -43,12 +44,13 @@
 #include "core/layout/line/LineBoxList.h"
 #include "core/layout/line/RootInlineBox.h"
 #include "core/layout/line/TrailingObjects.h"
-#include <memory>
+#include "core/layout/ng/ng_layout_result.h"
 
 namespace blink {
 
+template <class Run>
+class BidiRunList;
 class BlockChildrenLayoutInfo;
-class MarginInfo;
 class LayoutInline;
 class LineInfo;
 class LineLayoutState;
@@ -56,8 +58,10 @@ class LineWidth;
 class LayoutMultiColumnFlowThread;
 class LayoutMultiColumnSpannerPlaceholder;
 class LayoutRubyRun;
-template <class Run>
-class BidiRunList;
+class MarginInfo;
+class NGPaintFragment;
+
+struct NGInlineNodeData;
 
 enum IndentTextOrNot { kDoNotIndentText, kIndentText };
 
@@ -412,6 +416,28 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   // still working on LayoutNG.
   void AddOverflowFromFloats();
 
+  virtual NGInlineNodeData* GetNGInlineNodeData() const { return nullptr; }
+  virtual void ResetNGInlineNodeData() {}
+  virtual bool HasNGInlineNodeData() const { return false; }
+  virtual NGPaintFragment* PaintFragment() const { return nullptr; }
+  virtual scoped_refptr<NGLayoutResult> CachedLayoutResult(
+      const NGConstraintSpace&,
+      NGBreakToken*) const {
+    return nullptr;
+  }
+  virtual scoped_refptr<NGLayoutResult> CachedLayoutResultForTesting() {
+    return nullptr;
+  }
+  virtual void SetCachedLayoutResult(const NGConstraintSpace&,
+                                     NGBreakToken*,
+                                     scoped_refptr<NGLayoutResult>) {}
+  virtual void WillCollectInlines() {}
+  virtual void SetPaintFragment(scoped_refptr<const NGPhysicalFragment>) {}
+  virtual void ClearPaintFragment() {}
+  virtual const NGPhysicalBoxFragment* CurrentFragment() const {
+    return nullptr;
+  }
+
 #ifndef NDEBUG
   void ShowLineTreeAndMark(const InlineBox* = nullptr,
                            const char* = nullptr,
@@ -742,6 +768,10 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   static void UpdateAncestorShouldPaintFloatingObject(
       const LayoutBox& float_box);
 
+  bool ShouldTruncateOverflowingText() const;
+
+  int GetLayoutPassCountForTesting();
+
  protected:
   LayoutUnit MaxPositiveMarginBefore() const {
     return rare_data_
@@ -877,8 +907,6 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   bool IsSelfCollapsingBlock() const override;
   bool CheckIfIsSelfCollapsingBlock() const;
 
-  bool ShouldTruncateOverflowingText(const LayoutBlockFlow*) const;
-
  protected:
   std::unique_ptr<LayoutBlockFlowRareData> rare_data_;
   std::unique_ptr<FloatingObjects> floating_objects_;
@@ -970,12 +998,14 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
                                          LayoutUnit width,
                                          const AtomicString&,
                                          InlineBox*);
+  void ClearTruncationOnAtomicInlines(RootInlineBox*);
   void MarkLinesDirtyInBlockRange(LayoutUnit logical_top,
                                   LayoutUnit logical_bottom,
                                   RootInlineBox* highest = nullptr);
   // Positions new floats and also adjust all floats encountered on the line if
   // any of them have to move to the next page/column.
   void PositionDialog();
+  void IncrementLayoutPassCount();
 
   // END METHODS DEFINED IN LayoutBlockFlowLine
 };

@@ -7,6 +7,7 @@
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/password_manager/password_manager_test_base.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
@@ -30,7 +31,9 @@ namespace {
 
 class CredentialManagerBrowserTest : public PasswordManagerBrowserTestBase {
  public:
-  CredentialManagerBrowserTest() = default;
+  CredentialManagerBrowserTest() {
+    scoped_feature_list_.InitAndEnableFeature(features::kWebAuth);
+  }
 
   void SetUpOnMainThread() override {
     PasswordManagerBrowserTestBase::SetUpOnMainThread();
@@ -47,8 +50,6 @@ class CredentialManagerBrowserTest : public PasswordManagerBrowserTestBase {
     // To permit using webauthentication features.
     command_line->AppendSwitch(
         switches::kEnableExperimentalWebPlatformFeatures);
-    command_line->AppendSwitchASCII(switches::kEnableFeatures,
-                                    features::kWebAuth.name);
   }
 
   // Similarly to PasswordManagerBrowserTestBase::NavigateToFile this is a
@@ -189,7 +190,7 @@ class CredentialManagerBrowserTest : public PasswordManagerBrowserTestBase {
     //  1.) FrameHostMsg_DidStartProvisionalLoad
     //  2.) FrameLoader::PrepareForCommit
     //  2.1) Document::Shutdown (old Document)
-    //  3.) FrameHostMsg_DidCommitProvisionalLoad (new load)
+    //  3.) mojom::FrameHost::DidCommitProvisionalLoad (new load)
     //  ... loading ...
     //  4.) FrameHostMsg_DidStopLoading
     //  5.) content::WaitForLoadStop inside NavigateToURL returns
@@ -200,7 +201,7 @@ class CredentialManagerBrowserTest : public PasswordManagerBrowserTestBase {
     // associated interface to the ContentCredentialManager is retrieved, is
     // itself Channel-associated, any InterfaceRequest messages that may have
     // been issued before or during Step 2.1, will be guaranteed to arrive to
-    // the browser side before FrameHostMsg_DidCommitProvisionalLoad in Step 3.
+    // the browser side before DidCommitProvisionalLoad in Step 3.
     //
     // Hence it is sufficient to check that the Mojo connection is closed now.
     EXPECT_FALSE(client->has_binding_for_credential_manager());
@@ -212,7 +213,7 @@ class CredentialManagerBrowserTest : public PasswordManagerBrowserTestBase {
     // ordering with legacy IPC messages is preserved. Therefore, servicing the
     // store() called from the `unload` handler, triggered from
     // FrameLoader::PrepareForCommit, will be serviced before
-    // FrameHostMsg_DidCommitProvisionalLoad, thus before DidFinishNavigation,
+    // DidCommitProvisionalLoad, thus before DidFinishNavigation,
     ASSERT_TRUE(client->was_store_ever_called());
 
     BubbleObserver prompt_observer(WebContents());
@@ -286,6 +287,8 @@ class CredentialManagerBrowserTest : public PasswordManagerBrowserTestBase {
   }
 
  private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+
   DISALLOW_COPY_AND_ASSIGN(CredentialManagerBrowserTest);
 };
 

@@ -21,11 +21,13 @@ namespace tether {
 class ActiveHost;
 class BleConnectionManager;
 class DeviceIdTetherNetworkGuidMap;
+class DisconnectTetheringRequestSender;
 class HostScanCache;
 class NotificationPresenter;
 class TetherHostFetcher;
 class TetherHostResponseRecorder;
 class WifiHotspotConnector;
+class WifiHotspotDisconnector;
 
 // Connects to a tether network. When the user initiates a connection via the
 // UI, TetherConnectorImpl receives a callback from NetworkConnectionHandler and
@@ -45,7 +47,9 @@ class TetherConnectorImpl : public TetherConnector,
       DeviceIdTetherNetworkGuidMap* device_id_tether_network_guid_map,
       HostScanCache* host_scan_cache,
       NotificationPresenter* notification_presenter,
-      HostConnectionMetricsLogger* host_connection_metrics_logger);
+      HostConnectionMetricsLogger* host_connection_metrics_logger,
+      DisconnectTetheringRequestSender* disconnect_tethering_request_sender,
+      WifiHotspotDisconnector* wifi_hotspot_disconnector);
   ~TetherConnectorImpl() override;
 
   void ConnectToNetwork(
@@ -57,6 +61,8 @@ class TetherConnectorImpl : public TetherConnector,
   bool CancelConnectionAttempt(const std::string& tether_network_guid) override;
 
   // ConnectTetheringOperation::Observer:
+  void OnConnectTetheringRequestSent(
+      const cryptauth::RemoteDevice& remote_device) override;
   void OnSuccessfulConnectTetheringResponse(
       const cryptauth::RemoteDevice& remote_device,
       const std::string& ssid,
@@ -95,6 +101,8 @@ class TetherConnectorImpl : public TetherConnector,
   HostScanCache* host_scan_cache_;
   NotificationPresenter* notification_presenter_;
   HostConnectionMetricsLogger* host_connection_metrics_logger_;
+  DisconnectTetheringRequestSender* disconnect_tethering_request_sender_;
+  WifiHotspotDisconnector* wifi_hotspot_disconnector_;
 
   std::string device_id_pending_connection_;
   base::Closure success_callback_;

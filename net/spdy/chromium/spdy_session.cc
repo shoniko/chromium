@@ -10,14 +10,11 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/compiler_specific.h"
 #include "base/feature_list.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -43,6 +40,7 @@
 #include "net/log/net_log_source_type.h"
 #include "net/log/net_log_with_source.h"
 #include "net/proxy/proxy_server.h"
+#include "net/quic/chromium/quic_http_utils.h"
 #include "net/socket/socket.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/spdy/chromium/header_coalescer.h"
@@ -75,6 +73,9 @@ const uint32_t kDefaultInitialHeaderTableSize = 4096;
 const uint32_t kDefaultInitialEnablePush = 1;
 const uint32_t kDefaultInitialInitialWindowSize = 65535;
 const uint32_t kDefaultInitialMaxFrameSize = 16384;
+
+// The maximum size of header list that the server is allowed to send.
+const uint32_t kSpdyMaxHeaderListSize = 256 * 1024;
 
 bool IsSpdySettingAtDefaultInitialValue(SpdySettingsIds setting_id,
                                         uint32_t value) {
@@ -638,29 +639,26 @@ SpdySession::UnclaimedPushedStreamContainer::erase(const_iterator it) {
   DCHECK(it != end());
   // Only allow cross-origin push for secure resources.
   if (it->first.SchemeIsCryptographic()) {
-    spdy_session_->pool_->UnregisterUnclaimedPushedStream(it->first,
-                                                          spdy_session_);
+    spdy_session_->pool_->push_promise_index()->UnregisterUnclaimedPushedStream(
+        it->first, spdy_session_);
   }
   return streams_.erase(it);
 }
 
-SpdySession::UnclaimedPushedStreamContainer::iterator
-SpdySession::UnclaimedPushedStreamContainer::insert(
-    const_iterator position,
+bool SpdySession::UnclaimedPushedStreamContainer::insert(
     const GURL& url,
     SpdyStreamId stream_id,
     const base::TimeTicks& creation_time) {
   DCHECK(spdy_session_->pool_);
   // Only allow cross-origin push for https resources.
   if (url.SchemeIsCryptographic()) {
-    spdy_session_->pool_->RegisterUnclaimedPushedStream(
+    spdy_session_->pool_->push_promise_index()->RegisterUnclaimedPushedStream(
         url, spdy_session_->GetWeakPtr());
   }
-  return streams_.insert(
-      position,
-      std::make_pair(
-          url, SpdySession::UnclaimedPushedStreamContainer::PushedStreamInfo(
-                   stream_id, creation_time)));
+  auto result = streams_.insert(std::make_pair(
+      url, SpdySession::UnclaimedPushedStreamContainer::PushedStreamInfo(
+               stream_id, creation_time)));
+  return result.second;
 }
 
 size_t SpdySession::UnclaimedPushedStreamContainer::EstimateMemoryUsage()
@@ -705,32 +703,38 @@ bool SpdySession::CanPool(TransportSecurityState* transport_security_state,
   }
 
   // As with CheckPublicKeyPins above, disable Expect-CT reports.
-  if (transport_security_state->CheckCTRequirements(
-          HostPortPair(new_hostname, 0), ssl_info.is_issued_by_known_root,
-          ssl_info.public_key_hashes, ssl_info.cert.get(),
-          ssl_info.unverified_cert.get(),
-          ssl_info.signed_certificate_timestamps,
-          TransportSecurityState::DISABLE_EXPECT_CT_REPORTS,
-          ssl_info.ct_cert_policy_compliance) !=
-      TransportSecurityState::CT_REQUIREMENTS_MET) {
-    return false;
+  switch (transport_security_state->CheckCTRequirements(
+      HostPortPair(new_hostname, 0), ssl_info.is_issued_by_known_root,
+      ssl_info.public_key_hashes, ssl_info.cert.get(),
+      ssl_info.unverified_cert.get(), ssl_info.signed_certificate_timestamps,
+      TransportSecurityState::DISABLE_EXPECT_CT_REPORTS,
+      ssl_info.ct_cert_policy_compliance)) {
+    case TransportSecurityState::CT_REQUIREMENTS_NOT_MET:
+      return false;
+    case TransportSecurityState::CT_REQUIREMENTS_MET:
+    case TransportSecurityState::CT_NOT_REQUIRED:
+      // Intentional fallthrough; this case is just here to make sure that all
+      // possible values of CheckCTRequirements() are handled.
+      break;
   }
 
   return true;
 }
 
-SpdySession::SpdySession(const SpdySessionKey& spdy_session_key,
-                         HttpServerProperties* http_server_properties,
-                         TransportSecurityState* transport_security_state,
-                         const QuicVersionVector& quic_supported_versions,
-                         bool enable_sending_initial_data,
-                         bool enable_ping_based_connection_checking,
-                         size_t session_max_recv_window_size,
-                         const SettingsMap& initial_settings,
-                         TimeFunc time_func,
-                         ServerPushDelegate* push_delegate,
-                         ProxyDelegate* proxy_delegate,
-                         NetLog* net_log)
+SpdySession::SpdySession(
+    const SpdySessionKey& spdy_session_key,
+    HttpServerProperties* http_server_properties,
+    TransportSecurityState* transport_security_state,
+    const QuicTransportVersionVector& quic_supported_versions,
+    bool enable_sending_initial_data,
+    bool enable_ping_based_connection_checking,
+    bool support_ietf_format_quic_altsvc,
+    size_t session_max_recv_window_size,
+    const SettingsMap& initial_settings,
+    TimeFunc time_func,
+    ServerPushDelegate* push_delegate,
+    ProxyDelegate* proxy_delegate,
+    NetLog* net_log)
     : in_io_loop_(false),
       spdy_session_key_(spdy_session_key),
       pool_(NULL),
@@ -777,6 +781,7 @@ SpdySession::SpdySession(const SpdySessionKey& spdy_session_key,
       enable_sending_initial_data_(enable_sending_initial_data),
       enable_ping_based_connection_checking_(
           enable_ping_based_connection_checking),
+      support_ietf_format_quic_altsvc_(support_ietf_format_quic_altsvc),
       connection_at_risk_of_loss_time_(
           base::TimeDelta::FromSeconds(kDefaultConnectionAtRiskOfLossSeconds)),
       hung_interval_(base::TimeDelta::FromSeconds(kHungIntervalSeconds)),
@@ -793,7 +798,6 @@ SpdySession::SpdySession(const SpdySessionKey& spdy_session_key,
   DCHECK(base::ContainsKey(initial_settings_, SETTINGS_HEADER_TABLE_SIZE));
   DCHECK(base::ContainsKey(initial_settings_, SETTINGS_MAX_CONCURRENT_STREAMS));
   DCHECK(base::ContainsKey(initial_settings_, SETTINGS_INITIAL_WINDOW_SIZE));
-  DCHECK(base::ContainsKey(initial_settings_, SETTINGS_MAX_HEADER_LIST_SIZE));
 
   // TODO(mbelshe): consider randomization of the stream_hi_water_mark.
 }
@@ -860,8 +864,7 @@ void SpdySession::CancelPush(const GURL& url) {
   SpdyStreamId stream_id = unclaimed_it->second.stream_id;
 
   if (active_streams_.find(stream_id) == active_streams_.end()) {
-    ResetStream(stream_id, ERROR_CODE_CANCEL,
-                "Cancelled push stream with url: " + url.spec());
+    ResetStream(stream_id, ERROR_CODE_CANCEL, "Cancelled push stream.");
   }
   unclaimed_pushed_streams_.erase(unclaimed_it);
 }
@@ -884,8 +887,12 @@ void SpdySession::InitializeWithSocket(
   session_send_window_size_ = kDefaultInitialWindowSize;
   session_recv_window_size_ = kDefaultInitialWindowSize;
 
-  buffered_spdy_framer_ = std::make_unique<BufferedSpdyFramer>(
-      initial_settings_.find(SETTINGS_MAX_HEADER_LIST_SIZE)->second, net_log_);
+  SettingsMap::const_iterator it =
+      initial_settings_.find(SETTINGS_MAX_HEADER_LIST_SIZE);
+  uint32_t spdy_max_header_list_size =
+      (it == initial_settings_.end()) ? kSpdyMaxHeaderListSize : it->second;
+  buffered_spdy_framer_ =
+      std::make_unique<BufferedSpdyFramer>(spdy_max_header_list_size, net_log_);
   buffered_spdy_framer_->set_visitor(this);
   buffered_spdy_framer_->set_debug_visitor(this);
   buffered_spdy_framer_->UpdateHeaderDecoderTableSize(max_header_table_size_);
@@ -1566,10 +1573,9 @@ void SpdySession::TryCreatePushStream(SpdyStreamId stream_id,
   ActiveStreamMap::iterator associated_it =
       active_streams_.find(associated_stream_id);
   if (associated_it == active_streams_.end()) {
-    EnqueueResetStreamFrame(
-        stream_id, request_priority, ERROR_CODE_STREAM_CLOSED,
-        SpdyStringPrintf("Received push for inactive associated stream %d",
-                         associated_stream_id));
+    EnqueueResetStreamFrame(stream_id, request_priority,
+                            ERROR_CODE_STREAM_CLOSED,
+                            "Inactive associated stream.");
     return;
   }
 
@@ -1585,56 +1591,44 @@ void SpdySession::TryCreatePushStream(SpdyStreamId stream_id,
       if (gurl.SchemeIs("https")) {
         EnqueueResetStreamFrame(
             stream_id, request_priority, ERROR_CODE_REFUSED_STREAM,
-            SpdyStringPrintf("Rejected push of cross origin HTTPS content %d "
-                             "from trusted proxy",
-                             associated_stream_id));
+            "Cross origin HTTPS content from trusted proxy.");
         return;
       }
     } else {
       if (!gurl.SchemeIs("https") || !associated_url.SchemeIs("https")) {
         EnqueueResetStreamFrame(
             stream_id, request_priority, ERROR_CODE_REFUSED_STREAM,
-            SpdyStringPrintf("Rejected cross origin pushed stream %d: "
-                             "both pushed URL and associated URL "
-                             "must have https scheme.",
-                             associated_stream_id));
+            "Both pushed URL and associated URL must have https scheme.");
         return;
       }
       SSLInfo ssl_info;
       CHECK(GetSSLInfo(&ssl_info));
       if (!CanPool(transport_security_state_, ssl_info, associated_url.host(),
                    gurl.host())) {
-        EnqueueResetStreamFrame(
-            stream_id, request_priority, ERROR_CODE_REFUSED_STREAM,
-            SpdyStringPrintf("Rejected pushed stream %d because certificate "
-                             "does not match pushed URL.",
-                             associated_stream_id));
+        EnqueueResetStreamFrame(stream_id, request_priority,
+                                ERROR_CODE_REFUSED_STREAM,
+                                "Certificate does not match pushed URL.");
         return;
       }
     }
   }
 
-  // There should not be an existing pushed stream with the same path.
-  UnclaimedPushedStreamContainer::const_iterator pushed_it =
-      unclaimed_pushed_streams_.lower_bound(gurl);
-  if (pushed_it != unclaimed_pushed_streams_.end() &&
-      pushed_it->first == gurl) {
-    EnqueueResetStreamFrame(
-        stream_id, request_priority, ERROR_CODE_REFUSED_STREAM,
-        "Received duplicate pushed stream with url: " + gurl.spec());
+  // "Promised requests MUST be cacheable and MUST be safe [...]" (RFC7540
+  // Section 8.2).  Only cacheable safe request methods are GET and HEAD.
+  SpdyHeaderBlock::const_iterator it = headers.find(kHttp2MethodHeader);
+  if (it == headers.end() ||
+      (it->second.compare("GET") != 0 && it->second.compare("HEAD") != 0)) {
+    EnqueueResetStreamFrame(stream_id, request_priority,
+                            ERROR_CODE_REFUSED_STREAM,
+                            "Inadequate request method.");
     return;
   }
 
-  // "Promised requests MUST be cacheable and MUST be safe [...]" (RFC7540
-  // Section 8.2).  Only cacheable safe request methods are GET and HEAD.
-  SpdyHeaderBlock::const_iterator it = headers.find(":method");
-  if (it == headers.end() ||
-      (it->second.compare("GET") != 0 && it->second.compare("HEAD") != 0)) {
-    EnqueueResetStreamFrame(
-        stream_id, request_priority, ERROR_CODE_REFUSED_STREAM,
-        SpdyStringPrintf(
-            "Rejected push stream %d due to inadequate request method",
-            associated_stream_id));
+  // Insertion fails if there already is a pushed stream with the same path.
+  if (!unclaimed_pushed_streams_.insert(gurl, stream_id, time_func_())) {
+    EnqueueResetStreamFrame(stream_id, request_priority,
+                            ERROR_CODE_REFUSED_STREAM,
+                            "Duplicate pushed stream with url: " + gurl.spec());
     return;
   }
 
@@ -1657,10 +1651,6 @@ void SpdySession::TryCreatePushStream(SpdyStreamId stream_id,
   associated_it->second->AddRawReceivedBytes(last_compressed_frame_len_);
   last_compressed_frame_len_ = 0;
 
-  UnclaimedPushedStreamContainer::const_iterator inserted_pushed_it =
-      unclaimed_pushed_streams_.insert(pushed_it, gurl, stream_id,
-                                       time_func_());
-  DCHECK(inserted_pushed_it != pushed_it);
   DeleteExpiredPushedStreams();
 
   InsertActivatedStream(std::move(stream));
@@ -2013,10 +2003,6 @@ int SpdySession::DoWrite() {
       }
     }
 
-    // TODO(pkasting): Remove ScopedTracker below once crbug.com/457517 is
-    // fixed.
-    tracked_objects::ScopedTracker tracking_profile1(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION("457517 SpdySession::DoWrite1"));
     in_flight_write_ = producer->ProduceBuffer();
     if (!in_flight_write_) {
       NOTREACHED();
@@ -2033,9 +2019,6 @@ int SpdySession::DoWrite() {
   // Explicitly store in a scoped_refptr<IOBuffer> to avoid problems
   // with Socket implementations that don't store their IOBuffer
   // argument in a scoped_refptr<IOBuffer> (see crbug.com/232345).
-  // TODO(pkasting): Remove ScopedTracker below once crbug.com/457517 is fixed.
-  tracked_objects::ScopedTracker tracking_profile2(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION("457517 SpdySession::DoWrite2"));
   scoped_refptr<IOBuffer> write_io_buffer =
       in_flight_write_->GetIOBufferForRemainingData();
   return connection_->socket()->Write(
@@ -2196,14 +2179,26 @@ void SpdySession::HandleSetting(uint32_t id, uint32_t value) {
 }
 
 void SpdySession::UpdateStreamsSendWindowSize(int32_t delta_window_size) {
-  for (ActiveStreamMap::iterator it = active_streams_.begin();
-       it != active_streams_.end(); ++it) {
-    it->second->AdjustSendWindowSize(delta_window_size);
+  for (const auto& value : active_streams_) {
+    if (!value.second->AdjustSendWindowSize(delta_window_size)) {
+      DoDrainSession(
+          ERR_SPDY_FLOW_CONTROL_ERROR,
+          SpdyStringPrintf("New SETTINGS_INITIAL_WINDOW_SIZE value overflows "
+                           "flow control window of stream %d.",
+                           value.second->stream_id()));
+      return;
+    }
   }
 
-  for (CreatedStreamSet::const_iterator it = created_streams_.begin();
-       it != created_streams_.end(); it++) {
-    (*it)->AdjustSendWindowSize(delta_window_size);
+  for (auto* const stream : created_streams_) {
+    if (!stream->AdjustSendWindowSize(delta_window_size)) {
+      DoDrainSession(
+          ERR_SPDY_FLOW_CONTROL_ERROR,
+          SpdyStringPrintf("New SETTINGS_INITIAL_WINDOW_SIZE value overflows "
+                           "flow control window of stream %d.",
+                           stream->stream_id()));
+      return;
+    }
   }
 }
 
@@ -2497,10 +2492,7 @@ void SpdySession::DoDrainSession(Error err, const SpdyString& description) {
 
 void SpdySession::LogAbandonedStream(SpdyStream* stream, Error status) {
   DCHECK(stream);
-  SpdyString description =
-      SpdyStringPrintf("ABANDONED (stream_id=%d): ", stream->stream_id()) +
-      stream->url().spec();
-  stream->LogStreamError(status, description);
+  stream->LogStreamError(status, "Abandoned.");
   // We don't increment the streams abandoned counter here. If the
   // stream isn't active (i.e., it hasn't written anything to the wire
   // yet) then it's as if it never existed. If it is active, then
@@ -2563,7 +2555,7 @@ void SpdySession::DeleteExpiredPushedStreams() {
       continue;
     bytes_pushed_and_unclaimed_count_ += active_it->second->recv_bytes();
 
-    LogAbandonedActiveStream(active_it, ERR_INVALID_SPDY_STREAM);
+    LogAbandonedActiveStream(active_it, ERR_TIMED_OUT);
     // CloseActiveStreamIterator() will remove the stream from
     // |unclaimed_pushed_streams_|.
     ResetStreamIterator(active_it, ERROR_CODE_REFUSED_STREAM,
@@ -2656,21 +2648,17 @@ void SpdySession::OnRstStream(SpdyStreamId stream_id,
   } else if (error_code == ERROR_CODE_HTTP_1_1_REQUIRED) {
     // TODO(bnc): Record histogram with number of open streams capped at 50.
     if (net_log().IsCapturing()) {
-      it->second->LogStreamError(
-          ERR_HTTP_1_1_REQUIRED,
-          SpdyStringPrintf(
-              "Closing session because server reset stream with error %s.",
-              ErrorCodeToString(error_code)));
+      it->second->LogStreamError(ERR_HTTP_1_1_REQUIRED,
+                                 "Closing session because server reset stream "
+                                 "with ERR_HTTP_1_1_REQUIRED.");
     }
     DoDrainSession(ERR_HTTP_1_1_REQUIRED, "HTTP_1_1_REQUIRED for stream.");
   } else {
     RecordProtocolErrorHistogram(
         PROTOCOL_ERROR_RST_STREAM_FOR_NON_ACTIVE_STREAM);
     if (net_log().IsCapturing()) {
-      it->second->LogStreamError(
-          ERR_SPDY_PROTOCOL_ERROR,
-          SpdyStringPrintf("Server reset stream with error %s.",
-                           ErrorCodeToString(error_code)));
+      it->second->LogStreamError(ERR_SPDY_PROTOCOL_ERROR,
+                                 "Server reset stream.");
     }
     // TODO(mbelshe): Map from Spdy-protocol errors to something sensical.
     //                For now, it doesn't matter much - it is a protocol error.
@@ -2869,9 +2857,7 @@ void SpdySession::OnWindowUpdate(SpdyStreamId stream_id,
     if (delta_window_size < 1) {
       ResetStreamIterator(
           it, ERROR_CODE_FLOW_CONTROL_ERROR,
-          SpdyStringPrintf("Received WINDOW_UPDATE with an invalid "
-                           "delta_window_size %d",
-                           delta_window_size));
+          "Received WINDOW_UPDATE with an invalid delta_window_size.");
       return;
     }
 
@@ -2981,25 +2967,13 @@ void SpdySession::OnAltSvc(
     if (protocol == kProtoUnknown)
       continue;
 
-    // TODO(zhongyi): refactor the QUIC version filtering to a single function
-    // so that SpdySession::OnAltSvc and
-    // HttpStreamFactory::ProcessAlternativeServices
-    // could use the the same function.
     // Check if QUIC version is supported. Filter supported QUIC versions.
-    QuicVersionVector advertised_versions;
+    QuicTransportVersionVector advertised_versions;
     if (protocol == kProtoQUIC && !altsvc.version.empty()) {
-      bool match_found = false;
-      for (const QuicVersion& supported : quic_supported_versions_) {
-        for (const uint16_t& advertised : altsvc.version) {
-          if (supported == advertised) {
-            match_found = true;
-            advertised_versions.push_back(supported);
-          }
-        }
-      }
-      if (!match_found) {
+      advertised_versions = FilterSupportedAltSvcVersions(
+          altsvc, quic_supported_versions_, support_ietf_format_quic_altsvc_);
+      if (advertised_versions.empty())
         continue;
-      }
     }
 
     const AlternativeService alternative_service(protocol, altsvc.host,
@@ -3197,7 +3171,7 @@ void SpdySession::ResumeSendStalledStreams() {
   // have to worry about streams being closed, as well as ourselves
   // being closed.
 
-  std::deque<SpdyStream*> streams_to_requeue;
+  base::circular_deque<SpdyStream*> streams_to_requeue;
 
   while (!IsSendStalled()) {
     size_t old_size = 0;
@@ -3230,7 +3204,7 @@ void SpdySession::ResumeSendStalledStreams() {
 
 SpdyStreamId SpdySession::PopStreamToPossiblyResume() {
   for (int i = MAXIMUM_PRIORITY; i >= MINIMUM_PRIORITY; --i) {
-    std::deque<SpdyStreamId>* queue = &stream_send_unstall_queue_[i];
+    base::circular_deque<SpdyStreamId>* queue = &stream_send_unstall_queue_[i];
     if (!queue->empty()) {
       SpdyStreamId stream_id = queue->front();
       queue->pop_front();

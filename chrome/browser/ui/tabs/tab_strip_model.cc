@@ -8,6 +8,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
@@ -25,12 +26,14 @@
 #include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/browser/ui/web_contents_sizer.h"
 #include "chrome/common/url_constants.h"
+#include "components/feature_engagement/features.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 
-#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS) && !defined(OS_MACOSX)
+#if BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
 #include "chrome/browser/feature_engagement/new_tab/new_tab_tracker.h"
 #include "chrome/browser/feature_engagement/new_tab/new_tab_tracker_factory.h"
 #endif
@@ -186,13 +189,13 @@ class TabStripModel::WebContentsData : public content::WebContentsObserver {
   // navigation within that tab, the group relationship is lost). This
   // property can safely be used to implement features that depend on a
   // logical group of related tabs.
-  WebContents* group_;
+  WebContents* group_ = nullptr;
 
   // The owner models the same relationship as group, except it is more
   // easily discarded, e.g. when the user switches to a tab not part of the
   // same group. This property is used to determine what tab to select next
   // when one is closed.
-  WebContents* opener_;
+  WebContents* opener_ = nullptr;
 
   // True if our group should be reset the moment selection moves away from
   // this tab. This is the case for tabs opened in the foreground at the end
@@ -200,13 +203,13 @@ class TabStripModel::WebContentsData : public content::WebContentsObserver {
   // before selection moves elsewhere, their opener is selected. But if
   // selection shifts to _any_ tab (including their opener), the group
   // relationship is reset to avoid confusing close sequencing.
-  bool reset_group_on_select_;
+  bool reset_group_on_select_ = false;
 
   // Is the tab pinned?
-  bool pinned_;
+  bool pinned_ = false;
 
   // Is the tab interaction blocked by a modal dialog?
-  bool blocked_;
+  bool blocked_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsData);
 };
@@ -215,12 +218,7 @@ TabStripModel::WebContentsData::WebContentsData(TabStripModel* tab_strip_model,
                                                 WebContents* contents)
     : content::WebContentsObserver(contents),
       contents_(contents),
-      tab_strip_model_(tab_strip_model),
-      group_(nullptr),
-      opener_(nullptr),
-      reset_group_on_select_(false),
-      pinned_(false),
-      blocked_(false) {}
+      tab_strip_model_(tab_strip_model) {}
 
 void TabStripModel::WebContentsData::SetWebContents(WebContents* contents) {
   contents_ = contents;
@@ -243,8 +241,6 @@ void TabStripModel::WebContentsData::WebContentsDestroyed() {
 TabStripModel::TabStripModel(TabStripModelDelegate* delegate, Profile* profile)
     : delegate_(delegate),
       profile_(profile),
-      closing_all_(false),
-      in_notify_(false),
       weak_factory_(this) {
   DCHECK(delegate_);
   order_controller_.reset(new TabStripModelOrderController(this));
@@ -507,14 +503,11 @@ void TabStripModel::UpdateWebContentsStateAt(int index,
     observer.TabChangedAt(GetWebContentsAtImpl(index), index, change_type);
 }
 
-void TabStripModel::TabNeedsAttentionAt(int index) {
+void TabStripModel::SetTabNeedsAttentionAt(int index, bool attention) {
   DCHECK(ContainsIndex(index));
 
-  if (index == active_index())
-    return;
-
   for (auto& observer : observers_)
-    observer.TabNeedsAttentionAt(index);
+    observer.SetTabNeedsAttentionAt(index, attention);
 }
 
 void TabStripModel::CloseAllTabs() {
@@ -552,16 +545,11 @@ WebContents* TabStripModel::GetOpenerOfWebContentsAt(int index) {
 void TabStripModel::SetOpenerOfWebContentsAt(int index,
                                              WebContents* opener) {
   DCHECK(ContainsIndex(index));
-  if (opener) {
-    // The TabStripModel only maintains the references to openers that it itself
-    // owns; trying to set an opener to an external WebContents can result in
-    // the opener being used after its freed. See crbug.com/698681.
-    // TODO(devlin): This is a CHECK right now to track down any other cases
-    // where this can happen. If there aren't any, we might be able to downgrade
-    // this to a DCHECK.
-    CHECK_NE(kNoTab, GetIndexOfWebContents(opener))
-        << "Cannot set opener to a web contents not owned by this tab strip.";
-  }
+  // The TabStripModel only maintains the references to openers that it itself
+  // owns; trying to set an opener to an external WebContents can result in
+  // the opener being used after its freed. See crbug.com/698681.
+  DCHECK(!opener || GetIndexOfWebContents(opener) != kNoTab)
+      << "Cannot set opener to a web contents not owned by this tab strip.";
   contents_data_[index]->set_opener(opener);
 }
 
@@ -916,19 +904,21 @@ void TabStripModel::ExecuteContextMenuCommand(
     int context_index, ContextMenuCommand command_id) {
   DCHECK(command_id > CommandFirst && command_id < CommandLast);
   switch (command_id) {
-    case CommandNewTab:
+    case CommandNewTab: {
       base::RecordAction(UserMetricsAction("TabContextMenu_NewTab"));
       UMA_HISTOGRAM_ENUMERATION("Tab.NewTab",
                                 TabStripModel::NEW_TAB_CONTEXT_MENU,
                                 TabStripModel::NEW_TAB_ENUM_COUNT);
-#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS) && !defined(OS_MACOSX)
-      feature_engagement::NewTabTrackerFactory::GetInstance()
-          ->GetForProfile(profile_)
-          ->OnNewTabOpened();
-#endif
-
       delegate()->AddTabAt(GURL(), context_index + 1, true);
+#if BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
+      auto* new_tab_tracker =
+          feature_engagement::NewTabTrackerFactory::GetInstance()
+              ->GetForProfile(profile_);
+      new_tab_tracker->OnNewTabOpened();
+      new_tab_tracker->CloseBubble();
+#endif
       break;
+    }
 
     case CommandReload: {
       base::RecordAction(UserMetricsAction("TabContextMenu_Reload"));
@@ -1207,7 +1197,7 @@ bool TabStripModel::InternalCloseTabs(const std::vector<int>& indices,
       if (delegate_->ShouldRunUnloadListenerBeforeClosing(closing_contents))
         continue;
       content::RenderProcessHost* process =
-          closing_contents->GetRenderProcessHost();
+          closing_contents->GetMainFrame()->GetProcess();
       ++processes[process];
     }
 
@@ -1294,9 +1284,10 @@ void TabStripModel::NotifyIfActiveTabChanged(WebContents* old_contents,
                  : TabStripModelObserver::CHANGE_REASON_NONE;
     CHECK(!in_notify_);
     in_notify_ = true;
-    for (auto& observer : observers_)
+    for (auto& observer : observers_) {
       observer.ActiveTabChanged(old_contents, new_contents, active_index(),
                                 reason);
+    }
     in_notify_ = false;
   }
 }
@@ -1349,7 +1340,7 @@ void TabStripModel::MoveWebContentsAtImpl(int index,
   contents_data_.insert(contents_data_.begin() + to_position,
                         std::move(moved_data));
 
-  selection_model_.Move(index, to_position);
+  selection_model_.Move(index, to_position, 1);
   if (!selection_model_.IsSelected(to_position) && select_after_move) {
     // TODO(sky): why doesn't this code notify observers?
     selection_model_.SetSelectedIndex(to_position);

@@ -19,8 +19,8 @@
 #include "media/base/timestamp_constants.h"
 #include "media/capture/video/blob_utils.h"
 
+using Microsoft::WRL::ComPtr;
 using base::win::ScopedCoMem;
-using base::win::ScopedComPtr;
 using base::win::ScopedVariant;
 
 namespace media {
@@ -40,7 +40,7 @@ namespace media {
 bool PinMatchesCategory(IPin* pin, REFGUID category) {
   DCHECK(pin);
   bool found = false;
-  ScopedComPtr<IKsPropertySet> ks_property;
+  ComPtr<IKsPropertySet> ks_property;
   HRESULT hr = pin->QueryInterface(IID_PPV_ARGS(&ks_property));
   if (SUCCEEDED(hr)) {
     GUID pin_category;
@@ -104,8 +104,9 @@ mojom::RangePtr RetrieveControlRangeAndCurrent(
 // static
 void VideoCaptureDeviceWin::GetDeviceCapabilityList(
     const std::string& device_id,
+    bool query_detailed_frame_rates,
     CapabilityList* out_capability_list) {
-  base::win::ScopedComPtr<IBaseFilter> capture_filter;
+  ComPtr<IBaseFilter> capture_filter;
   HRESULT hr = VideoCaptureDeviceWin::GetDeviceFilter(
       device_id, capture_filter.GetAddressOf());
   if (!capture_filter.Get()) {
@@ -114,23 +115,24 @@ void VideoCaptureDeviceWin::GetDeviceCapabilityList(
     return;
   }
 
-  base::win::ScopedComPtr<IPin> output_capture_pin(
-      VideoCaptureDeviceWin::GetPin(capture_filter.Get(), PINDIR_OUTPUT,
-                                    PIN_CATEGORY_CAPTURE, GUID_NULL));
+  ComPtr<IPin> output_capture_pin(VideoCaptureDeviceWin::GetPin(
+      capture_filter.Get(), PINDIR_OUTPUT, PIN_CATEGORY_CAPTURE, GUID_NULL));
   if (!output_capture_pin.Get()) {
     DLOG(ERROR) << "Failed to get capture output pin";
     return;
   }
 
-  GetPinCapabilityList(capture_filter, output_capture_pin, out_capability_list);
+  GetPinCapabilityList(capture_filter, output_capture_pin,
+                       query_detailed_frame_rates, out_capability_list);
 }
 
 // static
 void VideoCaptureDeviceWin::GetPinCapabilityList(
-    base::win::ScopedComPtr<IBaseFilter> capture_filter,
-    base::win::ScopedComPtr<IPin> output_capture_pin,
+    ComPtr<IBaseFilter> capture_filter,
+    ComPtr<IPin> output_capture_pin,
+    bool query_detailed_frame_rates,
     CapabilityList* out_capability_list) {
-  ScopedComPtr<IAMStreamConfig> stream_config;
+  ComPtr<IAMStreamConfig> stream_config;
   HRESULT hr = output_capture_pin.CopyTo(stream_config.GetAddressOf());
   if (FAILED(hr)) {
     DLOG(ERROR) << "Failed to get IAMStreamConfig interface from "
@@ -140,7 +142,7 @@ void VideoCaptureDeviceWin::GetPinCapabilityList(
   }
 
   // Get interface used for getting the frame rate.
-  ScopedComPtr<IAMVideoControl> video_control;
+  ComPtr<IAMVideoControl> video_control;
   hr = capture_filter.CopyTo(video_control.GetAddressOf());
 
   int count = 0, size = 0;
@@ -175,10 +177,10 @@ void VideoCaptureDeviceWin::GetPinCapabilityList(
           reinterpret_cast<VIDEOINFOHEADER*>(media_type->pbFormat);
       format.frame_size.SetSize(h->bmiHeader.biWidth, h->bmiHeader.biHeight);
 
-      // Try to get a better |time_per_frame| from IAMVideoControl. If not, use
-      // the value from VIDEOINFOHEADER.
       std::vector<float> frame_rates;
-      if (video_control.Get()) {
+      if (query_detailed_frame_rates && video_control.Get()) {
+        // Try to get a better |time_per_frame| from IAMVideoControl. If not,
+        // use the value from VIDEOINFOHEADER.
         ScopedCoMem<LONGLONG> time_per_frame_list;
         LONG list_size = 0;
         const SIZE size = {format.frame_size.width(),
@@ -186,12 +188,12 @@ void VideoCaptureDeviceWin::GetPinCapabilityList(
         hr = video_control->GetFrameRateList(output_capture_pin.Get(), i, size,
                                              &list_size, &time_per_frame_list);
         // Sometimes |list_size| will be > 0, but time_per_frame_list will be
-        // NULL. Some drivers may return an HRESULT of S_FALSE which SUCCEEDED()
-        // translates into success, so explicitly check S_OK.
-        // See http://crbug.com/306237.
+        // NULL. Some drivers may return an HRESULT of S_FALSE which
+        // SUCCEEDED() translates into success, so explicitly check S_OK. See
+        // http://crbug.com/306237.
         if (hr == S_OK && list_size > 0 && time_per_frame_list) {
           for (int k = 0; k < list_size; k++) {
-            LONGLONG time_per_frame = *(time_per_frame_list + k);
+            LONGLONG time_per_frame = *(time_per_frame_list.get() + k);
             if (time_per_frame <= 0)
               continue;
             frame_rates.push_back(kSecondsToReferenceTime /
@@ -221,13 +223,13 @@ HRESULT VideoCaptureDeviceWin::GetDeviceFilter(const std::string& device_id,
                                                IBaseFilter** filter) {
   DCHECK(filter);
 
-  ScopedComPtr<ICreateDevEnum> dev_enum;
+  ComPtr<ICreateDevEnum> dev_enum;
   HRESULT hr = ::CoCreateInstance(CLSID_SystemDeviceEnum, NULL, CLSCTX_INPROC,
                                   IID_PPV_ARGS(&dev_enum));
   if (FAILED(hr))
     return hr;
 
-  ScopedComPtr<IEnumMoniker> enum_moniker;
+  ComPtr<IEnumMoniker> enum_moniker;
   hr = dev_enum->CreateClassEnumerator(CLSID_VideoInputDeviceCategory,
                                        enum_moniker.GetAddressOf(), 0);
   // CreateClassEnumerator returns S_FALSE on some Windows OS
@@ -235,11 +237,11 @@ HRESULT VideoCaptureDeviceWin::GetDeviceFilter(const std::string& device_id,
   if (hr != S_OK)
     return hr;
 
-  ScopedComPtr<IBaseFilter> capture_filter;
-  for (ScopedComPtr<IMoniker> moniker;
+  ComPtr<IBaseFilter> capture_filter;
+  for (ComPtr<IMoniker> moniker;
        enum_moniker->Next(1, moniker.GetAddressOf(), NULL) == S_OK;
        moniker.Reset()) {
-    ScopedComPtr<IPropertyBag> prop_bag;
+    ComPtr<IPropertyBag> prop_bag;
     hr = moniker->BindToStorage(0, 0, IID_PPV_ARGS(&prop_bag));
     if (FAILED(hr))
       continue;
@@ -278,12 +280,12 @@ HRESULT VideoCaptureDeviceWin::GetDeviceFilter(const std::string& device_id,
 // Finds an IPin on an IBaseFilter given the direction, Category and/or Major
 // Type. If either |category| or |major_type| are GUID_NULL, they are ignored.
 // static
-ScopedComPtr<IPin> VideoCaptureDeviceWin::GetPin(IBaseFilter* filter,
-                                                 PIN_DIRECTION pin_dir,
-                                                 REFGUID category,
-                                                 REFGUID major_type) {
-  ScopedComPtr<IPin> pin;
-  ScopedComPtr<IEnumPins> pin_enum;
+ComPtr<IPin> VideoCaptureDeviceWin::GetPin(IBaseFilter* filter,
+                                           PIN_DIRECTION pin_dir,
+                                           REFGUID category,
+                                           REFGUID major_type) {
+  ComPtr<IPin> pin;
+  ComPtr<IEnumPins> pin_enum;
   HRESULT hr = filter->EnumPins(pin_enum.GetAddressOf());
   if (pin_enum.Get() == NULL)
     return pin;
@@ -469,7 +471,7 @@ bool VideoCaptureDeviceWin::Init() {
   // require certain filters upstream from the WDM Video Capture filter, such as
   // a TV Tuner filter or an Analog Video Crossbar filter. We try using the more
   // prevalent MEDIATYPE_Interleaved first.
-  base::win::ScopedComPtr<IAMStreamConfig> stream_config;
+  ComPtr<IAMStreamConfig> stream_config;
 
   hr = capture_graph_builder_->FindInterface(
       &PIN_CATEGORY_CAPTURE, &MEDIATYPE_Interleaved, capture_filter_.Get(),
@@ -503,7 +505,7 @@ void VideoCaptureDeviceWin::AllocateAndStart(
       std::min(params.requested_format.frame_rate,
                found_capability.supported_format.frame_rate);
 
-  ScopedComPtr<IAMStreamConfig> stream_config;
+  ComPtr<IAMStreamConfig> stream_config;
   HRESULT hr = output_capture_pin_.CopyTo(stream_config.GetAddressOf());
   if (FAILED(hr)) {
     SetErrorState(FROM_HERE, "Can't get the Capture format settings", hr);
@@ -792,7 +794,7 @@ void VideoCaptureDeviceWin::SetPhotoOptions(
 }
 
 bool VideoCaptureDeviceWin::InitializeVideoAndCameraControls() {
-  base::win::ScopedComPtr<IKsTopologyInfo> info;
+  ComPtr<IKsTopologyInfo> info;
   HRESULT hr = capture_filter_.CopyTo(info.GetAddressOf());
   if (FAILED(hr)) {
     SetErrorState(FROM_HERE, "Failed to obtain the topology info.", hr);
@@ -860,7 +862,8 @@ void VideoCaptureDeviceWin::FrameReceived(const uint8_t* buffer,
 
 bool VideoCaptureDeviceWin::CreateCapabilityMap() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  GetPinCapabilityList(capture_filter_, output_capture_pin_, &capabilities_);
+  GetPinCapabilityList(capture_filter_, output_capture_pin_,
+                       true /* query_detailed_frame_rates */, &capabilities_);
   return !capabilities_.empty();
 }
 
@@ -872,7 +875,7 @@ void VideoCaptureDeviceWin::SetAntiFlickerInCaptureFilter(
       power_line_frequency != media::PowerLineFrequency::FREQUENCY_60HZ) {
     return;
   }
-  ScopedComPtr<IKsPropertySet> ks_propset;
+  ComPtr<IKsPropertySet> ks_propset;
   DWORD type_support = 0;
   HRESULT hr;
   if (SUCCEEDED(hr = capture_filter_.CopyTo(ks_propset.GetAddressOf())) &&
@@ -896,10 +899,9 @@ void VideoCaptureDeviceWin::SetAntiFlickerInCaptureFilter(
   }
 }
 
-void VideoCaptureDeviceWin::SetErrorState(
-    const tracked_objects::Location& from_here,
-    const std::string& reason,
-    HRESULT hr) {
+void VideoCaptureDeviceWin::SetErrorState(const base::Location& from_here,
+                                          const std::string& reason,
+                                          HRESULT hr) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DLOG_IF_FAILED_WITH_HRESULT(reason, hr);
   state_ = kError;

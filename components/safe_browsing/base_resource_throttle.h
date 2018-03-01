@@ -12,9 +12,9 @@
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "components/safe_browsing/base_ui_manager.h"
+#include "components/safe_browsing/db/database_manager.h"
+#include "components/safe_browsing/db/v4_protocol_manager_util.h"
 #include "components/safe_browsing/net_event_logger.h"
-#include "components/safe_browsing_db/database_manager.h"
-#include "components/safe_browsing_db/v4_protocol_manager_util.h"
 #include "components/security_interstitials/content/unsafe_resource.h"
 #include "content/public/browser/resource_throttle.h"
 #include "content/public/common/resource_type.h"
@@ -96,7 +96,9 @@ class BaseResourceThrottle
 
   // Called by OnBlockingPageComplete when proceed == false. This removes the
   // blocking page. This calls ResourceThrottle::Cancel() to show the previous
-  // page, but may be overridden in a subclass.
+  // page, but may be overridden in a subclass. The override in subclass should
+  // call this base implementation for cancellation, instead of calling
+  // ResourceThrottle::Cancel() directly.
   virtual void CancelResourceLoad();
 
   // Starts running |url| through the safe browsing check. Returns true if the

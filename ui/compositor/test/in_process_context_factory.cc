@@ -12,9 +12,6 @@
 #include "base/memory/ptr_util.h"
 #include "base/threading/thread.h"
 #include "cc/base/switches.h"
-#include "cc/output/output_surface_client.h"
-#include "cc/output/output_surface_frame.h"
-#include "cc/output/texture_mailbox_deleter.h"
 #include "cc/test/pixel_test_output_surface.h"
 #include "components/viz/common/frame_sinks/begin_frame_source.h"
 #include "components/viz/common/frame_sinks/delay_based_time_source.h"
@@ -23,6 +20,9 @@
 #include "components/viz/host/host_frame_sink_manager.h"
 #include "components/viz/service/display/display.h"
 #include "components/viz/service/display/display_scheduler.h"
+#include "components/viz/service/display/output_surface_client.h"
+#include "components/viz/service/display/output_surface_frame.h"
+#include "components/viz/service/display/texture_mailbox_deleter.h"
 #include "components/viz/service/frame_sinks/direct_layer_tree_frame_sink.h"
 #include "components/viz/service/frame_sinks/frame_sink_manager_impl.h"
 #include "gpu/command_buffer/client/context_support.h"
@@ -59,18 +59,18 @@ class FakeReflector : public Reflector {
 
 // An OutputSurface implementation that directly draws and swaps to an actual
 // GL surface.
-class DirectOutputSurface : public cc::OutputSurface {
+class DirectOutputSurface : public viz::OutputSurface {
  public:
   explicit DirectOutputSurface(
       scoped_refptr<InProcessContextProvider> context_provider)
-      : cc::OutputSurface(context_provider), weak_ptr_factory_(this) {
+      : viz::OutputSurface(context_provider), weak_ptr_factory_(this) {
     capabilities_.flipped_output_surface = true;
   }
 
   ~DirectOutputSurface() override {}
 
-  // cc::OutputSurface implementation.
-  void BindToClient(cc::OutputSurfaceClient* client) override {
+  // viz::OutputSurface implementation.
+  void BindToClient(viz::OutputSurfaceClient* client) override {
     client_ = client;
   }
   void EnsureBackbuffer() override {}
@@ -88,7 +88,7 @@ class DirectOutputSurface : public cc::OutputSurface {
         size.width(), size.height(), device_scale_factor,
         gl::GetGLColorSpace(color_space), has_alpha);
   }
-  void SwapBuffers(cc::OutputSurfaceFrame frame) override {
+  void SwapBuffers(viz::OutputSurfaceFrame frame) override {
     DCHECK(context_provider_.get());
     if (frame.sub_buffer_rect) {
       context_provider_->ContextSupport()->PartialSwapBuffers(
@@ -111,7 +111,8 @@ class DirectOutputSurface : public cc::OutputSurface {
     auto* gl = static_cast<InProcessContextProvider*>(context_provider());
     return gl->GetCopyTextureInternalFormat();
   }
-  cc::OverlayCandidateValidator* GetOverlayCandidateValidator() const override {
+  viz::OverlayCandidateValidator* GetOverlayCandidateValidator()
+      const override {
     return nullptr;
   }
   bool IsDisplayedAsOverlayPlane() const override { return false; }
@@ -126,7 +127,7 @@ class DirectOutputSurface : public cc::OutputSurface {
  private:
   void OnSwapBuffersComplete() { client_->DidReceiveSwapBuffersAck(); }
 
-  cc::OutputSurfaceClient* client_ = nullptr;
+  viz::OutputSurfaceClient* client_ = nullptr;
   base::WeakPtrFactory<DirectOutputSurface> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DirectOutputSurface);
@@ -145,6 +146,8 @@ InProcessContextFactory::InProcessContextFactory(
     viz::FrameSinkManagerImpl* frame_sink_manager)
     : frame_sink_id_allocator_(kDefaultClientId),
       use_test_surface_(true),
+      disable_vsync_(base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableVsyncForTests)),
       host_frame_sink_manager_(host_frame_sink_manager),
       frame_sink_manager_(frame_sink_manager) {
   DCHECK(host_frame_sink_manager);
@@ -200,8 +203,8 @@ void InProcessContextFactory::CreateLayerTreeFrameSink(
   if (!shared_worker_context_provider_ || shared_worker_context_provider_lost) {
     shared_worker_context_provider_ = InProcessContextProvider::CreateOffscreen(
         &gpu_memory_buffer_manager_, &image_factory_, nullptr);
-    if (shared_worker_context_provider_ &&
-        !shared_worker_context_provider_->BindToCurrentThread())
+    auto result = shared_worker_context_provider_->BindToCurrentThread();
+    if (result != gpu::ContextResult::kSuccess)
       shared_worker_context_provider_ = nullptr;
   }
 
@@ -226,29 +229,40 @@ void InProcessContextFactory::CreateLayerTreeFrameSink(
           &gpu_memory_buffer_manager_, &image_factory_, data->surface_handle,
           "UICompositor");
 
-  std::unique_ptr<cc::OutputSurface> display_output_surface;
+  std::unique_ptr<viz::OutputSurface> display_output_surface;
   if (use_test_surface_) {
     bool flipped_output_surface = false;
-    display_output_surface = base::MakeUnique<cc::PixelTestOutputSurface>(
+    display_output_surface = std::make_unique<cc::PixelTestOutputSurface>(
         context_provider, flipped_output_surface);
   } else {
     display_output_surface =
-        base::MakeUnique<DirectOutputSurface>(context_provider);
+        std::make_unique<DirectOutputSurface>(context_provider);
   }
 
-  std::unique_ptr<viz::DelayBasedBeginFrameSource> begin_frame_source(
-      new viz::DelayBasedBeginFrameSource(
-          base::MakeUnique<viz::DelayBasedTimeSource>(
-              compositor->task_runner().get())));
-  auto scheduler = base::MakeUnique<viz::DisplayScheduler>(
+  std::unique_ptr<viz::BeginFrameSource> begin_frame_source;
+  if (disable_vsync_) {
+    begin_frame_source = std::make_unique<viz::BackToBackBeginFrameSource>(
+        std::make_unique<viz::DelayBasedTimeSource>(
+            compositor->task_runner().get()));
+  } else {
+    auto time_source = std::make_unique<viz::DelayBasedTimeSource>(
+        compositor->task_runner().get());
+    time_source->SetTimebaseAndInterval(
+        base::TimeTicks(),
+        base::TimeDelta::FromMicroseconds(base::Time::kMicrosecondsPerSecond /
+                                          refresh_rate_));
+    begin_frame_source = std::make_unique<viz::DelayBasedBeginFrameSource>(
+        std::move(time_source));
+  }
+  auto scheduler = std::make_unique<viz::DisplayScheduler>(
       begin_frame_source.get(), compositor->task_runner().get(),
       display_output_surface->capabilities().max_frames_pending);
 
-  data->display = base::MakeUnique<viz::Display>(
+  data->display = std::make_unique<viz::Display>(
       &shared_bitmap_manager_, &gpu_memory_buffer_manager_, renderer_settings_,
       compositor->frame_sink_id(), std::move(display_output_surface),
       std::move(scheduler),
-      base::MakeUnique<cc::TextureMailboxDeleter>(
+      std::make_unique<viz::TextureMailboxDeleter>(
           compositor->task_runner().get()));
   GetFrameSinkManager()->RegisterBeginFrameSource(begin_frame_source.get(),
                                                   compositor->frame_sink_id());
@@ -257,7 +271,7 @@ void InProcessContextFactory::CreateLayerTreeFrameSink(
   data->begin_frame_source = std::move(begin_frame_source);
 
   auto* display = per_compositor_data_[compositor.get()]->display.get();
-  auto layer_tree_frame_sink = base::MakeUnique<viz::DirectLayerTreeFrameSink>(
+  auto layer_tree_frame_sink = std::make_unique<viz::DirectLayerTreeFrameSink>(
       compositor->frame_sink_id(), GetHostFrameSinkManager(),
       GetFrameSinkManager(), display, context_provider,
       shared_worker_context_provider_, &gpu_memory_buffer_manager_,
@@ -285,8 +299,8 @@ InProcessContextFactory::SharedMainThreadContextProvider() {
 
   shared_main_thread_contexts_ = InProcessContextProvider::CreateOffscreen(
       &gpu_memory_buffer_manager_, &image_factory_, nullptr);
-  if (shared_main_thread_contexts_.get() &&
-      !shared_main_thread_contexts_->BindToCurrentThread())
+  auto result = shared_main_thread_contexts_->BindToCurrentThread();
+  if (result != gpu::ContextResult::kSuccess)
     shared_main_thread_contexts_ = NULL;
 
   return shared_main_thread_contexts_;
@@ -365,7 +379,7 @@ InProcessContextFactory::CreatePerCompositorData(ui::Compositor* compositor) {
 
   gfx::AcceleratedWidget widget = compositor->widget();
 
-  auto data = base::MakeUnique<PerCompositorData>();
+  auto data = std::make_unique<PerCompositorData>();
   if (widget == gfx::kNullAcceleratedWidget) {
     data->surface_handle = gpu::kNullSurfaceHandle;
   } else {

@@ -5,13 +5,14 @@
 #include "modules/accessibility/InspectorAccessibilityAgent.h"
 
 #include <memory>
-#include "core/HTMLNames.h"
 #include "core/dom/AXObjectCache.h"
 #include "core/dom/DOMNodeIds.h"
 #include "core/dom/Element.h"
 #include "core/dom/ElementShadow.h"
+#include "core/dom/FlatTreeTraversal.h"
 #include "core/dom/Node.h"
 #include "core/dom/NodeList.h"
+#include "core/html_names.h"
 #include "core/inspector/IdentifiersFactory.h"
 #include "core/inspector/InspectorDOMAgent.h"
 #include "core/inspector/InspectorStyleSheet.h"
@@ -227,12 +228,18 @@ void FillWidgetProperties(AXObject& ax_object,
   }
 
   if (ax_object.IsRange()) {
-    properties.addItem(
-        CreateProperty(AXWidgetAttributesEnum::Valuemin,
-                       CreateValue(ax_object.MinValueForRange())));
-    properties.addItem(
-        CreateProperty(AXWidgetAttributesEnum::Valuemax,
-                       CreateValue(ax_object.MaxValueForRange())));
+    float min_value;
+    if (ax_object.MinValueForRange(&min_value)) {
+      properties.addItem(CreateProperty(AXWidgetAttributesEnum::Valuemin,
+                                        CreateValue(min_value)));
+    }
+
+    float max_value;
+    if (ax_object.MaxValueForRange(&max_value)) {
+      properties.addItem(CreateProperty(AXWidgetAttributesEnum::Valuemax,
+                                        CreateValue(max_value)));
+    }
+
     properties.addItem(
         CreateProperty(AXWidgetAttributesEnum::Valuetext,
                        CreateValue(ax_object.ValueDescription())));
@@ -242,7 +249,7 @@ void FillWidgetProperties(AXObject& ax_object,
 void FillWidgetStates(AXObject& ax_object,
                       protocol::Array<AXProperty>& properties) {
   AccessibilityRole role = ax_object.RoleValue();
-  const char* checked_prop_val = 0;
+  const char* checked_prop_val = nullptr;
   switch (ax_object.CheckedState()) {
     case kCheckedStateTrue:
       checked_prop_val = "true";
@@ -320,7 +327,7 @@ class SparseAttributeAXPropertyAdapter
                                    protocol::Array<AXProperty>& properties)
       : ax_object_(&ax_object), properties_(properties) {}
 
-  DEFINE_INLINE_TRACE() { visitor->Trace(ax_object_); }
+  void Trace(blink::Visitor* visitor) { visitor->Trace(ax_object_); }
 
  private:
   Member<AXObject> ax_object_;
@@ -646,7 +653,9 @@ void InspectorAccessibilityAgent::FillCoreProperties(
   }
   // Value.
   if (ax_object.SupportsRangeValue()) {
-    node_object.setValue(CreateValue(ax_object.ValueForRange()));
+    float value;
+    if (ax_object.ValueForRange(&value))
+      node_object.setValue(CreateValue(value));
   } else {
     String string_value = ax_object.StringValue();
     if (!string_value.IsEmpty())
@@ -677,10 +686,9 @@ void InspectorAccessibilityAgent::PopulateRelatives(
   std::unique_ptr<protocol::Array<AXNodeId>> child_ids =
       protocol::Array<AXNodeId>::create();
 
-  if (&ax_object != inspected_ax_object ||
-      (inspected_ax_object && !inspected_ax_object->AccessibilityIsIgnored())) {
+  if (!ax_object.AccessibilityIsIgnored())
     AddChildren(ax_object, inspected_ax_object, child_ids, nodes, cache);
-  }
+
   node_object.setChildIds(std::move(child_ids));
 }
 
@@ -705,7 +713,8 @@ void InspectorAccessibilityAgent::AddChildren(
     if (&ax_object != inspected_ax_object) {
       if (!inspected_ax_object)
         continue;
-      if (&ax_object != inspected_ax_object->ParentObjectUnignored())
+      if (&ax_object != inspected_ax_object->ParentObjectUnignored() &&
+          ax_object.GetNode())
         continue;
     }
 
@@ -717,7 +726,7 @@ void InspectorAccessibilityAgent::AddChildren(
   }
 }
 
-DEFINE_TRACE(InspectorAccessibilityAgent) {
+void InspectorAccessibilityAgent::Trace(blink::Visitor* visitor) {
   visitor->Trace(page_);
   visitor->Trace(dom_agent_);
   InspectorBaseAgent::Trace(visitor);

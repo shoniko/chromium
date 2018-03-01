@@ -30,6 +30,7 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "ipc/ipc_message.h"
+#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_object.mojom.h"
 #include "third_party/WebKit/public/web/WebConsoleMessage.h"
 #include "url/gurl.h"
 
@@ -135,7 +136,7 @@ void SetupOnUIThread(
           process_id, routing_id,
           ServiceWorkerDevToolsManager::ServiceWorkerIdentifier(
               context, weak_context, params->service_worker_version_id,
-              params->script_url, params->scope),
+              params->script_url, params->scope, params->devtools_worker_token),
           params->is_installed);
   params->worker_devtools_agent_route_id = routing_id;
   // Create DevToolsProxy here to ensure that the WorkerCreated() call is
@@ -337,11 +338,11 @@ class EmbeddedWorkerInstance::StartTask {
   }
 
   void Start(std::unique_ptr<EmbeddedWorkerStartParams> params,
-             const StatusCallback& callback) {
+             StatusCallback callback) {
     DCHECK_CURRENTLY_ON(BrowserThread::IO);
     DCHECK(instance_->context_);
     state_ = ProcessAllocationState::ALLOCATING;
-    start_callback_ = callback;
+    start_callback_ = std::move(callback);
     is_installed_ = params->is_installed;
 
     if (!GetContentClient()->browser()->IsBrowserStartupComplete())
@@ -372,9 +373,9 @@ class EmbeddedWorkerInstance::StartTask {
     TRACE_EVENT_NESTABLE_ASYNC_END1("ServiceWorker", "INITIALIZING_ON_RENDERER",
                                     task, "Status",
                                     ServiceWorkerStatusToString(status));
-    StatusCallback callback = task->start_callback_;
+    StatusCallback callback = std::move(task->start_callback_);
     task->start_callback_.Reset();
-    callback.Run(status);
+    std::move(callback).Run(status);
     // |task| may be destroyed.
   }
 
@@ -392,9 +393,9 @@ class EmbeddedWorkerInstance::StartTask {
       TRACE_EVENT_NESTABLE_ASYNC_END1("ServiceWorker", "ALLOCATING_PROCESS",
                                       this, "Error",
                                       ServiceWorkerStatusToString(status));
-      StatusCallback callback = start_callback_;
+      StatusCallback callback = std::move(start_callback_);
       start_callback_.Reset();
-      instance_->OnStartFailed(callback, status);
+      instance_->OnStartFailed(std::move(callback), status);
       // |this| may be destroyed.
       return;
     }
@@ -426,9 +427,9 @@ class EmbeddedWorkerInstance::StartTask {
 
     status = instance_->SendStartWorker(std::move(params));
     if (status != SERVICE_WORKER_OK) {
-      StatusCallback callback = start_callback_;
+      StatusCallback callback = std::move(start_callback_);
       start_callback_.Reset();
-      instance_->OnStartFailed(callback, status);
+      instance_->OnStartFailed(std::move(callback), status);
       // |this| may be destroyed.
     }
     TRACE_EVENT_NESTABLE_ASYNC_BEGIN0("ServiceWorker",
@@ -476,18 +477,20 @@ void EmbeddedWorkerInstance::Start(
     std::unique_ptr<EmbeddedWorkerStartParams> params,
     ProviderInfoGetter provider_info_getter,
     mojom::ServiceWorkerEventDispatcherRequest dispatcher_request,
+    mojom::ControllerServiceWorkerRequest controller_request,
     mojom::ServiceWorkerInstalledScriptsInfoPtr installed_scripts_info,
-    const StatusCallback& callback) {
+    StatusCallback callback) {
   restart_count_++;
   if (!context_) {
-    callback.Run(SERVICE_WORKER_ERROR_ABORT);
+    std::move(callback).Run(SERVICE_WORKER_ERROR_ABORT);
     // |this| may be destroyed by the callback.
     return;
   }
   DCHECK_EQ(EmbeddedWorkerStatus::STOPPED, status_);
 
   DCHECK(!params->pause_after_download || !params->is_installed);
-  DCHECK_NE(kInvalidServiceWorkerVersionId, params->service_worker_version_id);
+  DCHECK_NE(blink::mojom::kInvalidServiceWorkerVersionId,
+            params->service_worker_version_id);
 
   step_time_ = base::TimeTicks::Now();
   status_ = EmbeddedWorkerStatus::STARTING;
@@ -501,6 +504,7 @@ void EmbeddedWorkerInstance::Start(
   params->embedded_worker_id = embedded_worker_id_;
   params->worker_devtools_agent_route_id = MSG_ROUTING_NONE;
   params->wait_for_debugger = false;
+  params->devtools_worker_token = devtools_worker_token_;
   params->settings.v8_cache_options = GetV8CacheOptions();
 
   mojom::EmbeddedWorkerInstanceClientAssociatedRequest request =
@@ -508,11 +512,12 @@ void EmbeddedWorkerInstance::Start(
   client_.set_connection_error_handler(
       base::BindOnce(&EmbeddedWorkerInstance::Detach, base::Unretained(this)));
   pending_dispatcher_request_ = std::move(dispatcher_request);
+  pending_controller_request_ = std::move(controller_request);
   pending_installed_scripts_info_ = std::move(installed_scripts_info);
 
   inflight_start_task_.reset(
       new StartTask(this, params->script_url, std::move(request)));
-  inflight_start_task_->Start(std::move(params), callback);
+  inflight_start_task_->Start(std::move(params), std::move(callback));
 }
 
 void EmbeddedWorkerInstance::Stop() {
@@ -588,6 +593,7 @@ EmbeddedWorkerInstance::EmbeddedWorkerInstance(
       thread_id_(kInvalidEmbeddedWorkerThreadId),
       instance_host_binding_(this),
       devtools_attached_(false),
+      devtools_worker_token_(base::UnguessableToken::Create()),
       network_accessed_for_script_(false),
       weak_factory_(this) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
@@ -638,6 +644,7 @@ ServiceWorkerStatusCode EmbeddedWorkerInstance::SendStartWorker(
     return SERVICE_WORKER_ERROR_IPC_FAILED;
   }
   DCHECK(pending_dispatcher_request_.is_pending());
+  DCHECK(pending_controller_request_.is_pending());
 
   DCHECK(!instance_host_binding_.is_bound());
   mojom::EmbeddedWorkerInstanceHostAssociatedPtrInfo host_ptr_info;
@@ -653,6 +660,7 @@ ServiceWorkerStatusCode EmbeddedWorkerInstance::SendStartWorker(
   mojom::ServiceWorkerProviderInfoForStartWorkerPtr provider_info =
       std::move(provider_info_getter_).Run(process_id());
   client_->StartWorker(*params, std::move(pending_dispatcher_request_),
+                       std::move(pending_controller_request_),
                        std::move(pending_installed_scripts_info_),
                        std::move(host_ptr_info), std::move(provider_info),
                        std::move(content_settings_proxy_ptr_info));
@@ -907,12 +915,12 @@ void EmbeddedWorkerInstance::ReleaseProcess() {
   thread_id_ = kInvalidEmbeddedWorkerThreadId;
 }
 
-void EmbeddedWorkerInstance::OnStartFailed(const StatusCallback& callback,
+void EmbeddedWorkerInstance::OnStartFailed(StatusCallback callback,
                                            ServiceWorkerStatusCode status) {
   EmbeddedWorkerStatus old_status = status_;
   ReleaseProcess();
   base::WeakPtr<EmbeddedWorkerInstance> weak_this = weak_factory_.GetWeakPtr();
-  callback.Run(status);
+  std::move(callback).Run(status);
   if (weak_this && old_status != EmbeddedWorkerStatus::STOPPED) {
     for (auto& observer : weak_this->listener_list_)
       observer.OnStopped(old_status);

@@ -28,6 +28,7 @@
 
 #include "core/dom/events/EventDispatcher.h"
 #include "core/frame/FrameConsole.h"
+#include "core/frame/Intervention.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/UseCounter.h"
@@ -317,9 +318,8 @@ void TouchEvent::preventDefault() {
 
   if (!warning_message.IsEmpty() && view() && view()->IsLocalDOMWindow() &&
       view()->GetFrame()) {
-    ToLocalDOMWindow(view())->GetFrame()->Console().AddMessage(
-        ConsoleMessage::Create(message_source, kWarningMessageLevel,
-                               warning_message));
+    Intervention::GenerateReport(ToLocalDOMWindow(view())->GetFrame(),
+                                 warning_message);
   }
 
   if ((type() == EventTypeNames::touchstart ||
@@ -366,7 +366,7 @@ EventDispatchMediator* TouchEvent::CreateMediator() {
   return TouchEventDispatchMediator::Create(this);
 }
 
-DEFINE_TRACE(TouchEvent) {
+void TouchEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(touches_);
   visitor->Trace(target_touches_);
   visitor->Trace(changed_touches_);

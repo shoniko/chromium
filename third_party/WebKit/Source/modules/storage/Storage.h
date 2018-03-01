@@ -39,9 +39,7 @@ namespace blink {
 class ExceptionState;
 class LocalFrame;
 
-class Storage final : public GarbageCollected<Storage>,
-                      public ScriptWrappable,
-                      public ContextClient {
+class Storage final : public ScriptWrappable, public ContextClient {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(Storage);
 
@@ -56,11 +54,13 @@ class Storage final : public GarbageCollected<Storage>,
   String getItem(const String& key, ExceptionState& ec) const {
     return storage_area_->GetItem(key, ec, GetFrame());
   }
-  void setItem(const String& key, const String& value, ExceptionState& ec) {
+  bool setItem(const String& key, const String& value, ExceptionState& ec) {
     storage_area_->SetItem(key, value, ec, GetFrame());
+    return true;
   }
-  void removeItem(const String& key, ExceptionState& ec) {
+  DeleteResult removeItem(const String& key, ExceptionState& ec) {
     storage_area_->RemoveItem(key, ec, GetFrame());
+    return kDeleteSuccess;
   }
   void clear(ExceptionState& ec) { storage_area_->Clear(ec, GetFrame()); }
   bool Contains(const String& key, ExceptionState& ec) const {
@@ -69,15 +69,10 @@ class Storage final : public GarbageCollected<Storage>,
 
   StorageArea* Area() const { return storage_area_.Get(); }
 
-  String AnonymousNamedGetter(const AtomicString&, ExceptionState&);
-  bool AnonymousNamedSetter(const AtomicString& name,
-                            const AtomicString& value,
-                            ExceptionState&);
-  DeleteResult AnonymousNamedDeleter(const AtomicString&, ExceptionState&);
   void NamedPropertyEnumerator(Vector<String>&, ExceptionState&);
   bool NamedPropertyQuery(const AtomicString&, ExceptionState&);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   Storage(LocalFrame*, StorageArea*);

@@ -18,6 +18,7 @@
 #include "services/device/public/interfaces/sensor_provider.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/gfx/geometry/angle_conversions.h"
 
 using ::testing::_;
 using ::testing::Invoke;
@@ -193,7 +194,7 @@ class PlatformSensorAndProviderTestWin : public ::testing::Test {
     sensor_ = new NiceMock<MockISensor>();
     sensor_collection_ = new NiceMock<MockISensorCollection>();
     sensor_manager_ = new NiceMock<MockISensorManager>();
-    base::win::ScopedComPtr<ISensorManager> manager;
+    Microsoft::WRL::ComPtr<ISensorManager> manager;
     sensor_manager_->QueryInterface(IID_PPV_ARGS(&manager));
 
     // Overrides default ISensorManager with mocked interface.
@@ -202,7 +203,7 @@ class PlatformSensorAndProviderTestWin : public ::testing::Test {
   }
 
   void TearDown() override {
-    base::win::ScopedComPtr<ISensorManager> null_manager;
+    Microsoft::WRL::ComPtr<ISensorManager> null_manager;
     PlatformSensorProviderWin::GetInstance()->SetSensorManagerForTesting(
         null_manager);
   }
@@ -234,7 +235,8 @@ class PlatformSensorAndProviderTestWin : public ::testing::Test {
                       const PlatformSensorConfiguration& config) {
     run_loop_ = base::MakeUnique<base::RunLoop>();
     bool ret = sensor->StartListening(client, config);
-    run_loop_->Run();
+    if (ret)
+      run_loop_->Run();
     run_loop_ = nullptr;
     return ret;
   }
@@ -347,10 +349,10 @@ class PlatformSensorAndProviderTestWin : public ::testing::Test {
 
     // MockISensorDataReport implements IUnknown that provides ref counting.
     // IUnknown::QueryInterface increases refcount if an object implements
-    // requested interface. ScopedComPtr wraps received interface and destructs
+    // requested interface. ComPtr wraps received interface and destructs
     // it when there are not more references.
     auto* mock_report = new NiceMock<MockISensorDataReport>();
-    base::win::ScopedComPtr<ISensorDataReport> data_report;
+    Microsoft::WRL::ComPtr<ISensorDataReport> data_report;
     mock_report->QueryInterface(IID_PPV_ARGS(&data_report));
 
     EXPECT_CALL(*mock_report, GetTimestamp(_))
@@ -376,7 +378,7 @@ class PlatformSensorAndProviderTestWin : public ::testing::Test {
   scoped_refptr<MockISensorManager> sensor_manager_;
   scoped_refptr<MockISensorCollection> sensor_collection_;
   scoped_refptr<MockISensor> sensor_;
-  base::win::ScopedComPtr<ISensorEvents> sensor_events_;
+  Microsoft::WRL::ComPtr<ISensorEvents> sensor_events_;
   base::MessageLoop message_loop_;
   scoped_refptr<PlatformSensor> platform_sensor_;
   // Inner run loop used to wait for async sensor creation callback.
@@ -624,9 +626,9 @@ TEST_F(PlatformSensorAndProviderTestWin, CheckGyroscopeReadingConversion) {
   base::RunLoop().RunUntilIdle();
   SensorReadingSharedBuffer* buffer =
       static_cast<SensorReadingSharedBuffer*>(mapping.get());
-  EXPECT_THAT(buffer->reading.gyro.x, -x_ang_accel * kRadiansInDegrees);
-  EXPECT_THAT(buffer->reading.gyro.y, -y_ang_accel * kRadiansInDegrees);
-  EXPECT_THAT(buffer->reading.gyro.z, -z_ang_accel * kRadiansInDegrees);
+  EXPECT_THAT(buffer->reading.gyro.x, gfx::DegToRad(-x_ang_accel));
+  EXPECT_THAT(buffer->reading.gyro.y, gfx::DegToRad(-y_ang_accel));
+  EXPECT_THAT(buffer->reading.gyro.z, gfx::DegToRad(-z_ang_accel));
   EXPECT_TRUE(sensor->StopListening(client.get(), configuration));
 }
 

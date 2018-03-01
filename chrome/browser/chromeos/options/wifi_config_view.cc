@@ -907,7 +907,7 @@ void WifiConfigView::Cancel() {
 void WifiConfigView::Init(bool show_8021x) {
   views::LayoutProvider* provider = views::LayoutProvider::Get();
   SetBorder(views::CreateEmptyBorder(
-      provider->GetInsetsMetric(views::INSETS_DIALOG_CONTENTS)));
+      provider->GetDialogInsetsForContentType(views::TEXT, views::TEXT)));
 
   const NetworkState* network = GetNetworkState();
   if (network) {
@@ -1203,19 +1203,19 @@ void WifiConfigView::Init(bool show_8021x) {
             IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PASSPHRASE_HIDE));
     passphrase_visible_button_->SetImage(
         views::ImageButton::STATE_NORMAL,
-        *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+        *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
             IDR_SHOW_PASSWORD));
     passphrase_visible_button_->SetImage(
         views::ImageButton::STATE_HOVERED,
-        *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+        *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
             IDR_SHOW_PASSWORD_HOVER));
     passphrase_visible_button_->SetToggledImage(
         views::ImageButton::STATE_NORMAL,
-        ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+        ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
             IDR_HIDE_PASSWORD));
     passphrase_visible_button_->SetToggledImage(
         views::ImageButton::STATE_HOVERED,
-        ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+        ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
             IDR_HIDE_PASSWORD_HOVER));
     passphrase_visible_button_->SetImageAlignment(
         views::ImageButton::ALIGN_CENTER, views::ImageButton::ALIGN_MIDDLE);

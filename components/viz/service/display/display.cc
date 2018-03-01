@@ -10,24 +10,29 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/timer/elapsed_timer.h"
 #include "base/trace_event/trace_event.h"
+#include "cc/base/math_util.h"
+#include "cc/base/simple_enclosed_region.h"
 #include "cc/benchmarks/benchmark_instrumentation.h"
-#include "cc/output/compositor_frame.h"
-#include "cc/output/direct_renderer.h"
-#include "cc/output/output_surface.h"
-#include "cc/output/software_renderer.h"
-#include "cc/output/texture_mailbox_deleter.h"
 #include "components/viz/common/display/renderer_settings.h"
 #include "components/viz/common/frame_sinks/begin_frame_source.h"
+#include "components/viz/common/quads/compositor_frame.h"
+#include "components/viz/common/quads/draw_quad.h"
+#include "components/viz/common/quads/shared_quad_state.h"
+#include "components/viz/service/display/direct_renderer.h"
 #include "components/viz/service/display/display_client.h"
 #include "components/viz/service/display/display_scheduler.h"
 #include "components/viz/service/display/gl_renderer.h"
+#include "components/viz/service/display/output_surface.h"
 #include "components/viz/service/display/skia_renderer.h"
+#include "components/viz/service/display/software_renderer.h"
 #include "components/viz/service/display/surface_aggregator.h"
+#include "components/viz/service/display/texture_mailbox_deleter.h"
 #include "components/viz/service/surfaces/surface.h"
 #include "components/viz/service/surfaces/surface_manager.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/vulkan/features.h"
 #include "ui/gfx/buffer_types.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 
 #if BUILDFLAG(ENABLE_VULKAN)
 #include "cc/output/vulkan_renderer.h"
@@ -35,14 +40,13 @@
 
 namespace viz {
 
-Display::Display(
-    SharedBitmapManager* bitmap_manager,
-    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
-    const RendererSettings& settings,
-    const FrameSinkId& frame_sink_id,
-    std::unique_ptr<cc::OutputSurface> output_surface,
-    std::unique_ptr<DisplayScheduler> scheduler,
-    std::unique_ptr<cc::TextureMailboxDeleter> texture_mailbox_deleter)
+Display::Display(SharedBitmapManager* bitmap_manager,
+                 gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+                 const RendererSettings& settings,
+                 const FrameSinkId& frame_sink_id,
+                 std::unique_ptr<OutputSurface> output_surface,
+                 std::unique_ptr<DisplayScheduler> scheduler,
+                 std::unique_ptr<TextureMailboxDeleter> texture_mailbox_deleter)
     : bitmap_manager_(bitmap_manager),
       gpu_memory_buffer_manager_(gpu_memory_buffer_manager),
       settings_(settings),
@@ -181,12 +185,9 @@ void Display::SetOutputIsSecure(bool secure) {
 }
 
 void Display::InitializeRenderer() {
-  // Not relevant for display compositor since it's not delegated.
-  constexpr bool delegated_sync_points_required = false;
   resource_provider_ = base::MakeUnique<cc::DisplayResourceProvider>(
       output_surface_->context_provider(), bitmap_manager_,
-      gpu_memory_buffer_manager_, nullptr, delegated_sync_points_required,
-      settings_.enable_color_correct_rendering, settings_.resource_settings);
+      gpu_memory_buffer_manager_, settings_.resource_settings);
 
   if (output_surface_->context_provider()) {
     DCHECK(texture_mailbox_deleter_);
@@ -201,14 +202,13 @@ void Display::InitializeRenderer() {
   } else if (output_surface_->vulkan_context_provider()) {
 #if defined(ENABLE_VULKAN)
     DCHECK(texture_mailbox_deleter_);
-    renderer_ = base::MakeUnique<cc::VulkanRenderer>(
-        &settings_, output_surface_.get(), resource_provider_.get(),
-        texture_mailbox_deleter_.get(), settings_.highp_threshold_min);
+    renderer_ = base::MakeUnique<VulkanRenderer>(
+        &settings_, output_surface_.get(), resource_provider_.get());
 #else
     NOTREACHED();
 #endif
   } else {
-    auto renderer = base::MakeUnique<cc::SoftwareRenderer>(
+    auto renderer = base::MakeUnique<SoftwareRenderer>(
         &settings_, output_surface_.get(), resource_provider_.get());
     software_renderer_ = renderer.get();
     renderer_ = std::move(renderer);
@@ -256,7 +256,7 @@ bool Display::DrawAndSwap() {
   }
 
   base::ElapsedTimer aggregate_timer;
-  cc::CompositorFrame frame = aggregator_->Aggregate(current_surface_id_);
+  CompositorFrame frame = aggregator_->Aggregate(current_surface_id_);
   UMA_HISTOGRAM_COUNTS_1M("Compositing.SurfaceAggregator.AggregateUs",
                           aggregate_timer.Elapsed().InMicroseconds());
 
@@ -313,6 +313,14 @@ bool Display::DrawAndSwap() {
   client_->DisplayWillDrawAndSwap(should_draw, frame.render_pass_list);
 
   if (should_draw) {
+    if (settings_.enable_draw_occlusion) {
+      base::ElapsedTimer draw_occlusion_timer;
+      RemoveOverdrawQuads(&frame);
+      UMA_HISTOGRAM_COUNTS_1000(
+          "Compositing.Display.Draw.Occlusion.Calculation.Time",
+          draw_occlusion_timer.Elapsed().InMicroseconds());
+    }
+
     bool disable_image_filtering =
         frame.metadata.is_resourceless_software_draw_with_scroll_or_animation;
     if (software_renderer_) {
@@ -449,6 +457,82 @@ const SurfaceId& Display::CurrentSurfaceId() {
 void Display::ForceImmediateDrawAndSwapIfPossible() {
   if (scheduler_)
     scheduler_->ForceImmediateSwapIfPossible();
+}
+
+void Display::SetNeedsOneBeginFrame() {
+  if (scheduler_)
+    scheduler_->SetNeedsOneBeginFrame();
+}
+
+void Display::RemoveOverdrawQuads(CompositorFrame* frame) {
+  if (frame->render_pass_list.empty())
+    return;
+
+  const SharedQuadState* last_sqs = nullptr;
+  cc::SimpleEnclosedRegion occlusion_region;
+  bool current_sqs_intersects_occlusion = false;
+  for (const auto& pass : frame->render_pass_list) {
+    // TODO(yiyix): Add filter effects to draw occlusion calculation and perform
+    // draw occlusion on render pass.
+    if (!pass->filters.IsEmpty() || !pass->background_filters.IsEmpty())
+      continue;
+
+    // TODO(yiyix): Perform draw occlusion inside the render pass with
+    // transparent background.
+    if (pass != frame->render_pass_list.back())
+      continue;
+
+    for (auto quad = pass->quad_list.begin(); quad != pass->quad_list.end();) {
+      // RenderPassDrawQuad is a special type of DrawQuad where the visible_rect
+      // of shared quad state is not entirely covered by draw quads in it.
+      if (quad->material == ContentDrawQuadBase::Material::RENDER_PASS) {
+        ++quad;
+        continue;
+      }
+
+      if (!last_sqs)
+        last_sqs = quad->shared_quad_state;
+
+      gfx::Transform transform =
+          quad->shared_quad_state->quad_to_target_transform;
+
+      // TODO(yiyix): Find a rect interior to each transformed quad.
+      if (last_sqs != quad->shared_quad_state) {
+        if (last_sqs->opacity == 1 && last_sqs->are_contents_opaque &&
+            last_sqs->quad_to_target_transform.Preserves2dAxisAlignment()) {
+          gfx::Rect sqs_rect_in_target =
+              cc::MathUtil::MapEnclosedRectWith2dAxisAlignedTransform(
+                  last_sqs->quad_to_target_transform,
+                  last_sqs->visible_quad_layer_rect);
+
+          if (last_sqs->is_clipped)
+            sqs_rect_in_target.Intersect(last_sqs->clip_rect);
+
+          occlusion_region.Union(sqs_rect_in_target);
+        }
+        // If the visible_rect of the current shared quad state does not
+        // intersect with the occlusion rect, we can skip draw occlusion checks
+        // for quads in the current SharedQuadState.
+        last_sqs = quad->shared_quad_state;
+        current_sqs_intersects_occlusion =
+            occlusion_region.Intersects(cc::MathUtil::MapEnclosingClippedRect(
+                transform, last_sqs->visible_quad_layer_rect));
+      }
+
+      if (!current_sqs_intersects_occlusion) {
+        quad++;
+        continue;
+      }
+
+      // TODO(yiyix): Using profile tools to analyze bottleneck of this
+      // algorithm.
+      if (occlusion_region.Contains(cc::MathUtil::MapEnclosingClippedRect(
+              transform, quad->visible_rect)))
+        quad = pass->quad_list.EraseAndInvalidateAllPointers(quad);
+      else
+        quad++;
+    }
+  }
 }
 
 }  // namespace viz

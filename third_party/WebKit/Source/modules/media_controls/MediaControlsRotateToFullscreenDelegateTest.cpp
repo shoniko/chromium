@@ -4,7 +4,6 @@
 
 #include "modules/media_controls/MediaControlsRotateToFullscreenDelegate.h"
 
-#include "core/HTMLNames.h"
 #include "core/css/CSSStyleDeclaration.h"
 #include "core/dom/Document.h"
 #include "core/dom/UserGestureIndicator.h"
@@ -13,15 +12,17 @@
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
 #include "core/fullscreen/Fullscreen.h"
-#include "core/html/HTMLAudioElement.h"
-#include "core/html/HTMLVideoElement.h"
+#include "core/html/media/HTMLAudioElement.h"
+#include "core/html/media/HTMLVideoElement.h"
+#include "core/html_names.h"
 #include "core/loader/EmptyClients.h"
-#include "core/testing/DummyPageHolder.h"
+#include "core/testing/PageTestBase.h"
 #include "modules/device_orientation/DeviceOrientationController.h"
 #include "modules/device_orientation/DeviceOrientationData.h"
 #include "modules/media_controls/MediaControlsImpl.h"
 #include "modules/screen_orientation/ScreenOrientationControllerImpl.h"
 #include "platform/testing/EmptyWebMediaPlayer.h"
+#include "platform/testing/RuntimeEnabledFeaturesTestHelpers.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "platform/wtf/text/AtomicString.h"
 #include "public/platform/WebSize.h"
@@ -91,39 +92,31 @@ class StubLocalFrameClient : public EmptyLocalFrameClient {
 
 }  // anonymous namespace
 
-class MediaControlsRotateToFullscreenDelegateTest : public ::testing::Test {
+class MediaControlsRotateToFullscreenDelegateTest
+    : public PageTestBase,
+      private ScopedVideoFullscreenOrientationLockForTest,
+      private ScopedVideoRotateToFullscreenForTest {
+ public:
+  MediaControlsRotateToFullscreenDelegateTest()
+      : ScopedVideoFullscreenOrientationLockForTest(true),
+        ScopedVideoRotateToFullscreenForTest(true) {}
+
  protected:
   using SimpleOrientation =
       MediaControlsRotateToFullscreenDelegate::SimpleOrientation;
 
   void SetUp() override {
-    previous_video_fullscreen_orientation_lock_value_ =
-        RuntimeEnabledFeatures::VideoFullscreenOrientationLockEnabled();
-    previous_video_rotate_to_fullscreen_value_ =
-        RuntimeEnabledFeatures::VideoRotateToFullscreenEnabled();
-    RuntimeEnabledFeatures::SetVideoFullscreenOrientationLockEnabled(true);
-    RuntimeEnabledFeatures::SetVideoRotateToFullscreenEnabled(true);
-
     chrome_client_ = new MockChromeClient();
 
     Page::PageClients clients;
     FillWithEmptyClients(clients);
     clients.chrome_client = chrome_client_.Get();
 
-    page_holder_ = DummyPageHolder::Create(IntSize(800, 600), &clients,
-                                           StubLocalFrameClient::Create());
-
+    SetupPageWithClients(&clients, StubLocalFrameClient::Create());
     video_ = HTMLVideoElement::Create(GetDocument());
     GetVideo().setAttribute(controlsAttr, g_empty_atom);
     // Most tests should call GetDocument().body()->AppendChild(&GetVideo());
     // This is not done automatically, so that tests control timing of `Attach`.
-  }
-
-  void TearDown() override {
-    RuntimeEnabledFeatures::SetVideoFullscreenOrientationLockEnabled(
-        previous_video_fullscreen_orientation_lock_value_);
-    RuntimeEnabledFeatures::SetVideoRotateToFullscreenEnabled(
-        previous_video_rotate_to_fullscreen_value_);
   }
 
   static bool HasDelegate(const MediaControls& media_controls) {
@@ -156,7 +149,7 @@ class MediaControlsRotateToFullscreenDelegateTest : public ::testing::Test {
 
   void DisableControls() {
     // If scripts are not enabled, controls will always be shown.
-    page_holder_->GetFrame().GetSettings()->SetScriptEnabled(true);
+    GetFrame().GetSettings()->SetScriptEnabled(true);
 
     GetVideo().removeAttribute(controlsAttr);
   }
@@ -181,7 +174,6 @@ class MediaControlsRotateToFullscreenDelegateTest : public ::testing::Test {
 
   MockChromeClient& GetChromeClient() const { return *chrome_client_; }
   LocalDOMWindow& GetWindow() const { return *GetDocument().domWindow(); }
-  Document& GetDocument() const { return page_holder_->GetDocument(); }
   HTMLVideoElement& GetVideo() const { return *video_; }
   MediaControlsImpl& GetMediaControls() const {
     return *static_cast<MediaControlsImpl*>(GetVideo().GetMediaControls());
@@ -192,10 +184,7 @@ class MediaControlsRotateToFullscreenDelegateTest : public ::testing::Test {
   }
 
  private:
-  bool previous_video_fullscreen_orientation_lock_value_;
-  bool previous_video_rotate_to_fullscreen_value_;
   Persistent<MockChromeClient> chrome_client_;
-  std::unique_ptr<DummyPageHolder> page_holder_;
   Persistent<HTMLVideoElement> video_;
 };
 
@@ -236,7 +225,7 @@ void MediaControlsRotateToFullscreenDelegateTest::InitScreenAndVideo(
 void MediaControlsRotateToFullscreenDelegateTest::PlayVideo() {
   {
     std::unique_ptr<UserGestureIndicator> gesture =
-        LocalFrame::CreateUserGesture(GetDocument().GetFrame());
+        Frame::NotifyUserActivation(GetDocument().GetFrame());
     GetVideo().Play();
   }
   testing::RunPendingTasks();
@@ -260,7 +249,7 @@ TEST_F(MediaControlsRotateToFullscreenDelegateTest, DelegateRequiresFlag) {
   EXPECT_TRUE(HasDelegate(GetMediaControls()));
 
   // No delegate when flag is off.
-  RuntimeEnabledFeatures::SetVideoRotateToFullscreenEnabled(false);
+  ScopedVideoRotateToFullscreenForTest video_rotate_to_fullscreen(false);
   HTMLVideoElement* video = HTMLVideoElement::Create(GetDocument());
   GetDocument().body()->AppendChild(video);
   EXPECT_FALSE(HasDelegate(*video->GetMediaControls()));
@@ -323,7 +312,7 @@ TEST_F(MediaControlsRotateToFullscreenDelegateTest,
   // Should start observing visibility when played.
   {
     std::unique_ptr<UserGestureIndicator> gesture =
-        LocalFrame::CreateUserGesture(GetDocument().GetFrame());
+        Frame::NotifyUserActivation(GetDocument().GetFrame());
     GetVideo().Play();
   }
   testing::RunPendingTasks();
@@ -344,7 +333,7 @@ TEST_F(MediaControlsRotateToFullscreenDelegateTest,
   // Should resume observing visibility when playback resumes.
   {
     std::unique_ptr<UserGestureIndicator> gesture =
-        LocalFrame::CreateUserGesture(GetDocument().GetFrame());
+        Frame::NotifyUserActivation(GetDocument().GetFrame());
     GetVideo().Play();
   }
   testing::RunPendingTasks();
@@ -510,6 +499,36 @@ TEST_F(MediaControlsRotateToFullscreenDelegateTest,
   EXPECT_FALSE(GetVideo().IsFullscreen());
 }
 
+TEST_F(MediaControlsRotateToFullscreenDelegateTest,
+       EnterFailZeroDeviceOrientation) {
+  // Portrait screen, landscape video.
+  InitScreenAndVideo(kWebScreenOrientationPortraitPrimary, WebSize(640, 480),
+                     false /* with_device_orientation */);
+  EXPECT_EQ(SimpleOrientation::kPortrait, ObservedScreenOrientation());
+  EXPECT_EQ(SimpleOrientation::kLandscape, ComputeVideoOrientation());
+
+  // Dispatch a Device Orientation event where all values are zero, as happens
+  // on poorly configured devices that lack the necessary hardware to support
+  // the Device Orientation API, but don't properly expose that lack.
+  DeviceOrientationController::From(GetDocument())
+      .SetOverride(
+          DeviceOrientationData::Create(0.0 /* alpha */, 0.0 /* beta */,
+                                        0.0 /* gamma */, false /* absolute */));
+  testing::RunPendingTasks();
+
+  // Play video.
+  PlayVideo();
+  UpdateVisibilityObserver();
+
+  EXPECT_TRUE(ObservedVisibility());
+
+  // Rotate screen to landscape.
+  RotateTo(kWebScreenOrientationLandscapePrimary);
+
+  // Should not enter fullscreen since Device Orientation is not available.
+  EXPECT_FALSE(GetVideo().IsFullscreen());
+}
+
 TEST_F(MediaControlsRotateToFullscreenDelegateTest, EnterFailPaused) {
   // Portrait screen, landscape video.
   InitScreenAndVideo(kWebScreenOrientationPortraitPrimary, WebSize(640, 480));
@@ -608,7 +627,7 @@ TEST_F(MediaControlsRotateToFullscreenDelegateTest,
   // video (in this case document.body).
   {
     std::unique_ptr<UserGestureIndicator> gesture =
-        LocalFrame::CreateUserGesture(GetDocument().GetFrame());
+        Frame::NotifyUserActivation(GetDocument().GetFrame());
     Fullscreen::RequestFullscreen(*GetDocument().body());
   }
   testing::RunPendingTasks();
@@ -639,7 +658,7 @@ TEST_F(MediaControlsRotateToFullscreenDelegateTest,
   // Start in fullscreen.
   {
     std::unique_ptr<UserGestureIndicator> gesture =
-        LocalFrame::CreateUserGesture(GetDocument().GetFrame());
+        Frame::NotifyUserActivation(GetDocument().GetFrame());
     GetMediaControls().EnterFullscreen();
   }
   // n.b. omit to call Fullscreen::From(GetDocument()).DidEnterFullscreen() so
@@ -670,7 +689,7 @@ TEST_F(MediaControlsRotateToFullscreenDelegateTest,
   // Start in fullscreen.
   {
     std::unique_ptr<UserGestureIndicator> gesture =
-        LocalFrame::CreateUserGesture(GetDocument().GetFrame());
+        Frame::NotifyUserActivation(GetDocument().GetFrame());
     GetMediaControls().EnterFullscreen();
   }
   // n.b. omit to call Fullscreen::From(GetDocument()).DidEnterFullscreen() so
@@ -702,7 +721,7 @@ TEST_F(MediaControlsRotateToFullscreenDelegateTest,
   // video (in this case document.body).
   {
     std::unique_ptr<UserGestureIndicator> gesture =
-        LocalFrame::CreateUserGesture(GetDocument().GetFrame());
+        Frame::NotifyUserActivation(GetDocument().GetFrame());
     Fullscreen::RequestFullscreen(*GetDocument().body());
   }
   testing::RunPendingTasks();

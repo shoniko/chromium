@@ -21,11 +21,11 @@
 
 #include "core/svg/SVGLength.h"
 
-#include "core/SVGNames.h"
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/CSSValue.h"
 #include "core/css/parser/CSSParser.h"
 #include "core/svg/SVGAnimationElement.h"
+#include "core/svg_names.h"
 #include "platform/wtf/MathExtras.h"
 #include "platform/wtf/text/WTFString.h"
 
@@ -42,7 +42,7 @@ SVGLength::SVGLength(SVGLengthMode mode)
 SVGLength::SVGLength(const SVGLength& o)
     : value_(o.value_), unit_mode_(o.unit_mode_) {}
 
-DEFINE_TRACE(SVGLength) {
+void SVGLength::Trace(blink::Visitor* visitor) {
   visitor->Trace(value_);
   SVGPropertyBase::Trace(visitor);
 }

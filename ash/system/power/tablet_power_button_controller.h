@@ -12,7 +12,6 @@
 #include "ash/wm/tablet_mode/tablet_mode_observer.h"
 #include "base/macros.h"
 #include "base/scoped_observer.h"
-#include "base/time/tick_clock.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chromeos/accelerometer/accelerometer_reader.h"
@@ -24,6 +23,7 @@
 
 namespace base {
 class CommandLine;
+class TickClock;
 }  // namespace base
 
 namespace ash {
@@ -38,48 +38,23 @@ class ASH_EXPORT TabletPowerButtonController
       public chromeos::PowerManagerClient::Observer,
       public TabletModeObserver {
  public:
-  // Helper class used by tablet power button tests to access internal state.
-  class ASH_EXPORT TestApi {
-   public:
-    explicit TestApi(TabletPowerButtonController* controller);
-    ~TestApi();
-
-    // Returns true when |shutdown_timer_| is running.
-    bool ShutdownTimerIsRunning() const;
-
-    // Emulates |shutdown_timer_| timeout.
-    void TriggerShutdownTimeout();
-
-    // Returns true if |controller_| is observing |reader|.
-    bool IsObservingAccelerometerReader(
-        chromeos::AccelerometerReader* reader) const;
-
-    // Calls |controller_|'s ParseSpuriousPowerButtonSwitches() method.
-    void ParseSpuriousPowerButtonSwitches(
-        const base::CommandLine& command_line);
-
-    // Calls |controller_|'s IsSpuriousPowerButtonEvent() method.
-    bool IsSpuriousPowerButtonEvent() const;
-
-    // Sends |event| to |display_controller_|.
-    void SendKeyEvent(ui::KeyEvent* event);
-
-   private:
-    TabletPowerButtonController* controller_;  // Not owned.
-
-    DISALLOW_COPY_AND_ASSIGN(TestApi);
-  };
-
   // Public for tests.
   static constexpr float kGravity = 9.80665f;
 
-  TabletPowerButtonController(LockStateController* controller,
-                              PowerButtonDisplayController* display_controller);
-  ~TabletPowerButtonController() override;
+  // Amount of time since last screen state change that power button event needs
+  // to be ignored.
+  static constexpr base::TimeDelta kScreenStateChangeDelay =
+      base::TimeDelta::FromMilliseconds(500);
 
-  // Returns true if power button events should be handled by this class instead
-  // of PowerButtonController.
-  bool ShouldHandlePowerButtonEvents() const;
+  // Ignore button-up events occurring within this many milliseconds of the
+  // previous button-up event. This prevents us from falling behind if the power
+  // button is pressed repeatedly.
+  static constexpr base::TimeDelta kIgnoreRepeatedButtonUpDelay =
+      base::TimeDelta::FromMilliseconds(500);
+
+  TabletPowerButtonController(PowerButtonDisplayController* display_controller,
+                              base::TickClock* tick_clock);
+  ~TabletPowerButtonController() override;
 
   // Handles a power button event.
   void OnPowerButtonEvent(bool down, const base::TimeTicks& timestamp);
@@ -95,10 +70,12 @@ class ASH_EXPORT TabletPowerButtonController
   void OnTabletModeStarted() override;
   void OnTabletModeEnded() override;
 
-  // Overrides the tick clock used by |this| for testing.
-  void SetTickClockForTesting(std::unique_ptr<base::TickClock> tick_clock);
+  // Cancel the ongoing tablet power button behavior.
+  void CancelTabletPowerButton();
 
  private:
+  friend class TabletPowerButtonControllerTestApi;
+
   // Parses command-line switches that provide settings used to attempt to
   // ignore accidental power button presses by looking at accelerometer data.
   void ParseSpuriousPowerButtonSwitches(const base::CommandLine& command_line);
@@ -126,9 +103,6 @@ class ASH_EXPORT TabletPowerButtonController
   // a result.
   bool power_button_down_was_spurious_ = false;
 
-  // Time source for performed action times.
-  std::unique_ptr<base::TickClock> tick_clock_;
-
   // Saves the most recent timestamp that powerd is resuming from suspend,
   // updated in SuspendDone().
   base::TimeTicks last_resume_time_;
@@ -144,10 +118,13 @@ class ASH_EXPORT TabletPowerButtonController
   // released. Runs OnShutdownTimeout() to start shutdown.
   base::OneShotTimer shutdown_timer_;
 
-  LockStateController* controller_;  // Not owned.
+  LockStateController* lock_state_controller_;  // Not owned.
 
   // Used to interact with the display.
   PowerButtonDisplayController* display_controller_;  // Not owned.
+
+  // Time source for performed action times.
+  base::TickClock* tick_clock_;  // Not owned.
 
   ScopedObserver<chromeos::AccelerometerReader, TabletPowerButtonController>
       accelerometer_scoped_observer_;

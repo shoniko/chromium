@@ -56,7 +56,7 @@ void ChromeCleanerRunner::RunChromeCleanerAndReplyWithExitCode(
     base::OnceClosure on_connection_closed,
     ChromeCleanerRunner::ProcessDoneCallback on_process_done,
     scoped_refptr<base::SequencedTaskRunner> task_runner) {
-  auto cleaner_runner = make_scoped_refptr(new ChromeCleanerRunner(
+  auto cleaner_runner = base::WrapRefCounted(new ChromeCleanerRunner(
       cleaner_executable_path, reporter_invocation, metrics_status,
       std::move(on_prompt_user), std::move(on_connection_closed),
       std::move(on_process_done), std::move(task_runner)));
@@ -131,6 +131,12 @@ ChromeCleanerRunner::ChromeCleanerRunner(
     cleaner_command_line_.AppendSwitch(
         chrome_cleaner::kEnableCrashReportingSwitch);
   }
+
+  const std::string group_name = GetSRTFieldTrialGroupName();
+  if (!group_name.empty()) {
+    cleaner_command_line_.AppendSwitchASCII(
+        chrome_cleaner::kSRTPromptFieldTrialGroupNameSwitch, group_name);
+  }
 }
 
 ChromeCleanerRunner::ProcessStatus
@@ -179,7 +185,6 @@ ChromeCleanerRunner::LaunchAndWaitForExitOnBackgroundThread() {
 
   UMA_HISTOGRAM_SPARSE_SLOWLY(
       "SoftwareReporter.Cleaner.ExitCodeFromConnectedProcess", exit_code);
-
   return ProcessStatus(LaunchStatus::kSuccess, exit_code);
 }
 

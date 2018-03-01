@@ -34,7 +34,7 @@ class CORE_EXPORT CSSUnparsedValue final : public CSSStyleValue {
 
   size_t length() const { return fragments_.size(); }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(fragments_);
     CSSStyleValue::Trace(visitor);
   }
@@ -47,7 +47,7 @@ class CORE_EXPORT CSSUnparsedValue final : public CSSStyleValue {
  private:
   static CSSUnparsedValue* FromString(String string) {
     HeapVector<StringOrCSSVariableReferenceValue> fragments;
-    fragments.push_back(StringOrCSSVariableReferenceValue::fromString(string));
+    fragments.push_back(StringOrCSSVariableReferenceValue::FromString(string));
     return Create(fragments);
   }
 

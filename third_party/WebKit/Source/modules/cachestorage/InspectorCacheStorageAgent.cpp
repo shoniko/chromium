@@ -22,7 +22,6 @@
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/wtf/Functional.h"
 #include "platform/wtf/Noncopyable.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/RefCounted.h"
 #include "platform/wtf/RefPtr.h"
@@ -87,7 +86,7 @@ ProtocolResponse ParseCacheId(const String& id,
 ProtocolResponse AssertCacheStorage(
     const String& security_origin,
     std::unique_ptr<WebServiceWorkerCacheStorage>* result) {
-  RefPtr<SecurityOrigin> sec_origin =
+  scoped_refptr<SecurityOrigin> sec_origin =
       SecurityOrigin::CreateFromString(security_origin);
 
   // Cache Storage API is restricted to trustworthy origins.
@@ -249,11 +248,11 @@ class ResponsesAccumulator : public RefCounted<ResponsesAccumulator> {
                                                      b.request_url);
               });
     if (params_.skip_count > 0)
-      responses_.erase(0, params_.skip_count);
+      responses_.EraseAt(0, params_.skip_count);
     bool has_more = false;
     if (static_cast<size_t>(params_.page_size) < responses_.size()) {
-      responses_.erase(params_.page_size,
-                       responses_.size() - params_.page_size);
+      responses_.EraseAt(params_.page_size,
+                         responses_.size() - params_.page_size);
       has_more = true;
     }
     std::unique_ptr<Array<DataEntry>> array = Array<DataEntry>::create();
@@ -305,7 +304,7 @@ class GetCacheResponsesForRequestData
  public:
   GetCacheResponsesForRequestData(const DataRequestParams& params,
                                   const WebServiceWorkerRequest& request,
-                                  PassRefPtr<ResponsesAccumulator> accum)
+                                  scoped_refptr<ResponsesAccumulator> accum)
       : params_(params), request_(request), accumulator_(std::move(accum)) {}
   ~GetCacheResponsesForRequestData() override {}
 
@@ -323,7 +322,7 @@ class GetCacheResponsesForRequestData
  private:
   DataRequestParams params_;
   WebServiceWorkerRequest request_;
-  RefPtr<ResponsesAccumulator> accumulator_;
+  scoped_refptr<ResponsesAccumulator> accumulator_;
 };
 
 class GetCacheKeysForRequestData
@@ -346,9 +345,9 @@ class GetCacheKeysForRequestData
       callback_->sendSuccess(std::move(array), false);
       return;
     }
-    RefPtr<ResponsesAccumulator> accumulator =
-        AdoptRef(new ResponsesAccumulator(requests.size(), params_,
-                                          std::move(callback_)));
+    scoped_refptr<ResponsesAccumulator> accumulator =
+        WTF::AdoptRef(new ResponsesAccumulator(requests.size(), params_,
+                                               std::move(callback_)));
 
     for (size_t i = 0; i < requests.size(); i++) {
       const auto& request = requests[i];
@@ -460,7 +459,7 @@ class GetCacheForDeleteEntry
     BatchOperation delete_operation;
     delete_operation.operation_type =
         WebServiceWorkerCache::kOperationTypeDelete;
-    delete_operation.request.SetURL(KURL(kParsedURLString, request_spec_));
+    delete_operation.request.SetURL(KURL(request_spec_));
     Vector<BatchOperation> operations;
     operations.push_back(delete_operation);
     cache.release()->DispatchBatch(std::move(delete_request),
@@ -485,7 +484,7 @@ class CachedResponseFileReaderLoaderClient final
 
  public:
   static void Load(ExecutionContext* context,
-                   PassRefPtr<BlobDataHandle> blob,
+                   scoped_refptr<BlobDataHandle> blob,
                    std::unique_ptr<RequestCachedResponseCallback> callback) {
     new CachedResponseFileReaderLoaderClient(context, std::move(blob),
                                              std::move(callback));
@@ -516,7 +515,7 @@ class CachedResponseFileReaderLoaderClient final
  private:
   CachedResponseFileReaderLoaderClient(
       ExecutionContext* context,
-      PassRefPtr<BlobDataHandle>&& blob,
+      scoped_refptr<BlobDataHandle>&& blob,
       std::unique_ptr<RequestCachedResponseCallback>&& callback)
       : loader_(
             FileReaderLoader::Create(FileReaderLoader::kReadByClient, this)),
@@ -531,7 +530,7 @@ class CachedResponseFileReaderLoaderClient final
 
   std::unique_ptr<FileReaderLoader> loader_;
   std::unique_ptr<RequestCachedResponseCallback> callback_;
-  RefPtr<SharedBuffer> data_;
+  scoped_refptr<SharedBuffer> data_;
 };
 
 class CachedResponseMatchCallback
@@ -574,7 +573,7 @@ InspectorCacheStorageAgent::InspectorCacheStorageAgent(InspectedFrames* frames)
 
 InspectorCacheStorageAgent::~InspectorCacheStorageAgent() = default;
 
-DEFINE_TRACE(InspectorCacheStorageAgent) {
+void InspectorCacheStorageAgent::Trace(blink::Visitor* visitor) {
   visitor->Trace(frames_);
   InspectorBaseAgent::Trace(visitor);
 }
@@ -582,7 +581,7 @@ DEFINE_TRACE(InspectorCacheStorageAgent) {
 void InspectorCacheStorageAgent::requestCacheNames(
     const String& security_origin,
     std::unique_ptr<RequestCacheNamesCallback> callback) {
-  RefPtr<SecurityOrigin> sec_origin =
+  scoped_refptr<SecurityOrigin> sec_origin =
       SecurityOrigin::CreateFromString(security_origin);
 
   // Cache Storage API is restricted to trustworthy origins.
@@ -670,7 +669,7 @@ void InspectorCacheStorageAgent::requestCachedResponse(
     return;
   }
   WebServiceWorkerRequest request;
-  request.SetURL(KURL(kParsedURLString, request_url));
+  request.SetURL(KURL(request_url));
   ExecutionContext* context = nullptr;
   response = GetExecutionContext(frames_, cache_id, &context);
   if (!response.isSuccess())

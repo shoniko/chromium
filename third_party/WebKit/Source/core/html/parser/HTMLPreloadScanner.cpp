@@ -28,8 +28,6 @@
 #include "core/html/parser/HTMLPreloadScanner.h"
 
 #include <memory>
-#include "core/HTMLNames.h"
-#include "core/InputTypeNames.h"
 #include "core/css/MediaList.h"
 #include "core/css/MediaQueryEvaluator.h"
 #include "core/css/MediaValuesCached.h"
@@ -45,6 +43,8 @@
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/html/parser/HTMLSrcsetParser.h"
 #include "core/html/parser/HTMLTokenizer.h"
+#include "core/html_names.h"
+#include "core/input_type_names.h"
 #include "core/loader/LinkLoader.h"
 #include "platform/Histogram.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
@@ -104,7 +104,8 @@ static String InitiatorFor(const StringImpl* tag_impl) {
 
 static bool MediaAttributeMatches(const MediaValuesCached& media_values,
                                   const String& attribute_value) {
-  RefPtr<MediaQuerySet> media_queries = MediaQuerySet::Create(attribute_value);
+  scoped_refptr<MediaQuerySet> media_queries =
+      MediaQuerySet::Create(attribute_value);
   MediaQueryEvaluator media_query_evaluator(media_values);
   return media_query_evaluator.Eval(*media_queries);
 }
@@ -138,7 +139,7 @@ class TokenPreloadScanner::StartTagScanner {
     }
     if (!Match(tag_impl_, inputTag) && !Match(tag_impl_, linkTag) &&
         !Match(tag_impl_, scriptTag) && !Match(tag_impl_, videoTag))
-      tag_impl_ = 0;
+      tag_impl_ = nullptr;
   }
 
   enum URLReplacement { kAllowURLReplacement, kDisallowURLReplacement };
@@ -237,6 +238,12 @@ class TokenPreloadScanner::StartTagScanner {
         is_image_set, resource_width, client_hints_preferences, request_type);
     if (!request)
       return nullptr;
+
+    if (Match(tag_impl_, scriptTag)) {
+      request->SetScriptType(type_attribute_value_ == "module"
+                                 ? ScriptType::kModule
+                                 : ScriptType::kClassic);
+    }
 
     request->SetCrossOrigin(cross_origin_);
     request->SetNonce(nonce_);
@@ -520,10 +527,6 @@ class TokenPreloadScanner::StartTagScanner {
               ScriptLoader::kAllowLegacyTypeInTypeAttribute, script_type)) {
         return false;
       }
-      // TODO(kouhei): Enable preload for module scripts, with correct
-      // credentials mode.
-      if (type_attribute_value_ == "module")
-        return false;
       if (ScriptLoader::BlockForNoModule(script_type,
                                          nomodule_attribute_value_)) {
         return false;

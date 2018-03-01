@@ -350,6 +350,11 @@ bool SizedFormatAvailable(const FeatureInfo* feature_info,
   if (immutable)
     return true;
 
+  if (feature_info->feature_flags().ext_texture_norm16 &&
+      internal_format == GL_R16_EXT) {
+    return true;
+  }
+
   if ((feature_info->feature_flags().chromium_image_ycbcr_420v &&
        internal_format == GL_RGB_YCBCR_420V_CHROMIUM) ||
       (feature_info->feature_flags().chromium_image_ycbcr_422 &&
@@ -2004,7 +2009,7 @@ void TextureManager::RemoveFramebufferManager(
   NOTREACHED();
 }
 
-bool TextureManager::Initialize() {
+void TextureManager::Initialize() {
   // Reset PIXEL_UNPACK_BUFFER to avoid unrelated GL error on some GL drivers.
   if (feature_info_->gl_version_info().is_es3_capable) {
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
@@ -2043,8 +2048,6 @@ bool TextureManager::Initialize() {
     base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
         this, "gpu::TextureManager", base::ThreadTaskRunnerHandle::Get());
   }
-
-  return true;
 }
 
 scoped_refptr<TextureRef>

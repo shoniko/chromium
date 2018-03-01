@@ -33,7 +33,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/autofill/core/browser/autocomplete_history_manager.h"
 #include "components/autofill/core/browser/autofill_client.h"
@@ -221,7 +220,10 @@ AutofillManager::AutofillManager(
       client_(client),
       payments_client_(base::MakeUnique<payments::PaymentsClient>(
           driver->GetURLRequestContext(),
-          this)),
+          client->GetPrefs(),
+          client->GetIdentityProvider(),
+          /*unmask_delegate=*/this,
+          /*save_delegate=*/this)),
       app_locale_(app_locale),
       personal_data_(client->GetPersonalDataManager()),
       autocomplete_history_manager_(
@@ -248,8 +250,9 @@ AutofillManager::AutofillManager(
       found_cvc_field_(false),
       found_value_in_cvc_field_(false),
       found_cvc_value_in_non_cvc_field_(false),
-      external_delegate_(NULL),
-      test_delegate_(NULL),
+      enable_ablation_logging_(false),
+      external_delegate_(nullptr),
+      test_delegate_(nullptr),
 #if defined(OS_ANDROID) || defined(OS_IOS)
       autofill_assistant_(this),
 #endif
@@ -270,19 +273,24 @@ AutofillManager::~AutofillManager() {}
 // static
 void AutofillManager::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
+  registry->RegisterDoublePref(
+      prefs::kAutofillBillingCustomerNumber, 0.0,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
   // This pref is not synced because it's for a signin promo, which by
   // definition will not be synced.
   registry->RegisterIntegerPref(
       prefs::kAutofillCreditCardSigninPromoImpressionCount, 0);
   registry->RegisterBooleanPref(
-      prefs::kAutofillEnabled,
-      true,
+      prefs::kAutofillEnabled, true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(
       prefs::kAutofillProfileUseDatesFixed, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterIntegerPref(
       prefs::kAutofillLastVersionDeduped, 0,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterIntegerPref(
+      prefs::kAutofillLastVersionDisusedAddressesDeleted, 0,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   // These choices are made on a per-device basis, so they're not syncable.
   registry->RegisterBooleanPref(prefs::kAutofillWalletImportEnabled, true);
@@ -291,6 +299,9 @@ void AutofillManager::RegisterProfilePrefs(
   registry->RegisterIntegerPref(
       prefs::kAutofillAcceptSaveCreditCardPromptState,
       prefs::PREVIOUS_SAVE_CREDIT_CARD_PROMPT_USER_DECISION_NONE);
+  registry->RegisterIntegerPref(
+      prefs::kAutofillLastVersionDisusedCreditCardsDeleted, 0);
+  registry->RegisterBooleanPref(prefs::kAutofillCreditCardEnabled, true);
 }
 
 void AutofillManager::SetExternalDelegate(AutofillExternalDelegate* delegate) {
@@ -411,7 +422,8 @@ bool AutofillManager::OnWillSubmitFormImpl(const FormData& form,
   autocomplete_history_manager_->OnWillSubmitForm(form_for_autocomplete);
 
   address_form_event_logger_->OnWillSubmitForm();
-  credit_card_form_event_logger_->OnWillSubmitForm();
+  if (IsCreditCardAutofillEnabled())
+    credit_card_form_event_logger_->OnWillSubmitForm();
 
   StartUploadProcess(std::move(submitted_form), timestamp, true);
 
@@ -428,8 +440,18 @@ bool AutofillManager::OnFormSubmitted(const FormData& form) {
     return false;
   }
 
-  address_form_event_logger_->OnFormSubmitted();
-  credit_card_form_event_logger_->OnFormSubmitted();
+  CreditCard credit_card =
+      personal_data_->ExtractCreditCardFromForm(*submitted_form);
+  if (IsValidCreditCardNumber(credit_card.number())) {
+    credit_card_form_event_logger_->DetectedCardInSubmittedForm();
+    if (personal_data_->IsKnownCard(credit_card)) {
+      credit_card_form_event_logger_->SubmittedKnownCard();
+    }
+  }
+
+  address_form_event_logger_->OnFormSubmitted(/*force_logging=*/false);
+  if (IsCreditCardAutofillEnabled())
+    credit_card_form_event_logger_->OnFormSubmitted(enable_ablation_logging_);
 
   // Update Personal Data with the form's submitted data.
   if (submitted_form->IsAutofillable())
@@ -518,8 +540,8 @@ void AutofillManager::OnTextFieldDidChangeImpl(const FormData& form,
   if (test_delegate_)
     test_delegate_->OnTextFieldChanged();
 
-  FormStructure* form_structure = NULL;
-  AutofillField* autofill_field = NULL;
+  FormStructure* form_structure = nullptr;
+  AutofillField* autofill_field = nullptr;
   if (!GetCachedFormAndField(form, field, &form_structure, &autofill_field))
     return;
 
@@ -531,19 +553,22 @@ void AutofillManager::OnTextFieldDidChangeImpl(const FormData& form,
 
   if (!user_did_type_) {
     user_did_type_ = true;
-    AutofillMetrics::LogUserHappinessMetric(AutofillMetrics::USER_DID_TYPE);
+    AutofillMetrics::LogUserHappinessMetric(AutofillMetrics::USER_DID_TYPE,
+                                            autofill_field->Type().group());
   }
 
   if (autofill_field->is_autofilled) {
     autofill_field->is_autofilled = false;
     autofill_field->set_previously_autofilled(true);
     AutofillMetrics::LogUserHappinessMetric(
-        AutofillMetrics::USER_DID_EDIT_AUTOFILLED_FIELD);
+        AutofillMetrics::USER_DID_EDIT_AUTOFILLED_FIELD,
+        autofill_field->Type().group());
 
     if (!user_did_edit_autofilled_field_) {
       user_did_edit_autofilled_field_ = true;
       AutofillMetrics::LogUserHappinessMetric(
-          AutofillMetrics::USER_DID_EDIT_AUTOFILLED_FIELD_ONCE);
+          AutofillMetrics::USER_DID_EDIT_AUTOFILLED_FIELD_ONCE,
+          autofill_field->Type().group());
     }
   }
 
@@ -565,8 +590,8 @@ void AutofillManager::OnQueryFormFieldAutofillImpl(
   // Need to refresh models before using the form_event_loggers.
   bool is_autofill_possible = RefreshDataModels();
 
-  FormStructure* form_structure = NULL;
-  AutofillField* autofill_field = NULL;
+  FormStructure* form_structure = nullptr;
+  AutofillField* autofill_field = nullptr;
   bool got_autofillable_form =
       GetCachedFormAndField(form, field, &form_structure, &autofill_field) &&
       // Don't send suggestions or track forms that should not be parsed.
@@ -597,8 +622,10 @@ void AutofillManager::OnQueryFormFieldAutofillImpl(
   if (is_autofill_possible && driver()->RendererIsAvailable() &&
       got_autofillable_form) {
     // On desktop, don't return non credit card related suggestions for forms or
-    // fields that have the "autocomplete" attribute set to off.
-    if (IsDesktopPlatform() && !is_filling_credit_card &&
+    // fields that have the "autocomplete" attribute set to off, only if the
+    // feature to always fill addresses is off.
+    if (!base::FeatureList::IsEnabled(kAutofillAlwaysFillAddresses) &&
+        IsDesktopPlatform() && !is_filling_credit_card &&
         !field.should_autocomplete) {
       return;
     }
@@ -607,6 +634,16 @@ void AutofillManager::OnQueryFormFieldAutofillImpl(
     } else {
       suggestions =
           GetProfileSuggestions(*form_structure, field, *autofill_field);
+    }
+
+    // Logic for disabling/ablating credit card autofill.
+    if (base::FeatureList::IsEnabled(kAutofillCreditCardAblationExperiment) &&
+        is_filling_credit_card && !suggestions.empty()) {
+      suggestions.clear();
+      autocomplete_history_manager_->CancelPendingQuery();
+      external_delegate_->OnSuggestionsReturned(query_id, suggestions);
+      enable_ablation_logging_ = true;
+      return;
     }
 
     if (!suggestions.empty()) {
@@ -735,8 +772,8 @@ void AutofillManager::FillOrPreviewCreditCardForm(
     const FormData& form,
     const FormFieldData& field,
     const CreditCard& credit_card) {
-  FormStructure* form_structure = NULL;
-  AutofillField* autofill_field = NULL;
+  FormStructure* form_structure = nullptr;
+  AutofillField* autofill_field = nullptr;
   if (!GetCachedFormAndField(form, field, &form_structure, &autofill_field))
     return;
   if (action == AutofillDriver::FORM_DATA_ACTION_FILL) {
@@ -770,8 +807,8 @@ void AutofillManager::FillOrPreviewProfileForm(
     const FormData& form,
     const FormFieldData& field,
     const AutofillProfile& profile) {
-  FormStructure* form_structure = NULL;
-  AutofillField* autofill_field = NULL;
+  FormStructure* form_structure = nullptr;
+  AutofillField* autofill_field = nullptr;
   if (!GetCachedFormAndField(form, field, &form_structure, &autofill_field))
     return;
   if (action == AutofillDriver::FORM_DATA_ACTION_FILL)
@@ -840,11 +877,19 @@ void AutofillManager::OnDidFillAutofillFormData(const FormData& form,
 
   UpdatePendingForm(form);
 
-  AutofillMetrics::LogUserHappinessMetric(AutofillMetrics::USER_DID_AUTOFILL);
+  FormStructure* form_structure = nullptr;
+  std::set<FormType> form_types;
+  // Find the FormStructure that corresponds to |form|. Use default form type if
+  // form is not present in our cache, which will happen rarely.
+  if (FindCachedForm(form, &form_structure)) {
+    form_types = form_structure->GetFormTypes();
+  }
+  AutofillMetrics::LogUserHappinessMetric(AutofillMetrics::USER_DID_AUTOFILL,
+                                          form_types);
   if (!user_did_autofill_) {
     user_did_autofill_ = true;
     AutofillMetrics::LogUserHappinessMetric(
-        AutofillMetrics::USER_DID_AUTOFILL_ONCE);
+        AutofillMetrics::USER_DID_AUTOFILL_ONCE, form_types);
   }
 
   UpdateInitialInteractionTimestamp(timestamp);
@@ -855,18 +900,20 @@ void AutofillManager::DidShowSuggestions(bool is_new_popup,
                                          const FormFieldData& field) {
   if (test_delegate_)
     test_delegate_->DidShowSuggestions();
-  FormStructure* form_structure = NULL;
-  AutofillField* autofill_field = NULL;
+  FormStructure* form_structure = nullptr;
+  AutofillField* autofill_field = nullptr;
   if (!GetCachedFormAndField(form, field, &form_structure, &autofill_field))
     return;
 
   if (is_new_popup) {
-    AutofillMetrics::LogUserHappinessMetric(AutofillMetrics::SUGGESTIONS_SHOWN);
+    AutofillMetrics::LogUserHappinessMetric(AutofillMetrics::SUGGESTIONS_SHOWN,
+                                            autofill_field->Type().group());
 
     if (!did_show_suggestions_) {
       did_show_suggestions_ = true;
       AutofillMetrics::LogUserHappinessMetric(
-          AutofillMetrics::SUGGESTIONS_SHOWN_ONCE);
+          AutofillMetrics::SUGGESTIONS_SHOWN_ONCE,
+          autofill_field->Type().group());
     }
 
     if (autofill_field->Type().group() == CREDIT_CARD) {
@@ -1000,8 +1047,7 @@ void AutofillManager::SetTestDelegate(AutofillManagerTestDelegate* delegate) {
 
 void AutofillManager::OnSetDataList(const std::vector<base::string16>& values,
                                     const std::vector<base::string16>& labels) {
-  if (!IsValidString16Vector(values) ||
-      !IsValidString16Vector(labels) ||
+  if (!IsValidString16Vector(values) || !IsValidString16Vector(labels) ||
       values.size() != labels.size())
     return;
 
@@ -1044,12 +1090,9 @@ void AutofillManager::OnLoadedServerPredictions(
   // account creation forms.
   driver()->PropagateAutofillPredictions(queried_forms);
 
-  // If the corresponding flag is set, annotate forms with the predicted types.
+  // Send field type predictions to the renderer so that it can possibly
+  // annotate forms with the predicted types or add console warnings.
   driver()->SendAutofillTypePredictionsToRenderer(queried_forms);
-}
-
-IdentityProvider* AutofillManager::GetIdentityProvider() {
-  return client_->GetIdentityProvider();
 }
 
 void AutofillManager::OnDidGetRealPan(AutofillClient::PaymentsRpcResult result,
@@ -1163,6 +1206,11 @@ void AutofillManager::OnUserDidAcceptUpload() {
       upload_request_.cvc =
           client_->GetSaveCardBubbleController()->GetCvcEnteredByUser();
     }
+    if (IsAutofillSendBillingCustomerNumberExperimentEnabled()) {
+      upload_request_.billing_customer_number =
+          static_cast<int64_t>(payments_client_->GetPrefService()->GetDouble(
+              prefs::kAutofillBillingCustomerNumber));
+    }
     payments_client_->UploadCard(upload_request_);
   }
 }
@@ -1177,6 +1225,11 @@ void AutofillManager::OnDidGetUploadRiskData(const std::string& risk_data) {
       DCHECK(client_->GetSaveCardBubbleController());
       upload_request_.cvc =
           client_->GetSaveCardBubbleController()->GetCvcEnteredByUser();
+    }
+    if (IsAutofillSendBillingCustomerNumberExperimentEnabled()) {
+      upload_request_.billing_customer_number =
+          static_cast<int64_t>(payments_client_->GetPrefService()->GetDouble(
+              prefs::kAutofillBillingCustomerNumber));
     }
     payments_client_->UploadCard(upload_request_);
   }
@@ -1194,7 +1247,12 @@ bool AutofillManager::IsAutofillEnabled() const {
 bool AutofillManager::IsCreditCardUploadEnabled() {
   return ::autofill::IsCreditCardUploadEnabled(
       client_->GetPrefs(), client_->GetSyncService(),
-      GetIdentityProvider()->GetActiveUsername());
+      client_->GetIdentityProvider()->GetActiveUsername());
+}
+
+bool AutofillManager::IsCreditCardAutofillEnabled() {
+  return client_->GetPrefs()->GetBoolean(prefs::kAutofillCreditCardEnabled) &&
+         client_->IsAutofillSupported();
 }
 
 bool AutofillManager::ShouldUploadForm(const FormStructure& form) {
@@ -1210,15 +1268,16 @@ void AutofillManager::ImportFormData(const FormStructure& submitted_form) {
   std::unique_ptr<CreditCard> imported_credit_card;
   bool imported_credit_card_matches_masked_server_credit_card;
   if (!personal_data_->ImportFormData(
-          submitted_form, IsCreditCardUploadEnabled(), &imported_credit_card,
+          submitted_form, IsCreditCardAutofillEnabled(),
+          IsCreditCardUploadEnabled(), &imported_credit_card,
           &imported_credit_card_matches_masked_server_credit_card))
     return;
 
 #ifdef ENABLE_FORM_DEBUG_DUMP
   // Debug code for research on what autofill Chrome extracts from the last few
   // forms when submitting credit card data. See DumpAutofillData().
-  bool dump_data = base::CommandLine::ForCurrentProcess()->HasSwitch(
-      "dump-autofill-data");
+  bool dump_data =
+      base::CommandLine::ForCurrentProcess()->HasSwitch("dump-autofill-data");
 
   // Save the form data for future dumping.
   if (dump_data) {
@@ -1377,23 +1436,6 @@ int AutofillManager::SetProfilesForCreditCardUpload(
   AutofillMetrics::LogHasModifiedProfileOnCreditCardFormSubmission(
       has_modified_profile);
 
-  // If there are no recently used or modified profiles and experiment to use
-  // profiles that were not recently used is enabled, collect the profiles that
-  // used within the maximum time specified in the experiment.
-  if (candidate_profiles.empty()) {
-    const base::TimeDelta max_time_since_use =
-        GetMaxTimeSinceAutofillProfileUseForCardUpload();
-    if (!max_time_since_use.is_zero()) {
-      for (AutofillProfile* profile : personal_data_->GetProfiles())
-        if ((now - profile->modification_date()) < max_time_since_use ||
-            (now - profile->use_date()) < max_time_since_use)
-          candidate_profiles.push_back(*profile);
-      if (!candidate_profiles.empty())
-        upload_request->active_experiments.push_back(
-            kAutofillUpstreamUseNotRecentlyUsedAutofillProfile.name);
-    }
-  }
-
   if (candidate_profiles.empty()) {
     upload_decision_metrics |=
         has_profile
@@ -1452,7 +1494,6 @@ int AutofillManager::SetProfilesForCreditCardUpload(
       }
     }
     if (found_conflicting_names) {
-      if (!upload_decision_metrics)
       upload_decision_metrics |=
           AutofillMetrics::UPLOAD_NOT_OFFERED_CONFLICTING_NAMES;
     }
@@ -1461,7 +1502,6 @@ int AutofillManager::SetProfilesForCreditCardUpload(
   // If neither the card nor any of the addresses have a name associated with
   // them, the candidate set is invalid.
   if (verified_name.empty()) {
-    if (!upload_decision_metrics)
     upload_decision_metrics |= AutofillMetrics::UPLOAD_NOT_OFFERED_NO_NAME;
   }
 
@@ -1593,6 +1633,7 @@ void AutofillManager::Reset() {
   user_did_type_ = false;
   user_did_autofill_ = false;
   user_did_edit_autofilled_field_ = false;
+  enable_ablation_logging_ = false;
   masked_card_ = CreditCard();
   unmasking_query_id_ = -1;
   unmasking_form_ = FormData();
@@ -1609,7 +1650,10 @@ AutofillManager::AutofillManager(AutofillDriver* driver,
       client_(client),
       payments_client_(base::MakeUnique<payments::PaymentsClient>(
           driver->GetURLRequestContext(),
-          this)),
+          client->GetPrefs(),
+          client->GetIdentityProvider(),
+          /*unmask_delegate=*/this,
+          /*save_delegate=*/this)),
       app_locale_("en-US"),
       personal_data_(personal_data),
       autocomplete_history_manager_(
@@ -1632,8 +1676,9 @@ AutofillManager::AutofillManager(AutofillDriver* driver,
       user_did_autofill_(false),
       user_did_edit_autofilled_field_(false),
       unmasking_query_id_(-1),
-      external_delegate_(NULL),
-      test_delegate_(NULL),
+      enable_ablation_logging_(false),
+      external_delegate_(nullptr),
+      test_delegate_(nullptr),
 #if defined(OS_ANDROID) || defined(OS_IOS)
       autofill_assistant_(this),
 #endif
@@ -1648,8 +1693,7 @@ bool AutofillManager::RefreshDataModels() {
     return false;
 
   // No autofill data to return if the profiles are empty.
-  const std::vector<AutofillProfile*>& profiles =
-      personal_data_->GetProfiles();
+  const std::vector<AutofillProfile*>& profiles = personal_data_->GetProfiles();
   const std::vector<CreditCard*>& credit_cards =
       personal_data_->GetCreditCards();
 
@@ -1697,7 +1741,7 @@ bool AutofillManager::GetProfile(int unique_id,
   std::string credit_card_id;
   std::string profile_id;
   SplitFrontendID(unique_id, &credit_card_id, &profile_id);
-  *profile = NULL;
+  *profile = nullptr;
   if (base::IsValidGUID(profile_id))
     *profile = personal_data_->GetProfileByGUID(profile_id);
   return !!*profile;
@@ -1709,7 +1753,7 @@ bool AutofillManager::GetCreditCard(int unique_id,
   std::string credit_card_id;
   std::string profile_id;
   SplitFrontendID(unique_id, &credit_card_id, &profile_id);
-  *credit_card = NULL;
+  *credit_card = nullptr;
   if (base::IsValidGUID(credit_card_id))
     *credit_card = personal_data_->GetCreditCardByGUID(credit_card_id);
   return !!*credit_card;
@@ -1723,8 +1767,8 @@ void AutofillManager::FillOrPreviewDataModelForm(
     const AutofillDataModel& data_model,
     bool is_credit_card,
     const base::string16& cvc) {
-  FormStructure* form_structure = NULL;
-  AutofillField* autofill_field = NULL;
+  FormStructure* form_structure = nullptr;
+  AutofillField* autofill_field = nullptr;
   if (!GetCachedFormAndField(form, field, &form_structure, &autofill_field))
     return;
   FillOrPreviewDataModelForm(action, query_id, form, field, data_model,
@@ -1750,8 +1794,8 @@ void AutofillManager::FillOrPreviewDataModelForm(
   base::string16 profile_full_name;
   std::string profile_language_code;
   if (!is_credit_card) {
-    profile_full_name = data_model.GetInfo(
-        AutofillType(NAME_FULL), app_locale_);
+    profile_full_name =
+        data_model.GetInfo(AutofillType(NAME_FULL), app_locale_);
     profile_language_code =
         static_cast<const AutofillProfile*>(&data_model)->language_code();
   }
@@ -1763,10 +1807,8 @@ void AutofillManager::FillOrPreviewDataModelForm(
       if (iter.SameFieldAs(field)) {
         base::string16 value =
             data_model.GetInfo(autofill_field->Type(), app_locale_);
-        if (AutofillField::FillFormField(*autofill_field,
-                                         value,
-                                         profile_language_code,
-                                         app_locale_,
+        if (AutofillField::FillFormField(*autofill_field, value,
+                                         profile_language_code, app_locale_,
                                          &iter)) {
           // Mark the cached field as autofilled, so that we can detect when a
           // user edits an autofilled field (for metrics).
@@ -1808,12 +1850,12 @@ void AutofillManager::FillOrPreviewDataModelForm(
 
     base::string16 value =
         data_model.GetInfo(cached_field->Type(), app_locale_);
-    if (is_credit_card &&
-        cached_field->Type().GetStorableType() ==
-            CREDIT_CARD_VERIFICATION_CODE) {
+    if (is_credit_card && cached_field->Type().GetStorableType() ==
+                              CREDIT_CARD_VERIFICATION_CODE) {
       value = cvc;
-    } else if (is_credit_card && IsCreditCardExpirationType(
-                                     cached_field->Type().GetStorableType()) &&
+    } else if (is_credit_card &&
+               IsCreditCardExpirationType(
+                   cached_field->Type().GetStorableType()) &&
                static_cast<const CreditCard*>(&data_model)
                    ->IsExpired(AutofillClock::Now())) {
       // Don't fill expired cards expiration date.
@@ -1824,16 +1866,12 @@ void AutofillManager::FillOrPreviewDataModelForm(
     // Only notify autofilling of empty fields and the field that initiated
     // the filling (note that "select-one" controls may not be empty but will
     // still be autofilled).
-    bool should_notify =
-        !is_credit_card &&
-        !value.empty() &&
-        (result.fields[i].SameFieldAs(field) ||
-         result.fields[i].form_control_type == "select-one" ||
-         result.fields[i].value.empty());
-    if (AutofillField::FillFormField(*cached_field,
-                                     value,
-                                     profile_language_code,
-                                     app_locale_,
+    bool should_notify = !is_credit_card && !value.empty() &&
+                         (result.fields[i].SameFieldAs(field) ||
+                          result.fields[i].form_control_type == "select-one" ||
+                          result.fields[i].value.empty());
+    if (AutofillField::FillFormField(*cached_field, value,
+                                     profile_language_code, app_locale_,
                                      &result.fields[i])) {
       // Mark the cached field as autofilled, so that we can detect when a
       // user edits an autofilled field (for metrics).
@@ -1888,7 +1926,7 @@ bool AutofillManager::FindCachedForm(const FormData& form,
   // forms might appear toward the beginning of the list.  The communication
   // protocol with the crowdsourcing server does not permit us to discard the
   // original versions of the forms.
-  *form_structure = NULL;
+  *form_structure = nullptr;
   const auto& form_signature = autofill::CalculateFormSignature(form);
   for (auto& cur_form : base::Reversed(form_structures_)) {
     if (cur_form->form_signature() == form_signature || *cur_form == form) {
@@ -1931,7 +1969,7 @@ bool AutofillManager::GetCachedFormAndField(const FormData& form,
     return false;
 
   // Find the AutofillField that corresponds to |field|.
-  *autofill_field = NULL;
+  *autofill_field = nullptr;
   for (const auto& current : **form_structure) {
     if (current->SameFieldAs(field)) {
       *autofill_field = current.get();
@@ -1942,21 +1980,21 @@ bool AutofillManager::GetCachedFormAndField(const FormData& form,
   // Even though we always update the cache, the field might not exist if the
   // website disables autocomplete while the user is interacting with the form.
   // See http://crbug.com/160476
-  return *autofill_field != NULL;
+  return *autofill_field != nullptr;
 }
 
 AutofillField* AutofillManager::GetAutofillField(const FormData& form,
                                                  const FormFieldData& field) {
   if (!personal_data_)
-    return NULL;
+    return nullptr;
 
-  FormStructure* form_structure = NULL;
-  AutofillField* autofill_field = NULL;
+  FormStructure* form_structure = nullptr;
+  AutofillField* autofill_field = nullptr;
   if (!GetCachedFormAndField(form, field, &form_structure, &autofill_field))
-    return NULL;
+    return nullptr;
 
   if (!form_structure->IsAutofillable())
-    return NULL;
+    return nullptr;
 
   return autofill_field;
 }
@@ -1965,8 +2003,7 @@ bool AutofillManager::UpdateCachedForm(const FormData& live_form,
                                        const FormStructure* cached_form,
                                        FormStructure** updated_form) {
   bool needs_update =
-      (!cached_form ||
-       live_form.fields.size() != cached_form->field_count());
+      (!cached_form || live_form.fields.size() != cached_form->field_count());
   for (size_t i = 0; !needs_update && i < cached_form->field_count(); ++i)
     needs_update = !cached_form->field(i)->SameFieldAs(live_form.fields[i]);
 
@@ -2052,6 +2089,7 @@ void AutofillManager::ParseForms(const std::vector<FormData>& forms) {
 
   std::vector<FormStructure*> non_queryable_forms;
   std::vector<FormStructure*> queryable_forms;
+  std::set<FormType> form_types;
   for (const FormData& form : forms) {
     const auto parse_form_start_time = TimeTicks::Now();
 
@@ -2060,6 +2098,8 @@ void AutofillManager::ParseForms(const std::vector<FormData>& forms) {
       continue;
     DCHECK(form_structure);
 
+    std::set<FormType> current_form_types = form_structure->GetFormTypes();
+    form_types.insert(current_form_types.begin(), current_form_types.end());
     // Set aside forms with method GET or author-specified types, so that they
     // are not included in the query to the server.
     if (form_structure->ShouldBeCrowdsourced())
@@ -2072,7 +2112,8 @@ void AutofillManager::ParseForms(const std::vector<FormData>& forms) {
   }
 
   if (!queryable_forms.empty() || !non_queryable_forms.empty()) {
-    AutofillMetrics::LogUserHappinessMetric(AutofillMetrics::FORMS_LOADED);
+    AutofillMetrics::LogUserHappinessMetric(AutofillMetrics::FORMS_LOADED,
+                                            form_types);
 
 #if defined(OS_IOS)
     // Log this from same location as AutofillMetrics::FORMS_LOADED to ensure
@@ -2183,7 +2224,7 @@ void AutofillManager::SplitFrontendID(int frontend_id,
                                       std::string* cc_backend_id,
                                       std::string* profile_backend_id) const {
   int cc_int_id = (frontend_id >> std::numeric_limits<uint16_t>::digits) &
-      std::numeric_limits<uint16_t>::max();
+                  std::numeric_limits<uint16_t>::max();
   int profile_int_id = frontend_id & std::numeric_limits<uint16_t>::max();
 
   *cc_backend_id = IntToBackendID(cc_int_id);
@@ -2389,8 +2430,8 @@ void AutofillManager::DumpAutofillData(bool imported_cc) const {
     fputs("Got a new credit card on CC form:\n", file);
   else
     fputs("Submitted form:\n", file);
-  for (int i = static_cast<int>(recently_autofilled_forms_.size()) - 1;
-       i >= 0; i--) {
+  for (int i = static_cast<int>(recently_autofilled_forms_.size()) - 1; i >= 0;
+       i--) {
     for (const auto& pair : recently_autofilled_forms_[i]) {
       fputs("  ", file);
       fputs(pair.first.c_str(), file);

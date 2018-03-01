@@ -12,7 +12,9 @@ ScriptSourceCode::ScriptSourceCode()
 ScriptSourceCode::ScriptSourceCode(const String& source,
                                    const KURL& url,
                                    const TextPosition& start_position)
-    : source_(source), url_(url), start_position_(start_position) {
+    : source_(source),
+      url_(url),
+      start_position_(start_position) {
   TreatNullSourceAsEmpty();
   if (!url_.IsEmpty())
     url_.RemoveFragmentIdentifier();
@@ -32,7 +34,7 @@ ScriptSourceCode::ScriptSourceCode(ScriptStreamer* streamer,
 
 ScriptSourceCode::~ScriptSourceCode() {}
 
-DEFINE_TRACE(ScriptSourceCode) {
+void ScriptSourceCode::Trace(blink::Visitor* visitor) {
   visitor->Trace(resource_);
   visitor->Trace(streamer_);
 }

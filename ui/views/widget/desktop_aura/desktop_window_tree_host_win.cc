@@ -157,7 +157,7 @@ void DesktopWindowTreeHostWin::OnNativeWidgetCreated(
   SetWindowTransparency();
 }
 
-void DesktopWindowTreeHostWin::OnNativeWidgetActivationChanged(bool active) {}
+void DesktopWindowTreeHostWin::OnActiveWindowChanged(bool active) {}
 
 void DesktopWindowTreeHostWin::OnWidgetInitDone() {}
 
@@ -710,7 +710,10 @@ void DesktopWindowTreeHostWin::ResetWindowControls() {
 }
 
 gfx::NativeViewAccessible DesktopWindowTreeHostWin::GetNativeViewAccessible() {
-  return GetWidget()->GetRootView()->GetNativeViewAccessible();
+  // This function may be called during shutdown when the |RootView| is nullptr.
+  return GetWidget()->GetRootView()
+             ? GetWidget()->GetRootView()->GetNativeViewAccessible()
+             : nullptr;
 }
 
 bool DesktopWindowTreeHostWin::ShouldHandleSystemCommands() const {
@@ -796,11 +799,13 @@ void DesktopWindowTreeHostWin::HandleEndWMSizeMove() {
 }
 
 void DesktopWindowTreeHostWin::HandleMove() {
+  CheckForMonitorChange();
   native_widget_delegate_->OnNativeWidgetMove();
   OnHostMovedInPixels(GetBoundsInPixels().origin());
 }
 
 void DesktopWindowTreeHostWin::HandleWorkAreaChanged() {
+  CheckForMonitorChange();
   GetWidget()->widget_delegate()->OnWorkAreaChanged();
 }
 
@@ -814,11 +819,13 @@ void DesktopWindowTreeHostWin::HandleVisibilityChanged(bool visible) {
 
 void DesktopWindowTreeHostWin::HandleClientSizeChanged(
     const gfx::Size& new_size) {
+  CheckForMonitorChange();
   if (dispatcher())
     OnHostResizedInPixels(new_size);
 }
 
 void DesktopWindowTreeHostWin::HandleFrameChanged() {
+  CheckForMonitorChange();
   SetWindowTransparency();
   // Replace the frame and layout the contents.
   GetWidget()->non_client_view()->UpdateFrame();
@@ -974,7 +981,8 @@ HWND DesktopWindowTreeHostWin::GetHWND() const {
 
 void DesktopWindowTreeHostWin::SetWindowTransparency() {
   bool transparent = ShouldWindowContentsBeTransparent();
-  compositor()->SetHostHasTransparentBackground(transparent);
+  compositor()->SetBackgroundColor(transparent ? SK_ColorTRANSPARENT
+                                               : SK_ColorWHITE);
   window()->SetTransparent(transparent);
   content_window_->SetTransparent(transparent);
 }
@@ -994,6 +1002,15 @@ bool DesktopWindowTreeHostWin::IsModalWindowActive() const {
       return true;
   }
   return false;
+}
+
+void DesktopWindowTreeHostWin::CheckForMonitorChange() {
+  HMONITOR monitor_from_window =
+      ::MonitorFromWindow(GetHWND(), MONITOR_DEFAULTTOPRIMARY);
+  if (monitor_from_window == last_monitor_from_window_)
+    return;
+  last_monitor_from_window_ = monitor_from_window;
+  OnHostDisplayChanged();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

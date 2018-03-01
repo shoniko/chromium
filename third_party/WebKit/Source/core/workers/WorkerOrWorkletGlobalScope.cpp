@@ -10,11 +10,12 @@
 #include "core/inspector/ConsoleMessage.h"
 #include "core/loader/WorkerFetchContext.h"
 #include "core/probe/CoreProbes.h"
+#include "core/workers/MainThreadWorkletGlobalScope.h"
 #include "core/workers/WorkerReportingProxy.h"
 #include "core/workers/WorkerThread.h"
 #include "platform/CrossThreadFunctional.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/Functional.h"
 
 namespace blink {
@@ -60,14 +61,20 @@ void WorkerOrWorkletGlobalScope::CountDeprecation(WebFeature feature) {
   ReportingProxy().CountDeprecation(feature);
 }
 
-ResourceFetcher* WorkerOrWorkletGlobalScope::GetResourceFetcher() {
+ResourceFetcher* WorkerOrWorkletGlobalScope::EnsureFetcher() {
   DCHECK(RuntimeEnabledFeatures::OffMainThreadFetchEnabled());
   DCHECK(!IsMainThreadWorkletGlobalScope());
   if (resource_fetcher_)
     return resource_fetcher_;
   WorkerFetchContext* fetch_context = WorkerFetchContext::Create(*this);
-  resource_fetcher_ =
-      ResourceFetcher::Create(fetch_context, fetch_context->GetTaskRunner());
+  resource_fetcher_ = ResourceFetcher::Create(fetch_context);
+  DCHECK(resource_fetcher_);
+  return resource_fetcher_;
+}
+ResourceFetcher* WorkerOrWorkletGlobalScope::Fetcher() const {
+  DCHECK(RuntimeEnabledFeatures::OffMainThreadFetchEnabled());
+  DCHECK(!IsMainThreadWorkletGlobalScope());
+  DCHECK(resource_fetcher_);
   return resource_fetcher_;
 }
 
@@ -95,7 +102,22 @@ void WorkerOrWorkletGlobalScope::Dispose() {
   }
 }
 
-DEFINE_TRACE(WorkerOrWorkletGlobalScope) {
+scoped_refptr<WebTaskRunner> WorkerOrWorkletGlobalScope::GetTaskRunner(
+    TaskType type) {
+  DCHECK(IsContextThread());
+  if (IsMainThreadWorkletGlobalScope()) {
+    // MainThreadWorkletGlobalScope lives on the main thread and its GetThread()
+    // doesn't return a valid worker thread. Instead, retrieve a task runner
+    // from the frame.
+    return ToMainThreadWorkletGlobalScope(this)
+        ->GetFrame()
+        ->FrameScheduler()
+        ->GetTaskRunner(type);
+  }
+  return TaskRunnerHelper::Get(type, GetThread());
+}
+
+void WorkerOrWorkletGlobalScope::Trace(blink::Visitor* visitor) {
   visitor->Trace(resource_fetcher_);
   visitor->Trace(script_controller_);
   ExecutionContext::Trace(visitor);

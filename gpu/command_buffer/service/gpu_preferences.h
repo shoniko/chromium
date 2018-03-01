@@ -73,6 +73,11 @@ struct GPU_EXPORT GpuPreferences {
 
   // Enables support for outputting NV12 video frames.
   bool enable_nv12_dxgi_video = false;
+
+  // Enables MediaFoundationVideoEncoderAccelerator on Windows 7. Windows 7 does
+  // not support some of the attributes which may impact the performance or the
+  // quality of output. So this flag is disabled by default.
+  bool enable_media_foundation_vea_on_windows7 = false;
 #endif
 
   // ===================================
@@ -140,9 +145,6 @@ struct GPU_EXPORT GpuPreferences {
 
   // Turns on calling TRACE for every GL call.
   bool enable_gpu_service_tracing = false;
-
-  // Enable OpenGL ES 3 APIs.
-  bool enable_es3_apis = true;
 
   // Use the Pass-through command decoder, skipping all validation and state
   // tracking.

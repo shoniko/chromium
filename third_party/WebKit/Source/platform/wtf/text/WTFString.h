@@ -33,7 +33,6 @@
 #include "platform/wtf/text/ASCIIFastPath.h"
 #include "platform/wtf/text/StringImpl.h"
 #include "platform/wtf/text/StringView.h"
-#include <algorithm>
 #include <iosfwd>
 
 #ifdef __OBJC__
@@ -97,9 +96,9 @@ class WTF_EXPORT String {
 
   // Construct a string referencing an existing StringImpl.
   String(StringImpl* impl) : impl_(impl) {}
-  String(RefPtr<StringImpl> impl) : impl_(std::move(impl)) {}
+  String(scoped_refptr<StringImpl> impl) : impl_(std::move(impl)) {}
 
-  void swap(String& o) { impl_.Swap(o.impl_); }
+  void swap(String& o) { impl_.swap(o.impl_); }
 
   template <typename CharType>
   static String Adopt(StringBuffer<CharType>& buffer) {
@@ -112,8 +111,8 @@ class WTF_EXPORT String {
   bool IsNull() const { return !impl_; }
   bool IsEmpty() const { return !impl_ || !impl_->length(); }
 
-  StringImpl* Impl() const { return impl_.Get(); }
-  RefPtr<StringImpl> ReleaseImpl() { return std::move(impl_); }
+  StringImpl* Impl() const { return impl_.get(); }
+  scoped_refptr<StringImpl> ReleaseImpl() { return std::move(impl_); }
 
   unsigned length() const {
     if (!impl_)
@@ -333,6 +332,7 @@ class WTF_EXPORT String {
   String FoldCase() const;
 
   // Takes a printf format and args and prints into a String.
+  // This function supports Latin-1 characters only.
   PRINTF_FORMAT(1, 2) static String Format(const char* format, ...);
 
   // Returns an uninitialized string. The characters needs to be written
@@ -495,23 +495,18 @@ class WTF_EXPORT String {
     return impl_ ? impl_->CharactersSizeInBytes() : 0;
   }
 
-  // Hash table deleted values, which are only constructed and never copied or
-  // destroyed.
-  String(WTF::HashTableDeletedValueType) : impl_(WTF::kHashTableDeletedValue) {}
-  bool IsHashTableDeletedValue() const {
-    return impl_.IsHashTableDeletedValue();
-  }
-
 #ifndef NDEBUG
   // For use in the debugger.
   void Show() const;
 #endif
 
  private:
+  friend struct HashTraits<String>;
+
   template <typename CharacterType>
   void AppendInternal(CharacterType);
 
-  RefPtr<StringImpl> impl_;
+  scoped_refptr<StringImpl> impl_;
 };
 
 #undef DISPATCH_CASE_OP

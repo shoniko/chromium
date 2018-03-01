@@ -254,9 +254,7 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
 
     @Override
     public boolean shouldEmphasizeHttpsScheme() {
-        int securityLevel = getSecurityLevel();
-        return securityLevel == ConnectionSecurityLevel.DANGEROUS
-                || securityLevel == ConnectionSecurityLevel.SECURE_WITH_POLICY_INSTALLED_CERT;
+        return !mToolbarDataProvider.isUsingBrandColor();
     }
 
     @Override
@@ -388,7 +386,6 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
         }
 
         if (mUrlBar.setUrl(url, displayText)) {
-            mUrlBar.deEmphasizeUrl();
             mUrlBar.emphasizeUrl();
         }
     }
@@ -431,8 +428,8 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
         mTitleBar.setTextColor(titleTextColor);
 
         if (getProgressBar() != null) {
-            if (!ColorUtils.isUsingDefaultToolbarColor(getResources(),
-                    getBackground().getColor())) {
+            if (!ColorUtils.isUsingDefaultToolbarColor(
+                        getResources(), false, false, getBackground().getColor())) {
                 getProgressBar().setThemeColor(getBackground().getColor(), false);
             } else {
                 getProgressBar().setBackgroundColor(ApiCompatibilityUtils.getColor(resources,
@@ -778,12 +775,6 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
 
     @Override
     public boolean isSuggestionsListShown() {
-        // Custom tabs do not support suggestions.
-        return false;
-    }
-
-    @Override
-    public boolean isSuggestionsListScrolled() {
         // Custom tabs do not support suggestions.
         return false;
     }

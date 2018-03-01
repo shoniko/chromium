@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
 #include <stdint.h>
 
 #include <memory>
@@ -47,6 +46,7 @@
 #include "chromeos/login/login_state.h"
 #include "components/ownership/mock_owner_key_util.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/test_utils.h"
 #include "crypto/nss_key_util.h"
 #include "crypto/nss_util_internal.h"
 #include "crypto/scoped_test_nss_chromeos_user.h"
@@ -149,7 +149,7 @@ class TestCryptohomeClient : public ::chromeos::FakeCryptohomeClient {
   void MountEx(const cryptohome::Identification& cryptohome_id,
                const cryptohome::AuthorizationRequest& auth,
                const cryptohome::MountRequest& request,
-               const ProtobufMethodCallback& callback) override {
+               DBusMethodCallback<cryptohome::BaseReply> callback) override {
     EXPECT_EQ(is_create_attempt_expected_, request.has_create());
     if (is_create_attempt_expected_) {
       EXPECT_EQ(expected_authorization_secret_,
@@ -165,7 +165,7 @@ class TestCryptohomeClient : public ::chromeos::FakeCryptohomeClient {
         ->set_sanitized_username(
             cryptohome::MockAsyncMethodCaller::kFakeSanitizedUsername);
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(callback, DBUS_METHOD_CALL_SUCCESS, true, reply));
+        FROM_HERE, base::BindOnce(std::move(callback), reply));
   }
 
  private:
@@ -268,8 +268,9 @@ class CryptohomeAuthenticatorTest : public testing::Test {
   // Allow test to fail and exit gracefully, even if
   // OnOffTheRecordAuthSuccess() wasn't supposed to happen.
   void FailOnGuestLoginSuccess() {
-    ON_CALL(consumer_, OnOffTheRecordAuthSuccess()).WillByDefault(
-        Invoke(MockAuthStatusConsumer::OnGuestSuccessQuitAndFail));
+    ON_CALL(consumer_, OnOffTheRecordAuthSuccess())
+        .WillByDefault(
+            Invoke(MockAuthStatusConsumer::OnGuestSuccessQuitAndFail));
   }
 
   void ExpectLoginFailure(const AuthFailure& failure) {
@@ -319,9 +320,9 @@ class CryptohomeAuthenticatorTest : public testing::Test {
     fake_cryptohome_client_->AddKeyEx(
         cryptohome::Identification(user_context_.GetAccountId()),
         cryptohome::AuthorizationRequest(), request,
-        base::Bind(
-            [](DBusMethodCallStatus call_status, bool result,
-               const cryptohome::BaseReply& reply) { EXPECT_TRUE(result); }));
+        base::BindOnce([](base::Optional<cryptohome::BaseReply> reply) {
+          EXPECT_TRUE(reply.has_value());
+        }));
     base::RunLoop().RunUntilIdle();
   }
 
@@ -479,7 +480,7 @@ TEST_F(CryptohomeAuthenticatorTest, ResolveOwnerNeededFailedMount) {
 
   // Flush all the pending operations. The operations should induce an owner
   // verification.
-  device_settings_test_helper_.Flush();
+  content::RunAllTasksUntilIdle();
 
   state_.reset(new TestAttemptState(user_context_, false));
   state_->PresetCryptohomeStatus(true, cryptohome::MOUNT_ERROR_NONE);
@@ -529,7 +530,7 @@ TEST_F(CryptohomeAuthenticatorTest, ResolveOwnerNeededSuccess) {
 
   // Flush all the pending operations. The operations should induce an owner
   // verification.
-  device_settings_test_helper_.Flush();
+  content::RunAllTasksUntilIdle();
 
   state_.reset(new TestAttemptState(user_context_, false));
   state_->PresetCryptohomeStatus(true, cryptohome::MOUNT_ERROR_NONE);

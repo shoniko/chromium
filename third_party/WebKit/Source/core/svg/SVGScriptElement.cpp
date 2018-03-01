@@ -22,13 +22,13 @@
 
 #include "bindings/core/v8/ScriptEventListener.h"
 #include "bindings/core/v8/html_script_element_or_svg_script_element.h"
-#include "core/HTMLNames.h"
-#include "core/XLinkNames.h"
 #include "core/dom/Attribute.h"
 #include "core/dom/ScriptLoader.h"
 #include "core/dom/ScriptRunner.h"
 #include "core/dom/events/Event.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
+#include "core/html_names.h"
+#include "core/xlink_names.h"
 
 namespace blink {
 
@@ -166,7 +166,7 @@ void SVGScriptElement::DispatchErrorEvent() {
 void SVGScriptElement::SetScriptElementForBinding(
     HTMLScriptElementOrSVGScriptElement& element) {
   if (!IsInV1ShadowTree())
-    element.setSVGScriptElement(this);
+    element.SetSVGScriptElement(this);
 }
 
 #if DCHECK_IS_ON()
@@ -178,14 +178,15 @@ bool SVGScriptElement::IsAnimatableAttribute(const QualifiedName& name) const {
 }
 #endif
 
-DEFINE_TRACE(SVGScriptElement) {
+void SVGScriptElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(loader_);
   SVGElement::Trace(visitor);
   SVGURIReference::Trace(visitor);
   ScriptElementBase::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(SVGScriptElement) {
+void SVGScriptElement::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(loader_);
   SVGElement::TraceWrappers(visitor);
 }

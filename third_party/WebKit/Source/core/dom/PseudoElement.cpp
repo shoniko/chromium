@@ -31,6 +31,7 @@
 #include "core/layout/LayoutObject.h"
 #include "core/layout/LayoutQuote.h"
 #include "core/probe/CoreProbes.h"
+#include "core/style/ComputedStyle.h"
 #include "core/style/ContentData.h"
 
 namespace blink {
@@ -98,7 +99,7 @@ PseudoElement::PseudoElement(Element* parent, PseudoId pseudo_id)
   }
 }
 
-RefPtr<ComputedStyle> PseudoElement::CustomStyleForLayoutObject() {
+scoped_refptr<ComputedStyle> PseudoElement::CustomStyleForLayoutObject() {
   return ParentOrShadowHostElement()->PseudoStyle(
       PseudoStyleRequest(pseudo_id_));
 }
@@ -114,7 +115,7 @@ void PseudoElement::Dispose() {
   DetachLayoutTree();
   Element* parent = ParentOrShadowHostElement();
   GetDocument().AdoptIfNeeded(*this);
-  SetParentOrShadowHostNode(0);
+  SetParentOrShadowHostNode(nullptr);
   RemovedFrom(parent);
 }
 
@@ -123,7 +124,7 @@ void PseudoElement::AttachLayoutTree(AttachContext& context) {
 
   Element::AttachLayoutTree(context);
 
-  LayoutObject* layout_object = this->GetLayoutObject();
+  LayoutObject* layout_object = GetLayoutObject();
   if (!layout_object)
     return;
 
@@ -157,7 +158,7 @@ void PseudoElement::DidRecalcStyle() {
   // The layoutObjects inside pseudo elements are anonymous so they don't get
   // notified of recalcStyle and must have the style propagated downward
   // manually similar to LayoutObject::propagateStyleToAnonymousChildren.
-  LayoutObject* layout_object = this->GetLayoutObject();
+  LayoutObject* layout_object = GetLayoutObject();
   for (LayoutObject* child = layout_object->NextInPreOrder(layout_object);
        child; child = child->NextInPreOrder(layout_object)) {
     // We only manage the style for the generated content items.
@@ -196,6 +197,17 @@ Node* PseudoElement::FindAssociatedNode() const {
     ancestor = ancestor->Parent();
   }
   return ancestor->GetNode();
+}
+
+bool PseudoElementLayoutObjectIsNeeded(const ComputedStyle* style) {
+  if (!style)
+    return false;
+  if (style->Display() == EDisplay::kNone)
+    return false;
+  if (style->StyleType() == kPseudoIdFirstLetter ||
+      style->StyleType() == kPseudoIdBackdrop)
+    return true;
+  return style->GetContentData();
 }
 
 }  // namespace blink

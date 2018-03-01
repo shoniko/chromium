@@ -10,7 +10,6 @@
 #include "core/paint/PaintInfo.h"
 #include "core/style/BorderEdge.h"
 #include "core/style/ComputedStyle.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/GraphicsContextStateSaver.h"
 #include "platform/wtf/Vector.h"
@@ -600,6 +599,15 @@ BoxBorderPainter::BoxBorderPainter(const LayoutRect& border_rect,
   inner_ = style_.GetRoundedInnerBorderFor(
       border_rect, include_logical_left_edge, include_logical_right_edge);
 
+  // Make sure that the border width isn't larger than the border box, which
+  // can pixel snap smaller.
+  float max_width = outer_.Rect().Width();
+  float max_height = outer_.Rect().Height();
+  edges_[kBSTop].ClampWidth(max_height);
+  edges_[kBSRight].ClampWidth(max_width);
+  edges_[kBSBottom].ClampWidth(max_height);
+  edges_[kBSLeft].ClampWidth(max_width);
+
   is_rounded_ = outer_.IsRounded();
 }
 
@@ -1056,9 +1064,12 @@ void BoxBorderPainter::DrawDashedDottedBoxSideFromPath(
     return;
   }
 
-  // The extra multiplier is so that the clipping mask can antialias
+  // The stroke is doubled here because the provided path is the
+  // outside edge of the border so half the stroke is clipped off, with
+  // the extra multiplier so that the clipping mask can antialias
   // the edges to prevent jaggies.
-  graphics_context.SetStrokeThickness(stroke_thickness * 1.1f);
+  const float thickness_multiplier = 2 * 1.1f;
+  graphics_context.SetStrokeThickness(stroke_thickness * thickness_multiplier);
   graphics_context.SetStrokeStyle(
       border_style == EBorderStyle::kDashed ? kDashedStroke : kDottedStroke);
 

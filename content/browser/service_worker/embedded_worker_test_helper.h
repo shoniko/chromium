@@ -64,9 +64,6 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
                                  public IPC::Listener {
  public:
   enum class Event { Install, Activate };
-  using FetchCallback =
-      base::OnceCallback<void(ServiceWorkerStatusCode,
-                              base::Time /* dispatch_event_time */)>;
 
   class MockEmbeddedWorkerInstanceClient
       : public mojom::EmbeddedWorkerInstanceClient {
@@ -84,6 +81,7 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
     void StartWorker(
         const EmbeddedWorkerStartParams& params,
         mojom::ServiceWorkerEventDispatcherRequest dispatcher_request,
+        mojom::ControllerServiceWorkerRequest controller_request,
         mojom::ServiceWorkerInstalledScriptsInfoPtr installed_scripts_info,
         mojom::EmbeddedWorkerInstanceHostAssociatedPtrInfo instance_host,
         mojom::ServiceWorkerProviderInfoForStartWorkerPtr provider_info,
@@ -192,9 +190,11 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
       const GURL& scope,
       const GURL& script_url,
       bool pause_after_download,
-      mojom::ServiceWorkerEventDispatcherRequest request,
+      mojom::ServiceWorkerEventDispatcherRequest dispatcher_request,
+      mojom::ControllerServiceWorkerRequest controller_request,
       mojom::EmbeddedWorkerInstanceHostAssociatedPtrInfo instance_host,
-      mojom::ServiceWorkerProviderInfoForStartWorkerPtr provider_info);
+      mojom::ServiceWorkerProviderInfoForStartWorkerPtr provider_info,
+      mojom::ServiceWorkerInstalledScriptsInfoPtr installed_scripts_info);
   virtual void OnResumeAfterDownload(int embedded_worker_id);
   // StopWorker IPC handler routed through MockEmbeddedWorkerInstanceClient.
   // This calls SimulateWorkerStopped() by default.
@@ -206,21 +206,22 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
       mojom::ServiceWorkerEventDispatcher::DispatchActivateEventCallback
           callback);
   virtual void OnBackgroundFetchAbortEvent(
-      const std::string& tag,
+      const std::string& developer_id,
       mojom::ServiceWorkerEventDispatcher::
           DispatchBackgroundFetchAbortEventCallback callback);
   virtual void OnBackgroundFetchClickEvent(
-      const std::string& tag,
+      const std::string& developer_id,
       mojom::BackgroundFetchState state,
       mojom::ServiceWorkerEventDispatcher::
           DispatchBackgroundFetchClickEventCallback callback);
   virtual void OnBackgroundFetchFailEvent(
-      const std::string& tag,
+      const std::string& developer_id,
       const std::vector<BackgroundFetchSettledFetch>& fetches,
       mojom::ServiceWorkerEventDispatcher::
           DispatchBackgroundFetchFailEventCallback callback);
   virtual void OnBackgroundFetchedEvent(
-      const std::string& tag,
+      const std::string& developer_id,
+      const std::string& unique_id,
       const std::vector<BackgroundFetchSettledFetch>& fetches,
       mojom::ServiceWorkerEventDispatcher::
           DispatchBackgroundFetchedEventCallback callback);
@@ -234,11 +235,11 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
           callback);
   virtual void OnFetchEvent(
       int embedded_worker_id,
-      int fetch_event_id,
       const ServiceWorkerFetchRequest& request,
       mojom::FetchEventPreloadHandlePtr preload_handle,
       mojom::ServiceWorkerFetchResponseCallbackPtr response_callback,
-      FetchCallback finish_callback);
+      mojom::ServiceWorkerEventDispatcher::DispatchFetchEventCallback
+          finish_callback);
   virtual void OnNotificationClickEvent(
       const std::string& notification_id,
       const PlatformNotificationData& notification_data,
@@ -272,7 +273,8 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
   // These functions simulate sending an EmbeddedHostMsg message through the
   // legacy IPC system to the browser.
   void SimulateWorkerReadyForInspection(int embedded_worker_id);
-  void SimulateWorkerScriptCached(int embedded_worker_id);
+  void SimulateWorkerScriptCached(int embedded_worker_id,
+                                  base::OnceClosure callback);
   void SimulateWorkerScriptLoaded(int embedded_worker_id);
   void SimulateWorkerThreadStarted(int thread_id, int embedded_worker_id);
   void SimulateWorkerScriptEvaluated(int embedded_worker_id, bool success);
@@ -286,11 +288,16 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
   class MockServiceWorkerEventDispatcher;
   class MockRendererInterface;
 
+  void DidSimulateWorkerScriptCached(int embedded_worker_id,
+                                     bool pause_after_download);
+
   void OnStartWorkerStub(
       const EmbeddedWorkerStartParams& params,
-      mojom::ServiceWorkerEventDispatcherRequest request,
+      mojom::ServiceWorkerEventDispatcherRequest dispatcher_request,
+      mojom::ControllerServiceWorkerRequest controller_request,
       mojom::EmbeddedWorkerInstanceHostAssociatedPtrInfo instance_host,
-      mojom::ServiceWorkerProviderInfoForStartWorkerPtr provider_info);
+      mojom::ServiceWorkerProviderInfoForStartWorkerPtr provider_info,
+      mojom::ServiceWorkerInstalledScriptsInfoPtr installed_scripts_info);
   void OnResumeAfterDownloadStub(int embedded_worker_id);
   void OnStopWorkerStub(int embedded_worker_id);
   void OnMessageToWorkerStub(int thread_id,
@@ -300,21 +307,22 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
       mojom::ServiceWorkerEventDispatcher::DispatchActivateEventCallback
           callback);
   void OnBackgroundFetchAbortEventStub(
-      const std::string& tag,
+      const std::string& developer_id,
       mojom::ServiceWorkerEventDispatcher::
           DispatchBackgroundFetchAbortEventCallback callback);
   void OnBackgroundFetchClickEventStub(
-      const std::string& tag,
+      const std::string& developer_id,
       mojom::BackgroundFetchState state,
       mojom::ServiceWorkerEventDispatcher::
           DispatchBackgroundFetchClickEventCallback callback);
   void OnBackgroundFetchFailEventStub(
-      const std::string& tag,
+      const std::string& developer_id,
       const std::vector<BackgroundFetchSettledFetch>& fetches,
       mojom::ServiceWorkerEventDispatcher::
           DispatchBackgroundFetchFailEventCallback callback);
   void OnBackgroundFetchedEventStub(
-      const std::string& tag,
+      const std::string& developer_id,
+      const std::string& unique_id,
       const std::vector<BackgroundFetchSettledFetch>& fetches,
       mojom::ServiceWorkerEventDispatcher::
           DispatchBackgroundFetchedEventCallback callback);
@@ -328,11 +336,11 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
           callback);
   void OnFetchEventStub(
       int thread_id,
-      int fetch_event_id,
       const ServiceWorkerFetchRequest& request,
       mojom::FetchEventPreloadHandlePtr preload_handle,
       mojom::ServiceWorkerFetchResponseCallbackPtr response_callback,
-      FetchCallback finish_callback);
+      mojom::ServiceWorkerEventDispatcher::DispatchFetchEventCallback
+          finish_callback);
   void OnNotificationClickEventStub(
       const std::string& notification_id,
       const PlatformNotificationData& notification_data,
@@ -393,6 +401,9 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
       embedded_worker_id_instance_host_ptr_map_;
   std::map<int /* embedded_worker_id */, ServiceWorkerRemoteProviderEndpoint>
       embedded_worker_id_remote_provider_map_;
+  std::map<int /* embedded_worker_id */,
+           mojom::ServiceWorkerInstalledScriptsInfoPtr>
+      embedded_worker_id_installed_scripts_info_map_;
 
   std::vector<Event> events_;
   scoped_refptr<URLLoaderFactoryGetter> url_loader_factory_getter_;

@@ -10,11 +10,15 @@
 #include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/ui/browser_list_observer.h"
+#include "build/build_config.h"
 #include "chrome/browser/ui/javascript_dialogs/javascript_dialog.h"
 #include "content/public/browser/javascript_dialog_manager.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
+
+#if !defined(OS_ANDROID)
+#include "chrome/browser/ui/browser_list_observer.h"
+#endif
 
 // A class, attached to WebContentses in browser windows, that is the
 // JavaScriptDialogManager for them and handles displaying their dialogs.
@@ -30,13 +34,15 @@
 class JavaScriptDialogTabHelper
     : public content::JavaScriptDialogManager,
       public content::WebContentsObserver,
+#if !defined(OS_ANDROID)
       public chrome::BrowserListObserver,
+#endif
       public content::WebContentsUserData<JavaScriptDialogTabHelper> {
  public:
   explicit JavaScriptDialogTabHelper(content::WebContents* web_contents);
   ~JavaScriptDialogTabHelper() override;
 
-  void SetDialogShownCallbackForTesting(base::Closure callback);
+  void SetDialogShownCallbackForTesting(base::OnceClosure callback);
   bool IsShowingDialogForTesting() const;
 
   // JavaScriptDialogManager:
@@ -45,11 +51,11 @@ class JavaScriptDialogTabHelper
                            content::JavaScriptDialogType dialog_type,
                            const base::string16& message_text,
                            const base::string16& default_prompt_text,
-                           const DialogClosedCallback& callback,
+                           DialogClosedCallback callback,
                            bool* did_suppress_message) override;
   void RunBeforeUnloadDialog(content::WebContents* web_contents,
                              bool is_reload,
-                             const DialogClosedCallback& callback) override;
+                             DialogClosedCallback callback) override;
   bool HandleJavaScriptDialog(content::WebContents* web_contents,
                               bool accept,
                               const base::string16* prompt_override) override;
@@ -64,8 +70,10 @@ class JavaScriptDialogTabHelper
       const GURL& url,
       content::ReloadType reload_type) override;
 
+#if !defined(OS_ANDROID)
   // BrowserListObserver:
   void OnBrowserSetLastActive(Browser* browser) override;
+#endif
 
  private:
   friend class content::WebContentsUserData<JavaScriptDialogTabHelper>;
@@ -73,17 +81,9 @@ class JavaScriptDialogTabHelper
 
   void LogDialogDismissalCause(DismissalCause cause);
 
-  // Wrapper around a DialogClosedCallback so that we can intercept it before
-  // passing it onto the original callback.
-  void OnDialogClosed(DialogClosedCallback callback,
-                      bool success,
-                      const base::string16& user_input);
-
-  void CloseDialog(bool success,
-                   const base::string16& user_input,
-                   DismissalCause cause);
-
-  void ClearDialogInfo();
+  void CloseDialog(DismissalCause cause,
+                   bool success,
+                   const base::string16& user_input);
 
   // The dialog being displayed on the observed WebContents.
   base::WeakPtr<JavaScriptDialog> dialog_;
@@ -97,7 +97,7 @@ class JavaScriptDialogTabHelper
   // user's input but by a call to |CloseDialog|, this class will call it.
   content::JavaScriptDialogManager::DialogClosedCallback dialog_callback_;
 
-  base::Closure dialog_shown_;
+  base::OnceClosure dialog_shown_;
 
   DISALLOW_COPY_AND_ASSIGN(JavaScriptDialogTabHelper);
 };

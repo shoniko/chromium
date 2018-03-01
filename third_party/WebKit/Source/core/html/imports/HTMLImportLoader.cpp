@@ -178,7 +178,7 @@ void HTMLImportLoader::DidFinishLoading() {
 void HTMLImportLoader::MoveToFirst(HTMLImportChild* import) {
   size_t position = imports_.Find(import);
   DCHECK_NE(kNotFound, position);
-  imports_.erase(position);
+  imports_.EraseAt(position);
   imports_.insert(0, import);
 }
 
@@ -193,7 +193,7 @@ void HTMLImportLoader::AddImport(HTMLImportChild* import) {
 
 void HTMLImportLoader::RemoveImport(HTMLImportChild* client) {
   DCHECK_NE(kNotFound, imports_.Find(client));
-  imports_.erase(imports_.Find(client));
+  imports_.EraseAt(imports_.Find(client));
 }
 
 bool HTMLImportLoader::ShouldBlockScriptExecution() const {
@@ -204,7 +204,7 @@ V0CustomElementSyncMicrotaskQueue* HTMLImportLoader::MicrotaskQueue() const {
   return microtask_queue_;
 }
 
-DEFINE_TRACE(HTMLImportLoader) {
+void HTMLImportLoader::Trace(blink::Visitor* visitor) {
   visitor->Trace(controller_);
   visitor->Trace(imports_);
   visitor->Trace(document_);

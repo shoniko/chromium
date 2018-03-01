@@ -28,12 +28,14 @@
 
 #include <stdint.h>
 
+#include "bindings/core/v8/ReferrerScriptInfo.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/V8CacheOptions.h"
 #include "core/CoreExport.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/bindings/V8BindingMacros.h"
 #include "platform/loader/fetch/AccessControlStatus.h"
+#include "platform/loader/fetch/ScriptFetchOptions.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/text/TextPosition.h"
 #include "platform/wtf/text/WTFString.h"
@@ -42,9 +44,9 @@
 namespace blink {
 
 class CachedMetadataHandler;
+class ExecutionContext;
 class ScriptResource;
 class ScriptSourceCode;
-class ExecutionContext;
 class ScriptStreamer;
 
 class CORE_EXPORT V8ScriptRunner final {
@@ -55,6 +57,7 @@ class CORE_EXPORT V8ScriptRunner final {
   // a HandleScope and a ContextScope.
   static v8::MaybeLocal<v8::Script> CompileScript(ScriptState*,
                                                   const ScriptSourceCode&,
+                                                  const ScriptFetchOptions&,
                                                   AccessControlStatus,
                                                   V8CacheOptions);
   static v8::MaybeLocal<v8::Script> CompileScript(ScriptState*,
@@ -64,7 +67,8 @@ class CORE_EXPORT V8ScriptRunner final {
                                                   const TextPosition&,
                                                   CachedMetadataHandler*,
                                                   AccessControlStatus,
-                                                  V8CacheOptions);
+                                                  V8CacheOptions,
+                                                  const ReferrerScriptInfo&);
   // CachedMetadataHandler is set when metadata caching is supported. For
   // normal scripe resources, CachedMetadataHandler is from ScriptResource.
   // For worker script, ScriptResource is null but CachedMetadataHandler may be
@@ -78,12 +82,14 @@ class CORE_EXPORT V8ScriptRunner final {
                                                   ScriptStreamer*,
                                                   CachedMetadataHandler*,
                                                   AccessControlStatus,
-                                                  V8CacheOptions);
+                                                  V8CacheOptions,
+                                                  const ReferrerScriptInfo&);
   static v8::MaybeLocal<v8::Module> CompileModule(v8::Isolate*,
                                                   const String& source,
                                                   const String& file_name,
                                                   AccessControlStatus,
-                                                  const TextPosition&);
+                                                  const TextPosition&,
+                                                  const ReferrerScriptInfo&);
   static v8::MaybeLocal<v8::Value> RunCompiledScript(v8::Isolate*,
                                                      v8::Local<v8::Script>,
                                                      ExecutionContext*);

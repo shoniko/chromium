@@ -131,7 +131,9 @@ class FetchLoaderClient final
   void DidFetchDataLoadedDataPipe() override { handle_->Completed(); }
   void DidFetchDataLoadFailed() override { handle_->Aborted(); }
 
-  DEFINE_INLINE_TRACE() { FetchDataLoader::Client::Trace(visitor); }
+  void Trace(blink::Visitor* visitor) override {
+    FetchDataLoader::Client::Trace(visitor);
+  }
 
  private:
   std::unique_ptr<WebServiceWorkerStreamHandle> handle_;
@@ -175,7 +177,7 @@ void FetchRespondWithObserver::OnResponseFulfilled(const ScriptValue& value) {
     OnResponseRejected(kWebServiceWorkerResponseErrorNoV8Instance);
     return;
   }
-  Response* response = V8Response::toImplWithTypeCheck(
+  Response* response = V8Response::ToImplWithTypeCheck(
       ToIsolate(GetExecutionContext()), value.V8Value());
   // "If one of the following conditions is true, return a network error:
   //   - |response|'s type is |error|.
@@ -230,8 +232,9 @@ void FetchRespondWithObserver::OnResponseFulfilled(const ScriptValue& value) {
   response->PopulateWebServiceWorkerResponse(web_response);
   BodyStreamBuffer* buffer = response->InternalBodyBuffer();
   if (buffer) {
-    RefPtr<BlobDataHandle> blob_data_handle = buffer->DrainAsBlobDataHandle(
-        BytesConsumer::BlobSizePolicy::kAllowBlobWithInvalidSize);
+    scoped_refptr<BlobDataHandle> blob_data_handle =
+        buffer->DrainAsBlobDataHandle(
+            BytesConsumer::BlobSizePolicy::kAllowBlobWithInvalidSize);
     if (blob_data_handle) {
       // Handle the blob response body.
       web_response.SetBlobDataHandle(blob_data_handle);
@@ -287,7 +290,7 @@ FetchRespondWithObserver::FetchRespondWithObserver(
       frame_type_(frame_type),
       request_context_(request_context) {}
 
-DEFINE_TRACE(FetchRespondWithObserver) {
+void FetchRespondWithObserver::Trace(blink::Visitor* visitor) {
   RespondWithObserver::Trace(visitor);
 }
 

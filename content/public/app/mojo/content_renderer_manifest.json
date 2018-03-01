@@ -6,10 +6,13 @@
       "provides": {
         "browser": [
           "content::mojom::Child",
+          "content::mojom::ChildHistogramFetcher",
+          "content::mojom::ChildHistogramFetcherFactory",
           "content::mojom::EmbeddedWorkerInstanceClient",
           "content::mojom::EmbeddedWorkerSetup",
           "content::mojom::FrameFactory",
           "content::mojom::RenderWidgetWindowTreeClientFactory",
+          "content::mojom::SharedWorkerFactory",
           "content::mojom::WebDatabase",
           "IPC::mojom::ChannelBootstrap",
           "visitedlink::mojom::VisitedLinkNotificationSink",
@@ -21,9 +24,8 @@
       },
       "requires": {
         "*": [ "app" ],
-        "content_browser": [ "renderer" ],
+        "content_browser": [ "renderer", "url_keyed_metrics" ],
         "device": [
-          "device:battery_monitor",
           "device:power_monitor",
           "device:screen_orientation",
           "device:sensors",
@@ -51,7 +53,22 @@
         ]
       },
       "requires": {
-        "content_browser": [ "memory_instrumentation", "renderer" ]
+        "content_browser": [ "renderer" ]
+      }
+    },
+    "navigation:dedicated_worker": {
+      "requires": {
+        "content_browser": [ "renderer" ]
+      }
+    },
+    "navigation:service_worker": {
+      "requires": {
+        "content_browser": [ "renderer" ]
+      }
+    },
+    "navigation:shared_worker": {
+      "requires": {
+        "content_browser": [ "renderer" ]
       }
     }
   },

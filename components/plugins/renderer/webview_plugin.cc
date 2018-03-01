@@ -262,9 +262,6 @@ WebViewPlugin::WebViewHelper::WebViewHelper(WebViewPlugin* plugin,
   WebLocalFrame* web_frame =
       WebLocalFrame::CreateMainFrame(web_view_, this, nullptr, nullptr);
   WebFrameWidget::Create(this, web_frame);
-  service_manager::mojom::InterfaceProviderPtr provider;
-  mojo::MakeRequest(&provider);
-  interface_provider_.Bind(std::move(provider));
 }
 
 WebViewPlugin::WebViewHelper::~WebViewHelper() {
@@ -336,12 +333,9 @@ void WebViewPlugin::WebViewHelper::ScheduleAnimation() {
   }
 }
 
-std::unique_ptr<blink::WebURLLoader>
-WebViewPlugin::WebViewHelper::CreateURLLoader(
-    const blink::WebURLRequest& request,
-    base::SingleThreadTaskRunner* task_runner) {
-  // TODO(yhirano): Stop using Platform::CreateURLLoader() here.
-  return blink::Platform::Current()->CreateURLLoader(request, task_runner);
+std::unique_ptr<blink::WebURLLoaderFactory>
+WebViewPlugin::WebViewHelper::CreateURLLoaderFactory() {
+  return blink::Platform::Current()->CreateDefaultURLLoaderFactory();
 }
 
 void WebViewPlugin::WebViewHelper::DidClearWindowObject() {
@@ -363,11 +357,6 @@ void WebViewPlugin::WebViewHelper::DidClearWindowObject() {
 void WebViewPlugin::WebViewHelper::FrameDetached(DetachType type) {
   main_frame()->FrameWidget()->Close();
   main_frame()->Close();
-}
-
-service_manager::InterfaceProvider*
-WebViewPlugin::WebViewHelper::GetInterfaceProvider() {
-  return &interface_provider_;
 }
 
 void WebViewPlugin::OnZoomLevelChanged() {

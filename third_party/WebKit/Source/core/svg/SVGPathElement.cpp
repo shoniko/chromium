@@ -35,7 +35,7 @@ inline SVGPathElement::SVGPathElement(Document& document)
   AddToPropertyMap(path_);
 }
 
-DEFINE_TRACE(SVGPathElement) {
+void SVGPathElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(path_);
   SVGGeometryElement::Trace(visitor);
 }
@@ -112,7 +112,7 @@ void SVGPathElement::CollectStyleForPresentationAttribute(
     // If this is a <use> instance, return the referenced path to maximize
     // geometry sharing.
     if (const SVGElement* element = CorrespondingElement())
-      path = toSVGPathElement(element)->GetPath();
+      path = ToSVGPathElement(element)->GetPath();
     AddPropertyToPresentationAttributeStyle(style, property->CssPropertyId(),
                                             path->CssValue());
     return;
@@ -126,8 +126,8 @@ void SVGPathElement::InvalidateMPathDependencies() {
   // dependencies manually.
   if (SVGElementSet* dependencies = SetOfIncomingReferences()) {
     for (SVGElement* element : *dependencies) {
-      if (isSVGMPathElement(*element))
-        toSVGMPathElement(element)->TargetPathChanged();
+      if (auto* mpath = ToSVGMPathElementOrNull(*element))
+        mpath->TargetPathChanged();
     }
   }
 }
@@ -146,7 +146,7 @@ void SVGPathElement::RemovedFrom(ContainerNode* root_parent) {
 
 FloatRect SVGPathElement::GetBBox() {
   // We want the exact bounds.
-  return SVGPathElement::AsPath().BoundingRect(Path::BoundsType::kExact);
+  return SVGPathElement::AsPath().BoundingRect();
 }
 
 }  // namespace blink

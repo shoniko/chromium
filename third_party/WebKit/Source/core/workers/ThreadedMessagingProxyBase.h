@@ -6,11 +6,12 @@
 #define ThreadedMessagingProxyBase_h
 
 #include "core/CoreExport.h"
-#include "core/frame/UseCounter.h"
+#include "core/frame/WebFeatureForward.h"
 #include "core/inspector/ConsoleTypes.h"
 #include "core/workers/ParentFrameTaskRunners.h"
 #include "core/workers/WorkerBackingThreadStartupData.h"
 #include "core/workers/WorkerClients.h"
+#include "core/workers/WorkerThread.h"
 #include "platform/heap/SelfKeepAlive.h"
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/Optional.h"
@@ -21,7 +22,6 @@ class ExecutionContext;
 class SourceLocation;
 class ThreadableLoadingContext;
 class WorkerInspectorProxy;
-class WorkerThread;
 struct GlobalScopeCreationParams;
 
 // The base proxy class to talk to Worker/WorkletGlobalScope on a worker thread
@@ -30,7 +30,7 @@ struct GlobalScopeCreationParams;
 // accessed and destroyed on the parent context thread.
 //
 // This has a unique lifetime: this is co-owned by the parent object (e.g.,
-// InProcessWorkerBase, AnimationWorklet) and by itself via SelfKeepAlive. The
+// DedicatedWorker, AnimationWorklet) and by itself via SelfKeepAlive. The
 // parent object releases the reference on its destructor and SelfKeepAlive is
 // cleared when the worker thread is terminated.
 //
@@ -63,7 +63,7 @@ class CORE_EXPORT ThreadedMessagingProxyBase
   // Number of live messaging proxies, used by leak detection.
   static int ProxyCount();
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
   ThreadedMessagingProxyBase(ExecutionContext*, WorkerClients*);

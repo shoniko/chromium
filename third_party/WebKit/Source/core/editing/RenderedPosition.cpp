@@ -30,11 +30,12 @@
 
 #include "core/editing/RenderedPosition.h"
 
+#include "core/editing/InlineBoxPosition.h"
 #include "core/editing/InlineBoxTraversal.h"
 #include "core/editing/TextAffinity.h"
 #include "core/editing/VisiblePosition.h"
 #include "core/editing/VisibleUnits.h"
-#include "core/html/TextControlElement.h"
+#include "core/html/forms/TextControlElement.h"
 #include "core/layout/api/LineLayoutAPIShim.h"
 #include "core/paint/PaintLayer.h"
 #include "core/paint/compositing/CompositedSelectionBound.h"
@@ -77,11 +78,7 @@ RenderedPosition::RenderedPosition(const VisiblePositionInFlatTree& position)
 
 RenderedPosition::RenderedPosition(const Position& position,
                                    TextAffinity affinity)
-    : layout_object_(nullptr),
-      inline_box_(nullptr),
-      offset_(0),
-      prev_leaf_child_(UncachedInlineBox()),
-      next_leaf_child_(UncachedInlineBox()) {
+    : layout_object_(nullptr), inline_box_(nullptr), offset_(0) {
   if (position.IsNull())
     return;
   InlineBoxPosition box_position = ComputeInlineBoxPosition(position, affinity);
@@ -96,11 +93,7 @@ RenderedPosition::RenderedPosition(const Position& position,
 
 RenderedPosition::RenderedPosition(const PositionInFlatTree& position,
                                    TextAffinity affinity)
-    : layout_object_(nullptr),
-      inline_box_(nullptr),
-      offset_(0),
-      prev_leaf_child_(UncachedInlineBox()),
-      next_leaf_child_(UncachedInlineBox()) {
+    : layout_object_(nullptr), inline_box_(nullptr), offset_(0) {
   if (position.IsNull())
     return;
   InlineBoxPosition box_position = ComputeInlineBoxPosition(position, affinity);
@@ -114,15 +107,15 @@ RenderedPosition::RenderedPosition(const PositionInFlatTree& position,
 }
 
 InlineBox* RenderedPosition::PrevLeafChild() const {
-  if (prev_leaf_child_ == UncachedInlineBox())
+  if (!prev_leaf_child_.has_value())
     prev_leaf_child_ = inline_box_->PrevLeafChildIgnoringLineBreak();
-  return prev_leaf_child_;
+  return prev_leaf_child_.value();
 }
 
 InlineBox* RenderedPosition::NextLeafChild() const {
-  if (next_leaf_child_ == UncachedInlineBox())
+  if (!next_leaf_child_.has_value())
     next_leaf_child_ = inline_box_->NextLeafChildIgnoringLineBreak();
-  return next_leaf_child_;
+  return next_leaf_child_.value();
 }
 
 bool RenderedPosition::IsEquivalent(const RenderedPosition& other) const {
@@ -340,6 +333,18 @@ void RenderedPosition::PositionInGraphicsLayerBacking(
       LocalToInvalidationBackingPoint(edge_bottom_in_layer, nullptr);
 }
 
+LayoutPoint RenderedPosition::GetSamplePointForVisibility(
+    const LayoutPoint& edge_top_in_layer,
+    const LayoutPoint& edge_bottom_in_layer) {
+  FloatSize diff(edge_top_in_layer - edge_bottom_in_layer);
+  // Adjust by ~1px to avoid integer snapping error. This logic is the same
+  // as that in ComputeViewportSelectionBound in cc.
+  diff.Scale(1 / diff.DiagonalLength());
+  LayoutPoint sample_point = edge_bottom_in_layer;
+  sample_point.Move(LayoutSize(diff));
+  return sample_point;
+}
+
 bool RenderedPosition::IsVisible(bool selection_start) {
   if (IsNull())
     return false;
@@ -350,7 +355,7 @@ bool RenderedPosition::IsVisible(bool selection_start) {
   TextControlElement* text_control = EnclosingTextControl(node);
   if (!text_control)
     return true;
-  if (!isHTMLInputElement(text_control))
+  if (!IsHTMLInputElement(text_control))
     return true;
 
   LayoutObject* layout_object = text_control->GetLayoutObject();
@@ -358,14 +363,16 @@ bool RenderedPosition::IsVisible(bool selection_start) {
     return true;
 
   LayoutPoint edge_top_in_layer;
-  LayoutPoint ignored1;
+  LayoutPoint edge_bottom_in_layer;
   bool ignored2;
-  GetLocalSelectionEndpoints(selection_start, edge_top_in_layer, ignored1,
-                             ignored2);
+  GetLocalSelectionEndpoints(selection_start, edge_top_in_layer,
+                             edge_bottom_in_layer, ignored2);
+  LayoutPoint sample_point =
+      GetSamplePointForVisibility(edge_top_in_layer, edge_bottom_in_layer);
 
   LayoutBox* text_control_object = ToLayoutBox(layout_object);
   LayoutPoint position_in_input(layout_object_->LocalToAncestorPoint(
-      FloatPoint(edge_top_in_layer), text_control_object,
+      FloatPoint(sample_point), text_control_object,
       kTraverseDocumentBoundaries));
   if (!text_control_object->BorderBoxRect().Contains(position_in_input))
     return false;

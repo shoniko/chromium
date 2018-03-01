@@ -15,6 +15,7 @@
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/frame_messages.h"
 #include "content/common/frame_owner_properties.h"
+#include "content/common/frame_policy.h"
 #include "content/public/browser/navigation_throttle.h"
 #include "content/public/browser/stream_handle.h"
 #include "content/public/common/browser_side_navigation_policy.h"
@@ -29,7 +30,6 @@
 #include "third_party/WebKit/public/platform/WebMixedContentContextType.h"
 #include "third_party/WebKit/public/platform/WebPageVisibilityState.h"
 #include "third_party/WebKit/public/platform/modules/bluetooth/web_bluetooth.mojom.h"
-#include "third_party/WebKit/public/web/WebSandboxFlags.h"
 #include "third_party/WebKit/public/web/WebTreeScopeType.h"
 #include "ui/base/page_transition_types.h"
 
@@ -97,8 +97,8 @@ TestRenderFrameHost* TestRenderFrameHost::AppendChild(
   std::string frame_unique_name = base::GenerateGUID();
   OnCreateChildFrame(GetProcess()->GetNextRoutingID(),
                      blink::WebTreeScopeType::kDocument, frame_name,
-                     frame_unique_name, blink::WebSandboxFlags::kNone,
-                     ParsedFeaturePolicyHeader(), FrameOwnerProperties());
+                     frame_unique_name, base::UnguessableToken::Create(),
+                     FramePolicy(), FrameOwnerProperties());
   return static_cast<TestRenderFrameHost*>(
       child_creation_observer_.last_created_frame());
 }
@@ -148,7 +148,7 @@ void TestRenderFrameHost::SimulateNavigationCommit(const GURL& url) {
   FrameHostMsg_DidCommitProvisionalLoad_Params params;
   params.nav_entry_id = 0;
   params.url = url;
-  params.origin = url::Origin(url);
+  params.origin = url::Origin::Create(url);
   if (!GetParent())
     params.transition = ui::PAGE_TRANSITION_LINK;
   else if (is_auto_subframe)
@@ -286,14 +286,6 @@ void TestRenderFrameHost::SendNavigate(int nav_entry_id,
                              ModificationCallback());
 }
 
-void TestRenderFrameHost::SendFailedNavigate(int nav_entry_id,
-                                             bool did_create_new_entry,
-                                             const GURL& url) {
-  SendNavigateWithParameters(nav_entry_id, did_create_new_entry, false,
-                             url, ui::PAGE_TRANSITION_RELOAD, 500,
-                             ModificationCallback());
-}
-
 void TestRenderFrameHost::SendNavigateWithTransition(
     int nav_entry_id,
     bool did_create_new_entry,
@@ -382,7 +374,7 @@ void TestRenderFrameHost::SendNavigateWithParameters(
   // In most cases, the origin will match the URL's origin.  Tests that need to
   // check corner cases (like about:blank) should specify the origin param
   // manually.
-  url::Origin origin(url_copy);
+  url::Origin origin = url::Origin::Create(url_copy);
   params.origin = origin;
 
   url::Replacements<char> replacements;
@@ -418,8 +410,8 @@ void TestRenderFrameHost::SendNavigateWithParams(
         std::string("Content-Type: ") + contents_mime_type_);
     navigation_handle()->set_response_headers_for_testing(response_headers);
   }
-  FrameHostMsg_DidCommitProvisionalLoad msg(GetRoutingID(), *params);
-  OnDidCommitProvisionalLoad(msg);
+  DidCommitProvisionalLoad(
+      base::MakeUnique<FrameHostMsg_DidCommitProvisionalLoad_Params>(*params));
   last_commit_was_error_page_ = params->url_is_unreachable;
 }
 

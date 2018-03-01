@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/metrics/statistics_recorder.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/eme_constants.h"
 #include "media/base/media.h"
@@ -204,6 +205,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // Media pipeline starts new threads, which needs AtExitManager.
   base::AtExitManager at_exit;
 
+  // Required to avoid leaking histogram memory over long fuzzing runs. Must be
+  // installed before any histograms are acquired. This is safe to call multiple
+  // times.
+  base::StatisticsRecorder::Initialize();
+
   // Media pipeline checks command line arguments internally.
   base::CommandLine::Init(0, nullptr);
 
@@ -218,8 +224,22 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     media::ProgressivePipelineIntegrationFuzzerTest test;
     test.RunTest(data, size);
   } else {
-    media::MediaSourcePipelineIntegrationFuzzerTest test;
-    test.RunTest(data, size, MseFuzzerVariantEnumToMimeTypeString(variant));
+    // Sequentially fuzz with new and old MSE buffering APIs.  See
+    // https://crbug.com/718641.
+    {
+      base::test::ScopedFeatureList features_with_buffering_api_forced;
+      features_with_buffering_api_forced.InitAndEnableFeature(
+          media::kMseBufferByPts);
+      media::MediaSourcePipelineIntegrationFuzzerTest test;
+      test.RunTest(data, size, MseFuzzerVariantEnumToMimeTypeString(variant));
+    }
+    {
+      base::test::ScopedFeatureList features_with_buffering_api_forced;
+      features_with_buffering_api_forced.InitAndDisableFeature(
+          media::kMseBufferByPts);
+      media::MediaSourcePipelineIntegrationFuzzerTest test;
+      test.RunTest(data, size, MseFuzzerVariantEnumToMimeTypeString(variant));
+    }
   }
 
   return 0;

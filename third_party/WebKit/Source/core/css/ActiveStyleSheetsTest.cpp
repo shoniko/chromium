@@ -421,7 +421,7 @@ TEST_F(ActiveStyleSheetsTest, CompareActiveStyleSheets_AddRemoveNonMatchingMQ) {
   EXPECT_EQ(0u, changed_rule_sets.size());
 
   CSSStyleSheet* sheet1 = CreateSheet();
-  RefPtr<MediaQuerySet> mq =
+  scoped_refptr<MediaQuerySet> mq =
       MediaQueryParser::ParseMediaQuerySet("(min-width: 9000px)");
   sheet1->SetMediaQueries(mq);
   sheet1->MatchesMediaQueries(MediaQueryEvaluator());
@@ -455,7 +455,7 @@ TEST_F(ApplyRulesetsTest, AddUniversalRuleToDocument) {
 }
 
 TEST_F(ApplyRulesetsTest, AddUniversalRuleToShadowTree) {
-  GetDocument().body()->setInnerHTML("<div id=host></div>");
+  GetDocument().body()->SetInnerHTMLFromString("<div id=host></div>");
   Element* host = GetDocument().getElementById("host");
   ASSERT_TRUE(host);
 
@@ -492,7 +492,7 @@ TEST_F(ApplyRulesetsTest, AddFontFaceRuleToDocument) {
 }
 
 TEST_F(ApplyRulesetsTest, AddFontFaceRuleToShadowTree) {
-  GetDocument().body()->setInnerHTML("<div id=host></div>");
+  GetDocument().body()->SetInnerHTMLFromString("<div id=host></div>");
   Element* host = GetDocument().getElementById("host");
   ASSERT_TRUE(host);
 
@@ -516,12 +516,13 @@ TEST_F(ApplyRulesetsTest, AddFontFaceRuleToShadowTree) {
 }
 
 TEST_F(ApplyRulesetsTest, RemoveSheetFromShadowTree) {
-  GetDocument().body()->setInnerHTML("<div id=host></div>");
+  GetDocument().body()->SetInnerHTMLFromString("<div id=host></div>");
   Element* host = GetDocument().getElementById("host");
   ASSERT_TRUE(host);
 
   ShadowRoot& shadow_root = AttachShadow(*host);
-  shadow_root.setInnerHTML("<style>::slotted(#dummy){color:pink}</style>");
+  shadow_root.SetInnerHTMLFromString(
+      "<style>::slotted(#dummy){color:pink}</style>");
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   EXPECT_TRUE(GetStyleEngine().TreeBoundaryCrossingScopes().IsEmpty());

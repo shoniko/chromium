@@ -46,6 +46,14 @@
     console.log("end");
   `);
 
+  // Add Violation-source message.
+  var violationMessage = new ConsoleModel.ConsoleMessage(
+      null, ConsoleModel.ConsoleMessage.MessageSource.Violation,
+      ConsoleModel.ConsoleMessage.MessageLevel.Verbose,
+      "Violation message text",
+      ConsoleModel.ConsoleMessage.MessageType.Log);
+  ConsoleModel.consoleModel.addMessage(violationMessage);
+
   var messages = Console.ConsoleView.instance()._visibleViewMessages;
 
   function dumpVisibleMessages() {
@@ -68,12 +76,19 @@
       dumpVisibleMessages();
       next();
     },
+    function allLevelsFilter(next) {
+      Console.ConsoleViewFilter.levelFilterSetting().set(Console.ConsoleFilter.allLevelsFilterValue());
+      dumpVisibleMessages();
+      next();
+    },
     function addURL1Filter(next) {
+      TestRunner.addResult('Blocking messages from ' + url1);
       Console.ConsoleView.instance()._filter.addMessageURLFilter(url1);
       dumpVisibleMessages();
       next();
     },
     function addURL2Filter(next) {
+      TestRunner.addResult('Blocking messages from ' + url2);
       Console.ConsoleView.instance()._filter.addMessageURLFilter(url2);
       dumpVisibleMessages();
       next();
@@ -93,40 +108,44 @@
       dumpVisibleMessages();
       next();
     },
-    function checkContextFilter(next) {
-      Console.ConsoleView.instance()._filter.setContext('context1');
-      dumpVisibleMessages();
-      next();
-    },
-    function checkAllContextsFilter(next) {
-      Console.ConsoleView.instance()._filter.setContext(Console.ConsoleSidebar.AllContextsFilter);
-      dumpVisibleMessages();
-      next();
-    },
     function checkTextFilter(next) {
       Console.ConsoleView.instance()._filter._textFilterUI.setValue('outer');
-      Console.ConsoleView.instance()._filter._textFilterChanged();
+      Console.ConsoleView.instance()._filter._onFilterChanged();
       dumpVisibleMessages();
       next();
     },
     function checkMultiTextFilter(next)
     {
       Console.ConsoleView.instance()._filter._textFilterUI.setValue("Group /[2-3]top/");
-      Console.ConsoleView.instance()._filter._textFilterChanged();
+      Console.ConsoleView.instance()._filter._onFilterChanged();
       dumpVisibleMessages();
       next();
     },
     function checkTextUrlFilter(next)
     {
       Console.ConsoleView.instance()._filter._textFilterUI.setValue("url:log-source");
-      Console.ConsoleView.instance()._filter._textFilterChanged();
+      Console.ConsoleView.instance()._filter._onFilterChanged();
       dumpVisibleMessages();
       next();
     },
     function checkNegativeTextUrlFilter(next)
     {
       Console.ConsoleView.instance()._filter._textFilterUI.setValue("-url:log-source");
-      Console.ConsoleView.instance()._filter._textFilterChanged();
+      Console.ConsoleView.instance()._filter._onFilterChanged();
+      dumpVisibleMessages();
+      next();
+    },
+    function checkSourceFilter(next)
+    {
+      Console.ConsoleView.instance()._filter._textFilterUI.setValue("source:violation");
+      Console.ConsoleView.instance()._filter._onFilterChanged();
+      dumpVisibleMessages();
+      next();
+    },
+    function checkContextTextFilter(next)
+    {
+      Console.ConsoleView.instance()._filter._textFilterUI.setValue("context:context");
+      Console.ConsoleView.instance()._filter._onFilterChanged();
       dumpVisibleMessages();
       next();
     },

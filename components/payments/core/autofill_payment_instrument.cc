@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <memory>
 
+#include "base/bind.h"
 #include "base/json/json_writer.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -31,10 +32,10 @@ AutofillPaymentInstrument::AutofillPaymentInstrument(
     const std::string& app_locale,
     PaymentRequestBaseDelegate* payment_request_delegate)
     : PaymentInstrument(
-          method_name,
           autofill::data_util::GetPaymentRequestData(card.network())
               .icon_resource_id,
           PaymentInstrument::Type::AUTOFILL),
+      method_name_(method_name),
       credit_card_(card),
       matches_merchant_card_type_exactly_(matches_merchant_card_type_exactly),
       billing_profiles_(billing_profiles),
@@ -68,13 +69,12 @@ void AutofillPaymentInstrument::InvokePaymentApp(
   // Start the normalization of the billing address.
   // Use the country code from the profile if it is set, otherwise infer it
   // from the |app_locale_|.
-  std::string country_code = base::UTF16ToUTF8(
-      billing_address_.GetRawInfo(autofill::ADDRESS_HOME_COUNTRY));
-  if (!autofill::data_util::IsValidCountryCode(country_code)) {
-    country_code = autofill::AutofillCountry::CountryCodeForLocale(app_locale_);
-  }
-  payment_request_delegate_->GetAddressNormalizer()->StartAddressNormalization(
-      billing_address_, country_code, /*timeout_seconds=*/5, this);
+  std::string country_code = autofill::data_util::GetCountryCodeWithFallback(
+      billing_address_, app_locale_);
+  payment_request_delegate_->GetAddressNormalizer()->NormalizeAddressAsync(
+      billing_address_, country_code, /*timeout_seconds=*/5,
+      base::BindOnce(&AutofillPaymentInstrument::OnAddressNormalized,
+                     weak_ptr_factory_.GetWeakPtr()));
 
   payment_request_delegate_->DoFullCardRequest(credit_card_,
                                                weak_ptr_factory_.GetWeakPtr());
@@ -182,24 +182,6 @@ void AutofillPaymentInstrument::OnFullCardRequestFailed() {
   delegate_ = nullptr;
 }
 
-void AutofillPaymentInstrument::OnAddressNormalized(
-    const autofill::AutofillProfile& normalized_profile) {
-  DCHECK(is_waiting_for_billing_address_normalization_);
-
-  billing_address_ = normalized_profile;
-  is_waiting_for_billing_address_normalization_ = false;
-
-  if (!is_waiting_for_card_unmask_)
-    GenerateBasicCardResponse();
-}
-
-void AutofillPaymentInstrument::OnCouldNotNormalize(
-    const autofill::AutofillProfile& profile) {
-  // Since the phone number is formatted in either case, this profile should be
-  // used.
-  OnAddressNormalized(profile);
-}
-
 void AutofillPaymentInstrument::GenerateBasicCardResponse() {
   DCHECK(!is_waiting_for_billing_address_normalization_);
   DCHECK(!is_waiting_for_card_unmask_);
@@ -211,10 +193,22 @@ void AutofillPaymentInstrument::GenerateBasicCardResponse() {
           .ToDictionaryValue();
   std::string stringified_details;
   base::JSONWriter::Write(*response_value, &stringified_details);
-  delegate_->OnInstrumentDetailsReady(method_name(), stringified_details);
+  delegate_->OnInstrumentDetailsReady(method_name_, stringified_details);
 
   delegate_ = nullptr;
   cvc_ = base::UTF8ToUTF16("");
+}
+
+void AutofillPaymentInstrument::OnAddressNormalized(
+    bool success,
+    const autofill::AutofillProfile& normalized_profile) {
+  DCHECK(is_waiting_for_billing_address_normalization_);
+
+  billing_address_ = normalized_profile;
+  is_waiting_for_billing_address_normalization_ = false;
+
+  if (!is_waiting_for_card_unmask_)
+    GenerateBasicCardResponse();
 }
 
 }  // namespace payments

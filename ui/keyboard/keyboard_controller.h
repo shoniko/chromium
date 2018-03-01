@@ -13,9 +13,11 @@
 #include "ui/base/ime/input_method_observer.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/keyboard/container_behavior.h"
 #include "ui/keyboard/keyboard_event_filter.h"
 #include "ui/keyboard/keyboard_export.h"
 #include "ui/keyboard/keyboard_layout_delegate.h"
+#include "ui/keyboard/keyboard_util.h"
 
 namespace aura {
 class Window;
@@ -30,10 +32,6 @@ namespace keyboard {
 class CallbackAnimationObserver;
 class KeyboardControllerObserver;
 class KeyboardUI;
-
-// Relative distance from the parent window, from which show animation starts
-// or hide animation finishes.
-constexpr int kAnimationDistance = 30;
 
 // Represents the current state of the keyboard managed by the controller.
 // Don't change the numeric value of the members because they are used in UMA
@@ -134,12 +132,20 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
   bool IsKeyboardWindowCreated();
 
   // Returns the current keyboard bounds. An empty rectangle will get returned
-  // when the keyboard is not shown or in FLOATING mode.
+  // when the keyboard is not shown.
   const gfx::Rect& current_keyboard_bounds() const {
     return current_keyboard_bounds_;
   }
 
   KeyboardControllerState GetStateForTest() const { return state_; }
+
+  const gfx::Rect AdjustSetBoundsRequest(
+      const gfx::Rect& display_bounds,
+      const gfx::Rect& requested_bounds) const;
+
+  // Returns true if overscroll is currently allowed by the active keyboard
+  // container behavior.
+  bool IsOverscrollAllowed() const;
 
  private:
   // For access to Observer methods for simulation.
@@ -147,6 +153,10 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
 
   // For access to SetContainerBounds.
   friend class KeyboardLayoutManager;
+
+  // For access to NotifyKeyboardConfigChanged
+  friend bool keyboard::UpdateKeyboardConfig(
+      const keyboard::KeyboardConfig& config);
 
   // aura::WindowObserver overrides
   void OnWindowHierarchyChanged(const HierarchyChangeParams& params) override;
@@ -188,11 +198,15 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
   // display.
   void AdjustKeyboardBounds();
 
+  // Notifies keyboard config change to the observers.
+  // Only called from |UpdateKeyboardConfig| in keyboard_util.
+  void NotifyKeyboardConfigChanged();
+
   // Validates the state transition. Called from ChangeState.
   void CheckStateTransition(KeyboardControllerState prev,
                             KeyboardControllerState next);
 
-  // Changes the current state with validating the transition.
+  // Changes the current state and validates the transition.
   void ChangeState(KeyboardControllerState state);
 
   // Reports error histogram in case lingering in an intermediate state.
@@ -204,6 +218,9 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
   // CallbackAnimationObserver should destructed before container_ because it
   // uses container_'s animator.
   std::unique_ptr<CallbackAnimationObserver> animation_observer_;
+
+  // Current active visual behavior for the keyboard container.
+  std::unique_ptr<ContainerBehavior> container_behavior_;
 
   // If true, show the keyboard window when keyboard UI content updates.
   bool show_on_content_update_;

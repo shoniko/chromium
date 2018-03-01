@@ -17,6 +17,7 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
 #include "content/browser/frame_host/frame_tree_node.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/common/content_export.h"
@@ -29,6 +30,10 @@
 #include "content/public/common/request_context_type.h"
 #include "third_party/WebKit/public/platform/WebMixedContentContextType.h"
 #include "url/gurl.h"
+
+namespace net {
+class SSLInfo;
+}  // namespace net
 
 struct FrameHostMsg_DidCommitProvisionalLoad_Params;
 
@@ -103,6 +108,8 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
     DEFERRING_START,
     WILL_REDIRECT_REQUEST,
     DEFERRING_REDIRECT,
+    WILL_FAIL_REQUEST,
+    DEFERRING_FAILURE,
     CANCELING,
     WILL_PROCESS_RESPONSE,
     DEFERRING_RESPONSE,
@@ -165,6 +172,7 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   RestoreType GetRestoreType() override;
   const GURL& GetBaseURLForDataURL() override;
   const GlobalRequestID& GetGlobalRequestID() override;
+  bool IsDownload() override;
 
   // Resume and CancelDeferredNavigation must only be called by the
   // NavigationThrottle that is currently deferring the navigation.
@@ -185,11 +193,6 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   // enabled. Make it work in both modes.
   bool is_form_submission() const { return is_form_submission_; }
 
-  // Whether the navigation request is a download. This is useful when the
-  // navigation hasn't committed yet, in which case HasCommitted() will return
-  // false even if the navigation request is not a download.
-  bool is_download() const { return is_download_; }
-
   // The NavigatorDelegate to notify/query for various navigation events.
   // Normally this is the WebContents, except if this NavigationHandle was
   // created during a navigation to an interstitial page. In this case it will
@@ -198,8 +201,8 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   // Note: due to the interstitial navigation case, all calls that can possibly
   // expose the NavigationHandle to code outside of content/ MUST go though the
   // NavigatorDelegate. In particular, the ContentBrowserClient should not be
-  // called directly form the NavigationHandle code. Thus, these calls will not
-  // expose the NavigationHandle when navigating to an InterstialPage.
+  // called directly from the NavigationHandle code. Thus, these calls will not
+  // expose the NavigationHandle when navigating to an InterstitialPage.
   NavigatorDelegate* GetDelegate() const;
 
   RequestContextType request_context_type() const {
@@ -299,6 +302,14 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
       net::HttpResponseInfo::ConnectionInfo connection_info,
       RenderProcessHost* post_redirect_process,
       const ThrottleChecksFinishedCallback& callback);
+
+  // Called when the URLRequest will fail. |callback| will be called when all
+  // throttles check have completed. This will allow the caller to explicitly
+  // cancel the navigation (with a custom error code and/or custom error page
+  // HTML) or let the failure proceed as normal.
+  void WillFailRequest(base::Optional<net::SSLInfo> ssl_info,
+                       bool should_ssl_errors_be_fatal,
+                       const ThrottleChecksFinishedCallback& callback);
 
   // Called when the URLRequest has delivered response headers and metadata.
   // |callback| will be called when all throttle checks have completed,
@@ -412,6 +423,7 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
 
   NavigationThrottle::ThrottleCheckResult CheckWillStartRequest();
   NavigationThrottle::ThrottleCheckResult CheckWillRedirectRequest();
+  NavigationThrottle::ThrottleCheckResult CheckWillFailRequest();
   NavigationThrottle::ThrottleCheckResult CheckWillProcessResponse();
 
   void ResumeInternal();
@@ -461,6 +473,15 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   // nullptr;
   NavigationThrottle* GetDeferringThrottle() const;
 
+  // Returns the SSLInfo for a request that failed due to a certificate error.
+  // In the case of other request failures, returns base::nullopt.
+  // TODO(crrev.com/c/621236): Expose and use this method outside //content.
+  base::Optional<net::SSLInfo> GetSSLInfo();
+
+  // Returns the whether failure for a certificate error should be fatal.
+  // TODO(crrev.com/c/621236): Expose and use this method outside //content.
+  bool ShouldSSLErrorsBeFatal();
+
   // See NavigationHandle for a description of those member variables.
   GURL url_;
   scoped_refptr<SiteInstance> starting_site_instance_;
@@ -478,6 +499,8 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   bool subframe_entry_committed_;
   scoped_refptr<net::HttpResponseHeaders> response_headers_;
   net::HttpResponseInfo::ConnectionInfo connection_info_;
+  base::Optional<net::SSLInfo> ssl_info_;
+  bool should_ssl_errors_be_fatal_;
 
   // The original url of the navigation. This may differ from |url_| if the
   // navigation encounters redirects.

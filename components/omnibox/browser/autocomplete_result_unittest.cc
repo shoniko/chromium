@@ -15,7 +15,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_match_type.h"
@@ -26,6 +25,7 @@
 #include "components/variations/entropy_provider.h"
 #include "components/variations/variations_associated_data.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/metrics_proto/omnibox_event.pb.h"
 
 using metrics::OmniboxEventProto;
 
@@ -52,7 +52,7 @@ void PopulateAutocompleteMatchesFromTestData(
     const AutocompleteMatchTestData* data,
     size_t count,
     ACMatches* matches) {
-  ASSERT_TRUE(matches != NULL);
+  ASSERT_TRUE(matches != nullptr);
   for (size_t i = 0; i < count; ++i) {
     AutocompleteMatch match;
     match.destination_url = GURL(data[i].destination_url);
@@ -113,7 +113,7 @@ class AutocompleteResultTest : public testing::Test {
   }
 
   void SetUp() override {
-    template_url_service_.reset(new TemplateURLService(NULL, 0));
+    template_url_service_.reset(new TemplateURLService(nullptr, 0));
     template_url_service_->Load();
   }
 
@@ -200,10 +200,9 @@ void AutocompleteResultTest::RunCopyOldMatchesTest(
     const TestData* last, size_t last_size,
     const TestData* current, size_t current_size,
     const TestData* expected, size_t expected_size) {
-  AutocompleteInput input(base::ASCIIToUTF16("a"), base::string16::npos,
-                          std::string(), GURL(), base::string16(),
-                          OmniboxEventProto::INVALID_SPEC, false, false, false,
-                          true, false, TestSchemeClassifier());
+  AutocompleteInput input(base::ASCIIToUTF16("a"),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
 
   ACMatches last_matches;
   PopulateAutocompleteMatches(last, last_size, &last_matches);
@@ -237,10 +236,9 @@ TEST_F(AutocompleteResultTest, Swap) {
   AutocompleteMatch match;
   match.relevance = 1;
   match.allowed_to_be_default_match = true;
-  AutocompleteInput input(base::ASCIIToUTF16("a"), base::string16::npos,
-                          std::string(), GURL(), base::string16(),
-                          OmniboxEventProto::INVALID_SPEC, false, false, false,
-                          true, false, TestSchemeClassifier());
+  AutocompleteInput input(base::ASCIIToUTF16("a"),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
   matches.push_back(match);
   r1.AppendMatches(input, matches);
   r1.SortAndCull(input, template_url_service_.get());
@@ -375,10 +373,9 @@ TEST_F(AutocompleteResultTest, SortAndCullEmptyDestinationURLs) {
   matches[3].destination_url = GURL();
   matches[4].destination_url = GURL();
 
-  AutocompleteInput input(base::ASCIIToUTF16("a"), base::string16::npos,
-                          std::string(), GURL(), base::string16(),
-                          OmniboxEventProto::INVALID_SPEC, false, false, false,
-                          true, false, TestSchemeClassifier());
+  AutocompleteInput input(base::ASCIIToUTF16("a"),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
   AutocompleteResult result;
   result.AppendMatches(input, matches);
   result.SortAndCull(input, template_url_service_.get());
@@ -421,10 +418,9 @@ TEST_F(AutocompleteResultTest, SortAndCullDuplicateSearchURLs) {
   matches[3].destination_url = GURL("http://www.foo.com/s?q=foo&aqs=0");
   matches[4].destination_url = GURL("http://www.foo.com/");
 
-  AutocompleteInput input(base::ASCIIToUTF16("a"), base::string16::npos,
-                          std::string(), GURL(), base::string16(),
-                          OmniboxEventProto::INVALID_SPEC, false, false, false,
-                          true, false, TestSchemeClassifier());
+  AutocompleteInput input(base::ASCIIToUTF16("a"),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
   AutocompleteResult result;
   result.AppendMatches(input, matches);
   result.SortAndCull(input, template_url_service_.get());
@@ -473,10 +469,9 @@ TEST_F(AutocompleteResultTest, SortAndCullWithMatchDups) {
   matches[4].destination_url = GURL("http://www.foo.com/");
   matches[5].destination_url = GURL("http://www.foo.com/s?q=foo2&oq=f");
 
-  AutocompleteInput input(base::ASCIIToUTF16("a"), base::string16::npos,
-                          std::string(), GURL(), base::string16(),
-                          OmniboxEventProto::INVALID_SPEC, false, false, false,
-                          true, false, TestSchemeClassifier());
+  AutocompleteInput input(base::ASCIIToUTF16("a"),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
   AutocompleteResult result;
   result.AppendMatches(input, matches);
   result.SortAndCull(input, template_url_service_.get());
@@ -527,10 +522,8 @@ TEST_F(AutocompleteResultTest, SortAndCullWithDemotionsByType) {
   base::FieldTrialList::CreateFieldTrial(
       OmniboxFieldTrial::kBundledExperimentFieldTrialName, "A");
 
-  AutocompleteInput input(base::ASCIIToUTF16("a"), base::string16::npos,
-                          std::string(), GURL(), base::string16(),
-                          OmniboxEventProto::HOME_PAGE, false, false, false,
-                          true, false, TestSchemeClassifier());
+  AutocompleteInput input(base::ASCIIToUTF16("a"), OmniboxEventProto::HOME_PAGE,
+                          TestSchemeClassifier());
   AutocompleteResult result;
   result.AppendMatches(input, matches);
   result.SortAndCull(input, template_url_service_.get());
@@ -573,10 +566,9 @@ TEST_F(AutocompleteResultTest, SortAndCullWithMatchDupsAndDemotionsByType) {
 
   {
     AutocompleteInput input(
-        base::ASCIIToUTF16("a"), base::string16::npos, std::string(), GURL(),
-        base::string16(),
-        OmniboxEventProto::INSTANT_NTP_WITH_FAKEBOX_AS_STARTING_FOCUS, false,
-        false, false, true, false, TestSchemeClassifier());
+        base::ASCIIToUTF16("a"),
+        OmniboxEventProto::INSTANT_NTP_WITH_FAKEBOX_AS_STARTING_FOCUS,
+        TestSchemeClassifier());
     AutocompleteResult result;
     result.AppendMatches(input, matches);
     result.SortAndCull(input, template_url_service_.get());
@@ -612,10 +604,9 @@ TEST_F(AutocompleteResultTest, SortAndCullReorderForDefaultMatch) {
     // PopulateAutocompleteMatches()).
     ACMatches matches;
     PopulateAutocompleteMatches(data, arraysize(data), &matches);
-    AutocompleteInput input(base::ASCIIToUTF16("a"), base::string16::npos,
-                            std::string(), GURL(), base::string16(),
-                            OmniboxEventProto::HOME_PAGE, false, false, false,
-                            true, false, test_scheme_classifier);
+    AutocompleteInput input(base::ASCIIToUTF16("a"),
+                            metrics::OmniboxEventProto::HOME_PAGE,
+                            test_scheme_classifier);
     AutocompleteResult result;
     result.AppendMatches(input, matches);
     result.SortAndCull(input, template_url_service_.get());
@@ -628,10 +619,9 @@ TEST_F(AutocompleteResultTest, SortAndCullReorderForDefaultMatch) {
     PopulateAutocompleteMatches(data, arraysize(data), &matches);
     matches[0].allowed_to_be_default_match = false;
     matches[1].allowed_to_be_default_match = false;
-    AutocompleteInput input(base::ASCIIToUTF16("a"), base::string16::npos,
-                            std::string(), GURL(), base::string16(),
-                            OmniboxEventProto::HOME_PAGE, false, false, false,
-                            true, false, test_scheme_classifier);
+    AutocompleteInput input(base::ASCIIToUTF16("a"),
+                            metrics::OmniboxEventProto::HOME_PAGE,
+                            test_scheme_classifier);
     AutocompleteResult result;
     result.AppendMatches(input, matches);
     result.SortAndCull(input, template_url_service_.get());

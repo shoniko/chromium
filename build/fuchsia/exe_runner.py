@@ -26,21 +26,33 @@ def main():
   parser.add_argument('--runtime-deps-path',
                       type=os.path.realpath,
                       help='Runtime data dependency file from GN.')
+  parser.add_argument('--target-cpu',
+                      help='GN target_cpu setting for the build.')
   parser.add_argument('--exe-name',
                       type=os.path.realpath,
                       help='Name of the the binary executable.')
   parser.add_argument('-d', '--device', action='store_true', default=False,
                       help='Run on hardware device instead of QEMU.')
+  parser.add_argument('--bootdata', type=os.path.realpath,
+                      help='Path to a bootdata to use instead of the default '
+                           'one from the SDK')
+  parser.add_argument('--kernel', type=os.path.realpath,
+                      help='Path to a kernel to use instead of the default '
+                           'one from the SDK')
+  parser.add_argument('--no-autorun', action='store_true',
+                      help='Disable generating an autorun file')
   args, child_args = parser.parse_known_args()
 
   bootfs = BuildBootfs(
       args.output_directory,
       ReadRuntimeDeps(args.runtime_deps_path, args.output_directory),
-      args.exe_name, child_args, args.dry_run, power_off=False)
+      args.exe_name, child_args, args.dry_run, args.bootdata,
+      summary_output=None, shutdown_machine=False, target_cpu=args.target_cpu,
+      use_device=args.device, use_autorun=not args.no_autorun)
   if not bootfs:
     return 2
 
-  return RunFuchsia(bootfs, args.device, args.dry_run)
+  return RunFuchsia(bootfs, args.device, args.kernel, args.dry_run, None)
 
 
 if __name__ == '__main__':

@@ -35,7 +35,7 @@
 #include "cc/trees/layer_tree_host_impl.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/single_thread_proxy.h"
-#include "components/viz/common/quads/single_release_callback.h"
+#include "components/viz/common/resources/single_release_callback.h"
 #include "components/viz/test/test_layer_tree_frame_sink.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "media/base/media.h"
@@ -880,10 +880,11 @@ class LayerTreeHostContextTestDontUseLostResources
     context_should_support_io_surface_ = true;
 
     child_context_provider_ = TestContextProvider::Create();
-    CHECK(child_context_provider_->BindToCurrentThread());
+    auto result = child_context_provider_->BindToCurrentThread();
+    CHECK_EQ(result, gpu::ContextResult::kSuccess);
     shared_bitmap_manager_.reset(new TestSharedBitmapManager);
     child_resource_provider_ =
-        FakeResourceProvider::Create<LayerTreeResourceProvider>(
+        FakeResourceProvider::CreateLayerTreeResourceProvider(
             child_context_provider_.get(), shared_bitmap_manager_.get());
   }
 

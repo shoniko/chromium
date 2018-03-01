@@ -4,8 +4,8 @@
 
 #include "ash/system/power/tablet_power_button_controller.h"
 
-#include "ash/accessibility_delegate.h"
-#include "ash/ash_switches.h"
+#include "ash/accessibility/accessibility_delegate.h"
+#include "ash/public/cpp/ash_switches.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
@@ -17,7 +17,7 @@
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
-#include "base/time/default_tick_clock.h"
+#include "base/time/tick_clock.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "ui/chromeos/accelerometer/accelerometer_util.h"
 #include "ui/events/devices/input_device_manager.h"
@@ -31,28 +31,19 @@ namespace {
 // Amount of time the power button must be held to start the pre-shutdown
 // animation when in tablet mode. This differs depending on whether the screen
 // is on or off when the power button is initially pressed.
-constexpr int kShutdownWhenScreenOnTimeoutMs = 500;
+constexpr base::TimeDelta kShutdownWhenScreenOnTimeout =
+    base::TimeDelta::FromMilliseconds(500);
 // TODO(derat): This is currently set to a high value to work around delays in
 // powerd's reports of button-up events when the preceding button-down event
 // turns the display on. Set it to a lower value once powerd no longer blocks on
 // asking Chrome to turn the display on: http://crbug.com/685734
-constexpr int kShutdownWhenScreenOffTimeoutMs = 2000;
+constexpr base::TimeDelta kShutdownWhenScreenOffTimeout =
+    base::TimeDelta::FromMilliseconds(2000);
 
 // Amount of time since last SuspendDone() that power button event needs to be
 // ignored.
-constexpr int kIgnorePowerButtonAfterResumeMs = 2000;
-
-// Ignore button-up events occurring within this many milliseconds of the
-// previous button-up event. This prevents us from falling behind if the power
-// button is pressed repeatedly.
-constexpr int kIgnoreRepeatedButtonUpMs = 500;
-
-// Returns true if device is a convertible/tablet device, otherwise false.
-bool IsTabletModeSupported() {
-  TabletModeController* tablet_mode_controller =
-      Shell::Get()->tablet_mode_controller();
-  return tablet_mode_controller && tablet_mode_controller->CanEnterTabletMode();
-}
+constexpr base::TimeDelta kIgnorePowerButtonAfterResumeDelay =
+    base::TimeDelta::FromSeconds(2);
 
 // Returns the value for the command-line switch identified by |name|. Returns 0
 // if the switch was unset or contained a non-float value.
@@ -86,47 +77,17 @@ float GetLidAngle(const gfx::Vector3dF& screen,
 
 }  // namespace
 
-TabletPowerButtonController::TestApi::TestApi(
-    TabletPowerButtonController* controller)
-    : controller_(controller) {}
+constexpr base::TimeDelta TabletPowerButtonController::kScreenStateChangeDelay;
 
-TabletPowerButtonController::TestApi::~TestApi() {}
-
-bool TabletPowerButtonController::TestApi::ShutdownTimerIsRunning() const {
-  return controller_->shutdown_timer_.IsRunning();
-}
-
-void TabletPowerButtonController::TestApi::TriggerShutdownTimeout() {
-  DCHECK(ShutdownTimerIsRunning());
-  controller_->OnShutdownTimeout();
-  controller_->shutdown_timer_.Stop();
-}
-
-bool TabletPowerButtonController::TestApi::IsObservingAccelerometerReader(
-    chromeos::AccelerometerReader* reader) const {
-  DCHECK(reader);
-  return controller_->accelerometer_scoped_observer_.IsObserving(reader);
-}
-
-void TabletPowerButtonController::TestApi::ParseSpuriousPowerButtonSwitches(
-    const base::CommandLine& command_line) {
-  controller_->ParseSpuriousPowerButtonSwitches(command_line);
-}
-
-bool TabletPowerButtonController::TestApi::IsSpuriousPowerButtonEvent() const {
-  return controller_->IsSpuriousPowerButtonEvent();
-}
-
-void TabletPowerButtonController::TestApi::SendKeyEvent(ui::KeyEvent* event) {
-  controller_->display_controller_->OnKeyEvent(event);
-}
+constexpr base::TimeDelta
+    TabletPowerButtonController::kIgnoreRepeatedButtonUpDelay;
 
 TabletPowerButtonController::TabletPowerButtonController(
-    LockStateController* controller,
-    PowerButtonDisplayController* display_controller)
-    : tick_clock_(new base::DefaultTickClock()),
-      controller_(controller),
+    PowerButtonDisplayController* display_controller,
+    base::TickClock* tick_clock)
+    : lock_state_controller_(Shell::Get()->lock_state_controller()),
       display_controller_(display_controller),
+      tick_clock_(tick_clock),
       accelerometer_scoped_observer_(this) {
   chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(
       this);
@@ -140,10 +101,6 @@ TabletPowerButtonController::~TabletPowerButtonController() {
     Shell::Get()->tablet_mode_controller()->RemoveObserver(this);
   chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(
       this);
-}
-
-bool TabletPowerButtonController::ShouldHandlePowerButtonEvents() const {
-  return IsTabletModeSupported();
 }
 
 void TabletPowerButtonController::OnPowerButtonEvent(
@@ -161,12 +118,19 @@ void TabletPowerButtonController::OnPowerButtonEvent(
     // backlight has been turned back on before seeing the power button events
     // that woke the system. Avoid forcing off display just after resuming to
     // ensure that we don't turn the display off in response to the events.
-    if (timestamp - last_resume_time_ <=
-        base::TimeDelta::FromMilliseconds(kIgnorePowerButtonAfterResumeMs)) {
+    if (timestamp - last_resume_time_ <= kIgnorePowerButtonAfterResumeDelay)
+      force_off_on_button_up_ = false;
+
+    // The actual display may remain off for a short period after powerd asks
+    // Chrome to turn it on. If the user presses the power button again during
+    // this time, they probably intend to turn the display on. Avoid forcing off
+    // in this case.
+    if (timestamp - display_controller_->screen_state_last_changed() <=
+        kScreenStateChangeDelay) {
       force_off_on_button_up_ = false;
     }
 
-    last_button_down_time_ = tick_clock_->NowTicks();
+    last_button_down_time_ = timestamp;
     screen_off_when_power_button_down_ =
         display_controller_->screen_state() !=
         PowerButtonDisplayController::ScreenState::ON;
@@ -178,7 +142,7 @@ void TabletPowerButtonController::OnPowerButtonEvent(
       return;
 
     const base::TimeTicks previous_up_time = last_button_up_time_;
-    last_button_up_time_ = tick_clock_->NowTicks();
+    last_button_up_time_ = timestamp;
 
     if (max_accelerometer_samples_) {
       base::TimeDelta duration = last_button_up_time_ - last_button_down_time_;
@@ -188,12 +152,11 @@ void TabletPowerButtonController::OnPowerButtonEvent(
 
     // When power button is released, cancel shutdown animation whenever it is
     // still cancellable.
-    if (controller_->CanCancelShutdownAnimation())
-      controller_->CancelShutdownAnimation();
+    if (lock_state_controller_->CanCancelShutdownAnimation())
+      lock_state_controller_->CancelShutdownAnimation();
 
     // Ignore the event if it comes too soon after the last one.
-    if (timestamp - previous_up_time <=
-        base::TimeDelta::FromMilliseconds(kIgnoreRepeatedButtonUpMs)) {
+    if (timestamp - previous_up_time <= kIgnoreRepeatedButtonUpDelay) {
       shutdown_timer_.Stop();
       return;
     }
@@ -234,20 +197,21 @@ void TabletPowerButtonController::SuspendDone(
 
 void TabletPowerButtonController::OnTabletModeStarted() {
   shutdown_timer_.Stop();
-  if (controller_->CanCancelShutdownAnimation())
-    controller_->CancelShutdownAnimation();
+  if (lock_state_controller_->CanCancelShutdownAnimation())
+    lock_state_controller_->CancelShutdownAnimation();
 }
 
 void TabletPowerButtonController::OnTabletModeEnded() {
   shutdown_timer_.Stop();
-  if (controller_->CanCancelShutdownAnimation())
-    controller_->CancelShutdownAnimation();
+  if (lock_state_controller_->CanCancelShutdownAnimation())
+    lock_state_controller_->CancelShutdownAnimation();
 }
 
-void TabletPowerButtonController::SetTickClockForTesting(
-    std::unique_ptr<base::TickClock> tick_clock) {
-  DCHECK(tick_clock);
-  tick_clock_ = std::move(tick_clock);
+void TabletPowerButtonController::CancelTabletPowerButton() {
+  if (lock_state_controller_->CanCancelShutdownAnimation())
+    lock_state_controller_->CancelShutdownAnimation();
+  force_off_on_button_up_ = false;
+  shutdown_timer_.Stop();
 }
 
 void TabletPowerButtonController::ParseSpuriousPowerButtonSwitches(
@@ -359,15 +323,15 @@ bool TabletPowerButtonController::IsSpuriousPowerButtonEvent() const {
 }
 
 void TabletPowerButtonController::StartShutdownTimer() {
-  base::TimeDelta timeout = base::TimeDelta::FromMilliseconds(
-      screen_off_when_power_button_down_ ? kShutdownWhenScreenOffTimeoutMs
-                                         : kShutdownWhenScreenOnTimeoutMs);
+  base::TimeDelta timeout = screen_off_when_power_button_down_
+                                ? kShutdownWhenScreenOffTimeout
+                                : kShutdownWhenScreenOnTimeout;
   shutdown_timer_.Start(FROM_HERE, timeout, this,
                         &TabletPowerButtonController::OnShutdownTimeout);
 }
 
 void TabletPowerButtonController::OnShutdownTimeout() {
-  controller_->StartShutdownAnimation(ShutdownReason::POWER_BUTTON);
+  lock_state_controller_->StartShutdownAnimation(ShutdownReason::POWER_BUTTON);
 }
 
 void TabletPowerButtonController::LockScreenIfRequired() {
@@ -375,8 +339,8 @@ void TabletPowerButtonController::LockScreenIfRequired() {
   if (session_controller->ShouldLockScreenAutomatically() &&
       session_controller->CanLockScreen() &&
       !session_controller->IsUserSessionBlocked() &&
-      !controller_->LockRequested()) {
-    controller_->LockWithoutAnimation();
+      !lock_state_controller_->LockRequested()) {
+    lock_state_controller_->LockWithoutAnimation();
   }
 }
 

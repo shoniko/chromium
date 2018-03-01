@@ -212,6 +212,9 @@ class COMPOSITOR_EXPORT Compositor : public cc::LayerTreeHostClient,
 
   void SetLayerTreeFrameSink(std::unique_ptr<cc::LayerTreeFrameSink> surface);
 
+  // Called when a child surface is about to resize.
+  void OnChildResizing();
+
   // Schedules a redraw of the layer tree associated with this compositor.
   void ScheduleDraw();
 
@@ -225,11 +228,6 @@ class COMPOSITOR_EXPORT Compositor : public cc::LayerTreeHostClient,
   void SetRootLayer(Layer* root_layer);
 
   cc::AnimationTimeline* GetAnimationTimeline() const;
-
-  // Called when we need the compositor to preserve the alpha channel in the
-  // output for situations when we want to render transparently atop something
-  // else, e.g. Aero glass.
-  void SetHostHasTransparentBackground(bool host_has_transparent_background);
 
   // The scale factor of the device that this compositor is
   // compositing layers on.

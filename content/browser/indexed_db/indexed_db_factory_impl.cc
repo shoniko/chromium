@@ -19,6 +19,7 @@
 #include "content/browser/indexed_db/indexed_db_backing_store.h"
 #include "content/browser/indexed_db/indexed_db_context_impl.h"
 #include "content/browser/indexed_db/indexed_db_database_error.h"
+#include "content/browser/indexed_db/indexed_db_metadata_coding.h"
 #include "content/browser/indexed_db/indexed_db_pre_close_task_queue.h"
 #include "content/browser/indexed_db/indexed_db_tombstone_sweeper.h"
 #include "content/browser/indexed_db/indexed_db_tracing.h"
@@ -173,8 +174,13 @@ void IndexedDBFactoryImpl::CloseBackingStore(const Origin& origin) {
   DCHECK(it != backing_store_map_.end());
   // Stop the timer and pre close tasks (if they are running) - this may happen
   // if the timer was started and then a forced close occurs.
-  it->second->close_timer()->Stop();
-  it->second->SetPreCloseTaskList(nullptr);
+  scoped_refptr<IndexedDBBackingStore>& backing_store = it->second;
+  backing_store->close_timer()->Stop();
+  backing_store->SetPreCloseTaskList(nullptr);
+
+  if (backing_store->IsBlobCleanupPending())
+    backing_store->ForceRunBlobCleanup();
+
   backing_store_map_.erase(it);
 }
 
@@ -200,8 +206,10 @@ leveldb::Status IndexedDBFactoryImpl::AbortTransactions(const Origin& origin) {
   }
 
   leveldb::Status get_names_status;
-  std::vector<base::string16> db_names =
-      backing_store->GetDatabaseNames(&get_names_status);
+  IndexedDBMetadataCoding metadata_coding;
+  std::vector<base::string16> db_names;
+  get_names_status = metadata_coding.ReadDatabaseNames(
+      backing_store->db(), backing_store->origin_identifier(), &db_names);
   if (!get_names_status.ok()) {
     return leveldb::Status::IOError(
         "Internal error getting origin database names for "
@@ -286,7 +294,10 @@ void IndexedDBFactoryImpl::GetDatabaseNames(
     return;
   }
 
-  std::vector<base::string16> names = backing_store->GetDatabaseNames(&s);
+  IndexedDBMetadataCoding metadata_coding;
+  std::vector<base::string16> names;
+  s = metadata_coding.ReadDatabaseNames(
+      backing_store->db(), backing_store->origin_identifier(), &names);
   if (!s.ok()) {
     DLOG(ERROR) << "Internal error getting database names";
     IndexedDBDatabaseError error(blink::kWebIDBDatabaseExceptionUnknownError,
@@ -339,7 +350,10 @@ void IndexedDBFactoryImpl::DeleteDatabase(
     return;
   }
 
-  std::vector<base::string16> names = backing_store->GetDatabaseNames(&s);
+  IndexedDBMetadataCoding metadata_coding;
+  std::vector<base::string16> names;
+  s = metadata_coding.ReadDatabaseNames(
+      backing_store->db(), backing_store->origin_identifier(), &names);
   if (!s.ok()) {
     DLOG(ERROR) << "Internal error getting database names";
     IndexedDBDatabaseError error(blink::kWebIDBDatabaseExceptionUnknownError,
@@ -360,8 +374,9 @@ void IndexedDBFactoryImpl::DeleteDatabase(
   }
 
   scoped_refptr<IndexedDBDatabase> database;
-  std::tie(database, s) = IndexedDBDatabase::Create(name, backing_store.get(),
-                                                    this, unique_identifier);
+  std::tie(database, s) = IndexedDBDatabase::Create(
+      name, backing_store.get(), this,
+      base::MakeUnique<IndexedDBMetadataCoding>(), unique_identifier);
   if (!database.get()) {
     IndexedDBDatabaseError error(
         blink::kWebIDBDatabaseExceptionUnknownError,
@@ -390,6 +405,13 @@ void IndexedDBFactoryImpl::DatabaseDeleted(
   if (!context_)
     return;
   context_->DatabaseDeleted(identifier.first);
+}
+
+void IndexedDBFactoryImpl::BlobFilesCleaned(const url::Origin& origin) {
+  // NULL after ContextDestroyed() called, and in some unit tests.
+  if (!context_)
+    return;
+  context_->BlobFilesCleaned(origin);
 }
 
 void IndexedDBFactoryImpl::AbortTransactionsAndCompactDatabase(
@@ -574,8 +596,9 @@ void IndexedDBFactoryImpl::Open(
       return;
     }
 
-    std::tie(database, s) = IndexedDBDatabase::Create(name, backing_store.get(),
-                                                      this, unique_identifier);
+    std::tie(database, s) = IndexedDBDatabase::Create(
+        name, backing_store.get(), this,
+        base::MakeUnique<IndexedDBMetadataCoding>(), unique_identifier);
     if (!database.get()) {
       DLOG(ERROR) << "Unable to create the database";
       IndexedDBDatabaseError error(blink::kWebIDBDatabaseExceptionUnknownError,
@@ -617,6 +640,16 @@ size_t IndexedDBFactoryImpl::GetConnectionCount(const Origin& origin) const {
     count += it->second->ConnectionCount();
 
   return count;
+}
+
+void IndexedDBFactoryImpl::NotifyIndexedDBContentChanged(
+    const url::Origin& origin,
+    const base::string16& database_name,
+    const base::string16& object_store_name) {
+  if (!context_)
+    return;
+  context_->NotifyIndexedDBContentChanged(origin, database_name,
+                                          object_store_name);
 }
 
 }  // namespace content

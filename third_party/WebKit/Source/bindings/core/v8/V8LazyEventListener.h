@@ -32,7 +32,7 @@
 #define V8LazyEventListener_h
 
 #include "bindings/core/v8/V8AbstractEventListener.h"
-#include "platform/wtf/PassRefPtr.h"
+#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/text/TextPosition.h"
 #include "v8/include/v8.h"
 
@@ -57,7 +57,7 @@ class V8LazyEventListener final : public V8AbstractEventListener {
                                    code, source_url, position, node);
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(node_);
     V8AbstractEventListener::Trace(visitor);
   }

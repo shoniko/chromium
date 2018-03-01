@@ -196,7 +196,7 @@ void RecordCheckValidityFailure(CheckValidityFailureReason reason) {
 ResourceMetadataStorage::Iterator::Iterator(
     std::unique_ptr<leveldb::Iterator> it)
     : it_(std::move(it)) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   DCHECK(it_);
 
   // Skip the header entry.
@@ -208,11 +208,11 @@ ResourceMetadataStorage::Iterator::Iterator(
 }
 
 ResourceMetadataStorage::Iterator::~Iterator() {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 }
 
 bool ResourceMetadataStorage::Iterator::IsAtEnd() const {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   return !it_->Valid();
 }
 
@@ -221,13 +221,13 @@ std::string ResourceMetadataStorage::Iterator::GetID() const {
 }
 
 const ResourceEntry& ResourceMetadataStorage::Iterator::GetValue() const {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   DCHECK(!IsAtEnd());
   return entry_;
 }
 
 void ResourceMetadataStorage::Iterator::Advance() {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   DCHECK(!IsAtEnd());
 
   for (it_->Next() ; it_->Valid(); it_->Next()) {
@@ -240,16 +240,16 @@ void ResourceMetadataStorage::Iterator::Advance() {
 }
 
 bool ResourceMetadataStorage::Iterator::HasError() const {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   return !it_->status().ok();
 }
 
 // static
 bool ResourceMetadataStorage::UpgradeOldDB(
     const base::FilePath& directory_path) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   static_assert(
-      kDBVersion == 14,
+      kDBVersion == 15,
       "database version and this function must be updated at the same time");
 
   const base::FilePath resource_map_path =
@@ -522,6 +522,16 @@ bool ResourceMetadataStorage::UpgradeOldDB(
     batch.Put(GetHeaderDBKey(), serialized_header);
 
     return resource_map->Write(leveldb::WriteOptions(), &batch).ok();
+  } else if (header.version() < 15) {
+    // Just need to clear largest_changestamp.
+    // Put header with the latest version number.
+    std::string serialized_header;
+    if (!GetDefaultHeaderEntry().SerializeToString(&serialized_header))
+      return false;
+
+    leveldb::WriteBatch batch;
+    batch.Put(GetHeaderDBKey(), serialized_header);
+    return resource_map->Write(leveldb::WriteOptions(), &batch).ok();
   }
 
   LOG(WARNING) << "Unexpected DB version: " << header.version();
@@ -544,7 +554,7 @@ void ResourceMetadataStorage::Destroy() {
 }
 
 bool ResourceMetadataStorage::Initialize() {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   resource_map_.reset();
 
@@ -706,7 +716,7 @@ void ResourceMetadataStorage::RecoverCacheInfoFromTrashedResourceMap(
 
 FileError ResourceMetadataStorage::SetLargestChangestamp(
     int64_t largest_changestamp) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   ResourceMetadataHeader header;
   FileError error = GetHeader(&header);
@@ -720,7 +730,7 @@ FileError ResourceMetadataStorage::SetLargestChangestamp(
 
 FileError ResourceMetadataStorage::GetLargestChangestamp(
     int64_t* largest_changestamp) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   ResourceMetadataHeader header;
   FileError error = GetHeader(&header);
   if (error != FILE_ERROR_OK) {
@@ -732,7 +742,7 @@ FileError ResourceMetadataStorage::GetLargestChangestamp(
 }
 
 FileError ResourceMetadataStorage::PutEntry(const ResourceEntry& entry) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   const std::string& id = entry.local_id();
   DCHECK(!id.empty());
@@ -785,7 +795,7 @@ FileError ResourceMetadataStorage::PutEntry(const ResourceEntry& entry) {
 
 FileError ResourceMetadataStorage::GetEntry(const std::string& id,
                                             ResourceEntry* out_entry) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   DCHECK(!id.empty());
 
   std::string serialized_entry;
@@ -800,7 +810,7 @@ FileError ResourceMetadataStorage::GetEntry(const std::string& id,
 }
 
 FileError ResourceMetadataStorage::RemoveEntry(const std::string& id) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   DCHECK(!id.empty());
 
   ResourceEntry entry;
@@ -828,7 +838,7 @@ FileError ResourceMetadataStorage::RemoveEntry(const std::string& id) {
 
 std::unique_ptr<ResourceMetadataStorage::Iterator>
 ResourceMetadataStorage::GetIterator() {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   std::unique_ptr<leveldb::Iterator> it(
       resource_map_->NewIterator(leveldb::ReadOptions()));
@@ -838,7 +848,7 @@ ResourceMetadataStorage::GetIterator() {
 FileError ResourceMetadataStorage::GetChild(const std::string& parent_id,
                                             const std::string& child_name,
                                             std::string* child_id) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   DCHECK(!parent_id.empty());
   DCHECK(!child_name.empty());
 
@@ -853,7 +863,7 @@ FileError ResourceMetadataStorage::GetChild(const std::string& parent_id,
 FileError ResourceMetadataStorage::GetChildren(
     const std::string& parent_id,
     std::vector<std::string>* children) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   DCHECK(!parent_id.empty());
 
   // Iterate over all entries with keys starting with |parent_id|.
@@ -876,7 +886,7 @@ ResourceMetadataStorage::RecoveredCacheInfo::~RecoveredCacheInfo() {}
 FileError ResourceMetadataStorage::GetIdByResourceId(
     const std::string& resource_id,
     std::string* out_id) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   DCHECK(!resource_id.empty());
 
   const leveldb::Status status = resource_map_->Get(
@@ -887,7 +897,7 @@ FileError ResourceMetadataStorage::GetIdByResourceId(
 }
 
 ResourceMetadataStorage::~ResourceMetadataStorage() {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 }
 
 void ResourceMetadataStorage::DestroyOnBlockingPool() {
@@ -910,7 +920,7 @@ std::string ResourceMetadataStorage::GetChildEntryKey(
 
 FileError ResourceMetadataStorage::PutHeader(
     const ResourceMetadataHeader& header) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   std::string serialized_header;
   if (!header.SerializeToString(&serialized_header)) {
@@ -926,7 +936,7 @@ FileError ResourceMetadataStorage::PutHeader(
 }
 
 FileError ResourceMetadataStorage::GetHeader(ResourceMetadataHeader* header) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   std::string serialized_header;
   const leveldb::Status status = resource_map_->Get(
@@ -940,7 +950,7 @@ FileError ResourceMetadataStorage::GetHeader(ResourceMetadataHeader* header) {
 }
 
 bool ResourceMetadataStorage::CheckValidity() {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   // Perform read with checksums verification enabled.
   leveldb::ReadOptions options;

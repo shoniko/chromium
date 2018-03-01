@@ -12,7 +12,7 @@
 #import "base/ios/block_types.h"
 #import "ios/chrome/browser/ui/side_swipe/side_swipe_controller.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_owner.h"
-#import "ios/chrome/browser/ui/toolbar/web_toolbar_controller.h"
+#import "ios/chrome/browser/ui/toolbar/web_toolbar_delegate.h"
 #import "ios/chrome/browser/ui/url_loader.h"
 #import "ios/public/provider/chrome/browser/voice/voice_search_presenter.h"
 
@@ -21,17 +21,16 @@
 @class BrowserContainerView;
 @class BrowserViewControllerDependencyFactory;
 class GURL;
+@protocol OmniboxFocuser;
+@protocol SnackbarCommands;
 @class Tab;
 @class TabModel;
+@protocol TabStripFoldAnimation;
 
 namespace ios {
 class ChromeBrowserState;
 }
 
-// Notification sent when the page info is shown.
-extern NSString* const kPageInfoWillShowNotification;
-// Notification sent when the page info is hidden.
-extern NSString* const kPageInfoWillHideNotification;
 // Notification sent when the location bar becomes first responder.
 extern NSString* const kLocationBarBecomesFirstResponderNotification;
 // Notification sent when the location bar resigns first responder.
@@ -64,6 +63,7 @@ applicationCommandEndpoint:(id<ApplicationCommands>)applicationCommandEndpoint
 @property(nonatomic, readonly) id<ApplicationCommands,
                                   BrowserCommands,
                                   OmniboxFocuser,
+                                  SnackbarCommands,
                                   UrlLoader,
                                   WebToolbarDelegate>
     dispatcher;
@@ -143,18 +143,15 @@ applicationCommandEndpoint:(id<ApplicationCommands>)applicationCommandEndpoint
 // Focuses the omnibox.
 - (void)focusOmnibox;
 
-// Dismisses all presented views then calls |completion|.
-- (void)clearPresentedStateWithCompletion:(ProceduralBlock)completion;
+// Dismisses all presented views, excluding the omnibox if |dismissOmnibox| is
+// NO, then calls |completion|.
+- (void)clearPresentedStateWithCompletion:(ProceduralBlock)completion
+                           dismissOmnibox:(BOOL)dismissOmnibox;
 
-// Returns a set with the names of the files received from other applications
-// that are bookmarked or referenced by an open or recently closed tab.
-- (NSSet*)referencedExternalFiles;
-
-// Removes files received from other applications. If |immediately| is YES,
-// initiates the removal of files immediately. |completionHandler| is called
-// when files have been removed.
-- (void)removeExternalFilesImmediately:(BOOL)immediately
-                     completionHandler:(ProceduralBlock)completionHandler;
+// Returns a tab strip placeholder view created from the current state of the
+// tab strip. It is used to animate the transition from the browser view
+// controller to the tab switcher.
+- (UIView<TabStripFoldAnimation>*)tabStripPlaceholderView;
 
 // Called before the instance is deallocated.
 - (void)shutdown;

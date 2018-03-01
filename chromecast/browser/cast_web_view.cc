@@ -12,6 +12,7 @@
 #include "chromecast/base/cast_features.h"
 #include "chromecast/base/metrics/cast_metrics_helper.h"
 #include "chromecast/browser/cast_web_contents_manager.h"
+#include "chromecast/public/cast_media_shlib.h"
 #include "content/public/browser/media_capture_devices.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
@@ -59,15 +60,18 @@ CastWebView::CastWebView(Delegate* delegate,
                          CastWebContentsManager* web_contents_manager,
                          content::BrowserContext* browser_context,
                          scoped_refptr<content::SiteInstance> site_instance,
-                         bool transparent)
+                         bool transparent,
+                         bool allow_media_access,
+                         bool is_headless)
     : delegate_(delegate),
       web_contents_manager_(web_contents_manager),
       browser_context_(browser_context),
       site_instance_(std::move(site_instance)),
       transparent_(transparent),
       web_contents_(CreateWebContents(browser_context_, site_instance_)),
-      window_(shell::CastContentWindow::Create(delegate)),
+      window_(shell::CastContentWindow::Create(delegate, is_headless)),
       did_start_navigation_(false),
+      allow_media_access_(allow_media_access),
       weak_factory_(this) {
   DCHECK(delegate_);
   DCHECK(web_contents_manager_);
@@ -75,9 +79,6 @@ CastWebView::CastWebView(Delegate* delegate,
   DCHECK(window_);
   content::WebContentsObserver::Observe(web_contents_.get());
   web_contents_->SetDelegate(this);
-
-  if (transparent_)
-    window_->SetTransparent();
 }
 
 CastWebView::~CastWebView() {}
@@ -106,6 +107,10 @@ void CastWebView::CloseContents(content::WebContents* source) {
 }
 
 void CastWebView::Show(CastWindowManager* window_manager) {
+  if (media::CastMediaShlib::ClearVideoPlaneImage) {
+    media::CastMediaShlib::ClearVideoPlaneImage();
+  }
+
   DCHECK(window_manager);
   window_->ShowWebContents(web_contents_.get(), window_manager);
   web_contents_->Focus();
@@ -139,7 +144,8 @@ void CastWebView::ActivateContents(content::WebContents* contents) {
 bool CastWebView::CheckMediaAccessPermission(content::WebContents* web_contents,
                                              const GURL& security_origin,
                                              content::MediaStreamType type) {
-  if (!base::FeatureList::IsEnabled(kAllowUserMediaAccess)) {
+  if (!base::FeatureList::IsEnabled(kAllowUserMediaAccess) &&
+      !allow_media_access_) {
     LOG(WARNING) << __func__ << ": media access is disabled.";
     return false;
   }
@@ -149,8 +155,14 @@ bool CastWebView::CheckMediaAccessPermission(content::WebContents* web_contents,
 const content::MediaStreamDevice* GetRequestedDeviceOrDefault(
     const content::MediaStreamDevices& devices,
     const std::string& requested_device_id) {
-  if (!requested_device_id.empty())
-    return devices.FindById(requested_device_id);
+  if (!requested_device_id.empty()) {
+    auto it = std::find_if(
+        devices.begin(), devices.end(),
+        [requested_device_id](const content::MediaStreamDevice& device) {
+          return device.id == requested_device_id;
+        });
+    return it != devices.end() ? &(*it) : nullptr;
+  }
 
   if (!devices.empty())
     return &devices[0];
@@ -162,7 +174,8 @@ void CastWebView::RequestMediaAccessPermission(
     content::WebContents* web_contents,
     const content::MediaStreamRequest& request,
     const content::MediaResponseCallback& callback) {
-  if (!base::FeatureList::IsEnabled(kAllowUserMediaAccess)) {
+  if (!base::FeatureList::IsEnabled(kAllowUserMediaAccess) &&
+      !allow_media_access_) {
     LOG(WARNING) << __func__ << ": media access is disabled.";
     callback.Run(content::MediaStreamDevices(),
                  content::MEDIA_DEVICE_NOT_SUPPORTED,

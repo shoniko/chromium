@@ -36,7 +36,7 @@
 #include "content/public/browser/web_contents.h"
 #include "extensions/features/features.h"
 
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
 #include "components/signin/core/account_id/account_id.h"
 #endif
@@ -430,12 +430,20 @@ void Navigate(NavigateParams* params) {
         source_browser->window()->GetDispositionForPopupBounds(
             params->window_bounds);
   }
+  // Trying to open a background tab when in an app browser results in
+  // focusing a regular browser window an opening a tab in the background
+  // of that window. Change the disposition to NEW_FOREGROUND_TAB so that
+  // the new tab is focused.
+  if (source_browser && source_browser->is_app() &&
+      params->disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB) {
+    params->disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
+  }
 
   params->browser = GetBrowserForDisposition(params);
   if (!params->browser)
     return;
 
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
   if (source_browser && source_browser != params->browser) {
     // When the newly created browser was spawned by a browser which visits
     // another user's desktop, it should be shown on the same desktop as the
@@ -632,7 +640,8 @@ bool IsURLAllowedInIncognito(const GURL& url,
   // chrome://extensions is on the list because it redirects to
   // chrome://settings.
   if (url.scheme() == content::kChromeUIScheme &&
-      (url.host_piece() == chrome::kChromeUISettingsHost ||
+      (url.host_piece() == chrome::kChromeUIDownloadInternalsHost ||
+       url.host_piece() == chrome::kChromeUISettingsHost ||
        url.host_piece() == chrome::kChromeUIHelpHost ||
        url.host_piece() == chrome::kChromeUIHistoryHost ||
        url.host_piece() == chrome::kChromeUIExtensionsHost ||

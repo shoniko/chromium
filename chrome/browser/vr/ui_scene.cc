@@ -9,33 +9,28 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "base/values.h"
+#include "chrome/browser/vr/databinding/binding_base.h"
 #include "chrome/browser/vr/elements/draw_phase.h"
 #include "chrome/browser/vr/elements/ui_element.h"
 #include "ui/gfx/transform.h"
 
 namespace vr {
 
-template <typename F>
-void ForAllElements(UiElement* e, F f) {
-  f(e);
-  for (auto& child : e->children()) {
-    ForAllElements(child.get(), f);
-  }
-}
+namespace {
 
 template <typename P>
-UiElement* FindElement(UiElement* e, P predicate) {
-  if (predicate(e)) {
-    return e;
+UiScene::Elements GetVisibleElements(UiElement* root, P predicate) {
+  UiScene::Elements elements;
+  for (auto& element : *root) {
+    if (element.IsVisible() && predicate(&element))
+      elements.push_back(&element);
   }
-  for (const auto& child : e->children()) {
-    if (UiElement* match = FindElement(child.get(), predicate)) {
-      return match;
-    }
-  }
-  return nullptr;
+  return elements;
 }
+
+}  // namespace
 
 void UiScene::AddUiElement(UiElementName parent,
                            std::unique_ptr<UiElement> element) {
@@ -45,6 +40,7 @@ void UiScene::AddUiElement(UiElementName parent,
   if (gl_initialized_)
     element->Initialize();
   GetUiElementByName(parent)->AddChild(std::move(element));
+  is_dirty_ = true;
 }
 
 void UiScene::RemoveUiElement(int element_id) {
@@ -52,37 +48,109 @@ void UiScene::RemoveUiElement(int element_id) {
   CHECK_NE(nullptr, to_remove);
   CHECK_NE(nullptr, to_remove->parent());
   to_remove->parent()->RemoveChild(to_remove);
+  is_dirty_ = true;
 }
 
-void UiScene::AddAnimation(int element_id,
-                           std::unique_ptr<cc::Animation> animation) {
-  UiElement* element = GetUiElementById(element_id);
-  element->AddAnimation(std::move(animation));
-}
-
-void UiScene::RemoveAnimation(int element_id, int animation_id) {
-  UiElement* element = GetUiElementById(element_id);
-  element->RemoveAnimation(animation_id);
-}
-
-void UiScene::OnBeginFrame(const base::TimeTicks& current_time,
+bool UiScene::OnBeginFrame(const base::TimeTicks& current_time,
                            const gfx::Vector3dF& look_at) {
-  ForAllElements(root_element_.get(), [current_time](UiElement* element) {
-    // Process all animations before calculating object transforms.
-    element->Animate(current_time);
-  });
+  bool scene_dirty = !initialized_scene_ || is_dirty_;
+  bool needs_redraw = false;
+  initialized_scene_ = true;
+  is_dirty_ = false;
 
-  ForAllElements(root_element_.get(), [look_at](UiElement* element) {
-    element->LayOutChildren();
-    element->AdjustRotationForHeadPose(look_at);
-  });
+  {
+    TRACE_EVENT0("gpu", "UiScene::OnBeginFrame.UpdateAnimations");
 
-  root_element_->UpdateInheritedProperties();
+    // Process all animations and pre-binding work. I.e., induce any
+    // time-related "dirtiness" on the scene graph.
+    for (auto& element : *root_element_) {
+      element.set_update_phase(UiElement::kDirty);
+      if (element.DoBeginFrame(current_time, look_at))
+        scene_dirty = true;
+      element.set_update_phase(UiElement::kUpdatedAnimations);
+    }
+  }
+
+  {
+    TRACE_EVENT0("gpu", "UiScene::OnBeginFrame.UpdateBindings");
+
+    // Propagate updates across bindings.
+    for (auto& element : *root_element_) {
+      if (element.UpdateBindings())
+        scene_dirty = true;
+      element.set_update_phase(UiElement::kUpdatedBindings);
+    }
+  }
+
+  {
+    TRACE_EVENT0("gpu", "UiScene::OnBeginFrame.UpdateOpacity");
+
+    if (scene_dirty) {
+      // We must now update visibility since some texture update optimizations
+      // rely on accurate visibility information.
+      root_element_->UpdateComputedOpacityRecursive();
+    } else {
+      for (auto& element : *root_element_)
+        element.set_update_phase(UiElement::kUpdatedComputedOpacity);
+    }
+  }
+
+  {
+    TRACE_EVENT0("gpu", "UiScene::OnBeginFrame.UpdateTexturesAndSizes");
+
+    // Update textures and sizes.
+    // TODO(mthiesse): We should really only be updating the sizes here, and not
+    // actually redrawing the textures because we draw all of the textures as a
+    // second phase after OnBeginFrame, once we've processed input. For now this
+    // is fine, it's just a small amount of duplicated work.
+    // Textures will have to know what their size would be, if they were to draw
+    // with their current state, and changing anything other than texture
+    // synchronously in response to input should be prohibited.
+    for (auto& element : *root_element_) {
+      if (element.PrepareToDraw())
+        needs_redraw = true;
+      element.set_update_phase(UiElement::kUpdatedTexturesAndSizes);
+    }
+  }
+
+  if (!scene_dirty) {
+    // Nothing to update, so set all elements to the final update phase and
+    // return early.
+    for (auto& element : *root_element_) {
+      element.set_update_phase(UiElement::kUpdatedWorldSpaceTransform);
+    }
+    return needs_redraw;
+  }
+
+  {
+    TRACE_EVENT0("gpu", "UiScene::OnBeginFrame.UpdateLayout");
+
+    // Update layout, which depends on size.
+    for (auto& element : *root_element_) {
+      element.LayOutChildren();
+      element.set_update_phase(UiElement::kUpdatedLayout);
+    }
+  }
+
+  {
+    TRACE_EVENT0("gpu", "UiScene::OnBeginFrame.UpdateWorldSpaceTransform");
+
+    // Now that we have finalized our local values, we can safely update our
+    // final, baked transform.
+    root_element_->UpdateWorldSpaceTransformRecursive();
+  }
+
+  return scene_dirty || needs_redraw;
 }
 
-void UiScene::PrepareToDraw() {
-  ForAllElements(root_element_.get(),
-                 [](UiElement* element) { element->PrepareToDraw(); });
+bool UiScene::UpdateTextures() {
+  bool needs_redraw = false;
+  // Update textures and sizes.
+  for (auto& element : *root_element_) {
+    if (element.PrepareToDraw())
+      needs_redraw = true;
+  }
+  return needs_redraw;
 }
 
 UiElement& UiScene::root_element() {
@@ -90,48 +158,51 @@ UiElement& UiScene::root_element() {
 }
 
 UiElement* UiScene::GetUiElementById(int element_id) const {
-  return FindElement(root_element_.get(), [element_id](UiElement* element) {
-    return element->id() == element_id;
-  });
+  for (auto& element : *root_element_) {
+    if (element.id() == element_id)
+      return &element;
+  }
+  return nullptr;
 }
 
 UiElement* UiScene::GetUiElementByName(UiElementName name) const {
-  DCHECK(name != UiElementName::kNone);
-  return FindElement(root_element_.get(), [name](UiElement* element) {
-    return element->name() == name;
-  });
+  for (auto& element : *root_element_) {
+    if (element.name() == name)
+      return &element;
+  }
+  return nullptr;
 }
 
-std::vector<const UiElement*> UiScene::GetWorldElements() const {
-  std::vector<const UiElement*> elements;
-  ForAllElements(root_element_.get(), [&elements](UiElement* element) {
-    if (element->IsVisible() && !element->viewport_aware() &&
-        !element->is_overlay()) {
-      elements.push_back(element);
-    }
-  });
-  return elements;
+UiScene::Elements UiScene::GetVisible2dBrowsingElements() const {
+  return GetVisibleElements(
+      GetUiElementByName(k2dBrowsingRoot), [](UiElement* element) {
+        return element->draw_phase() == kPhaseForeground ||
+               element->draw_phase() == kPhaseFloorCeiling ||
+               element->draw_phase() == kPhaseBackground;
+      });
 }
 
-std::vector<const UiElement*> UiScene::GetOverlayElements() const {
-  std::vector<const UiElement*> elements;
-  ForAllElements(root_element_.get(), [&elements](UiElement* element) {
-    if (element->IsVisible() && element->is_overlay()) {
-      elements.push_back(element);
-    }
-  });
-  return elements;
+UiScene::Elements UiScene::GetVisible2dBrowsingOverlayElements() const {
+  return GetVisibleElements(
+      GetUiElementByName(k2dBrowsingRoot), [](UiElement* element) {
+        return element->draw_phase() == kPhaseOverlayBackground ||
+               element->draw_phase() == kPhaseOverlayForeground;
+      });
 }
 
-std::vector<const UiElement*> UiScene::GetViewportAwareElements() const {
-  std::vector<const UiElement*> elements;
-  ForAllElements(root_element_.get(), [&elements](UiElement* element) {
-    if (element->IsVisible() && element->viewport_aware() &&
-        element->parent()) {
-      elements.push_back(element);
-    }
-  });
-  return elements;
+UiScene::Elements UiScene::GetVisibleSplashScreenElements() const {
+  return GetVisibleElements(
+      GetUiElementByName(kSplashScreenRoot), [](UiElement* element) {
+        return element->draw_phase() == kPhaseOverlayBackground ||
+               element->draw_phase() == kPhaseOverlayForeground;
+      });
+}
+
+UiScene::Elements UiScene::GetVisibleWebVrOverlayForegroundElements() const {
+  return GetVisibleElements(
+      GetUiElementByName(kWebVrRoot), [](UiElement* element) {
+        return element->draw_phase() == kPhaseOverlayForeground;
+      });
 }
 
 UiScene::UiScene() {
@@ -148,8 +219,8 @@ UiScene::~UiScene() = default;
 // initialize when the binding fires, automatically.
 void UiScene::OnGlInitialized() {
   gl_initialized_ = true;
-  ForAllElements(root_element_.get(),
-                 [](UiElement* element) { element->Initialize(); });
+  for (auto& element : *root_element_)
+    element.Initialize();
 }
 
 }  // namespace vr

@@ -76,7 +76,7 @@ ResultExpr RendererProcessPolicy::EvaluateSyscall(int sysno) const {
 // lowered. Thus we generally have the same protection because we normally
 // set rlim_max and rlim_cur together.
 //
-// See LinuxSandbox::LimitAddressSpace() in
+// See SandboxLinux::LimitAddressSpace() in
 // content/common/sandbox_linux/sandbox_linux.cc and
 // ArrayBufferContents::ReserveMemory,
 // ArrayBufferContents::ReleaseReservedMemory in
@@ -100,8 +100,8 @@ ResultExpr RendererProcessPolicy::EvaluateSyscall(int sysno) const {
     case __NR_sched_setscheduler:
       return sandbox::RestrictSchedTarget(GetPolicyPid(), sysno);
     case __NR_prlimit64:
-      // See crbug.com/662450.
-      return sandbox::RestrictPrlimitToGetrlimit(GetPolicyPid());
+      // See crbug.com/662450 and setrlimit comment above.
+      return sandbox::RestrictPrlimit(GetPolicyPid());
     default:
       // Default on the content baseline policy.
       return SandboxBPFBasePolicy::EvaluateSyscall(sysno);

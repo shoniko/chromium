@@ -15,7 +15,6 @@
 #include "ash/system/tray/tray_popup_utils.h"
 #include "ash/system/tray/tri_view.h"
 #include "base/containers/adapters.h"
-#include "base/memory/ptr_util.h"
 #include "third_party/skia/include/core/SkDrawLooper.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -453,7 +452,8 @@ void TrayDetailsView::DoTransitionToDefaultView() {
   // Cache pointer to owner in this function scope. TrayDetailsView will be
   // deleted after called ShowDefaultView.
   SystemTrayItem* owner = owner_;
-  owner->system_tray()->ShowDefaultView(BUBBLE_USE_EXISTING);
+  owner->system_tray()->ShowDefaultView(BUBBLE_USE_EXISTING,
+                                        false /* show_by_click */);
   owner->set_restore_focus(false);
 }
 

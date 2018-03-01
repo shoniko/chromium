@@ -8,7 +8,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <deque>
 #include <map>
 #include <memory>
 #include <set>
@@ -341,6 +340,7 @@ class CONTENT_EXPORT RenderViewImpl : public RenderWidget,
   int GetRoutingID() const override;
   gfx::Size GetSize() const override;
   float GetDeviceScaleFactor() const override;
+  float GetZoomLevel() const override;
   const WebPreferences& GetWebkitPreferences() override;
   void SetWebkitPreferences(const WebPreferences& preferences) override;
   blink::WebView* GetWebView() override;
@@ -375,6 +375,8 @@ class CONTENT_EXPORT RenderViewImpl : public RenderWidget,
                         const ui::LatencyInfo& latency_info,
                         HandledEventCallback callback) override;
   void ScrollFocusedEditableNodeIntoRect(const gfx::Rect& rect);
+
+  void UpdateWebViewWithDeviceScaleFactor();
 
  protected:
   // RenderWidget overrides:
@@ -438,6 +440,7 @@ class CONTENT_EXPORT RenderViewImpl : public RenderWidget,
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest,
                            GetCompositionCharacterBoundsTest);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, OnNavigationHttpPost);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, UpdateDSFAfterSwapIn);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplScaleFactorTest,
                            ScreenMetricsEmulationWithOriginalDSF1);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplScaleFactorTest,
@@ -604,8 +607,6 @@ class CONTENT_EXPORT RenderViewImpl : public RenderWidget,
   void UpdateThemePrefs() {}
 #endif
 
-  void UpdateWebViewWithDeviceScaleFactor();
-
   // Send the appropriate ack to be able discard this input event message.
   void OnDiscardInputEvent(
       const blink::WebInputEvent* input_event,
@@ -627,10 +628,6 @@ class CONTENT_EXPORT RenderViewImpl : public RenderWidget,
   // contents) should be sent to the browser immediately. This is normally
   // false, but set to true by some tests.
   bool send_content_state_immediately_;
-
-  // Bitwise-ORed set of extra bindings that have been enabled.  See
-  // BindingsPolicy for details.
-  int enabled_bindings_;
 
   // If true, we send IPC messages when |preferred_size_| changes.
   bool send_preferred_size_changes_;

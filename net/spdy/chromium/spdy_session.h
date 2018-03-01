@@ -8,12 +8,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <deque>
 #include <map>
 #include <memory>
 #include <set>
 #include <vector>
 
+#include "base/compiler_specific.h"
+#include "base/containers/circular_deque.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -271,10 +272,12 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
 
     size_t erase(const GURL& url);
     iterator erase(const_iterator it);
-    iterator insert(const_iterator position,
-                    const GURL& url,
-                    SpdyStreamId stream_id,
-                    const base::TimeTicks& creation_time);
+
+    // Return true if there was not already an entry with |url|,
+    // in which case the insertion was successful.
+    bool insert(const GURL& url,
+                SpdyStreamId stream_id,
+                const base::TimeTicks& creation_time) WARN_UNUSED_RESULT;
 
     size_t EstimateMemoryUsage() const;
 
@@ -285,6 +288,8 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
     // already started to be pushed by the server, but do not have
     // consumers yet. Contains a subset of |active_streams_|.
     PushedStreamMap streams_;
+
+    DISALLOW_COPY_AND_ASSIGN(UnclaimedPushedStreamContainer);
   };
 
   // Returns true if |new_hostname| can be pooled into an existing connection to
@@ -297,14 +302,14 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   // Create a new SpdySession.
   // |spdy_session_key| is the host/port that this session connects to, privacy
   // and proxy configuration settings that it's using.
-  // |session| is the HttpNetworkSession.  |net_log| is the NetLog that we log
-  // network events to.
+  // |net_log| is the NetLog that we log network events to.
   SpdySession(const SpdySessionKey& spdy_session_key,
               HttpServerProperties* http_server_properties,
               TransportSecurityState* transport_security_state,
-              const QuicVersionVector& quic_supported_versions,
+              const QuicTransportVersionVector& quic_supported_versions,
               bool enable_sending_initial_data,
               bool enable_ping_based_connection_checking,
+              bool support_ietf_format_quic_altsvc,
               size_t session_max_recv_window_size,
               const SettingsMap& initial_settings,
               TimeFunc time_func,
@@ -537,14 +542,6 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
     return pooled_aliases_;
   }
 
-  size_t GetFrameMaximumSize() const {
-    return buffered_spdy_framer_->GetFrameMaximumSize();
-  }
-
-  size_t GetDataFrameMaximumPayload() const {
-    return buffered_spdy_framer_->GetDataFrameMaximumPayload();
-  }
-
   // https://http2.github.io/http2-spec/#TLSUsage mandates minimum security
   // standards for TLS.
   bool HasAcceptableTransportSecurity() const;
@@ -578,14 +575,12 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   // Allow tests to access our innards for testing purposes.
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, ClientPing);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, FailedPing);
-  FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, GetActivePushStream);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, DeleteExpiredPushStreams);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, MetricsCollectionOnPushStreams);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, CancelPushBeforeClaimed);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, CancelPushAfterSessionGoesAway);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, CancelPushAfterExpired);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, ProtocolNegotiation);
-  FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, ClearSettings);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, AdjustRecvWindowSize);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, AdjustSendWindowSize);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, SessionFlowControlInactiveStream);
@@ -613,10 +608,10 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   FRIEND_TEST_ALL_PREFIXES(SpdyNetworkTransactionTest,
                            ServerPushValidCrossOriginWithOpenSession);
 
-  typedef std::deque<base::WeakPtr<SpdyStreamRequest>>
-      PendingStreamRequestQueue;
-  typedef std::map<SpdyStreamId, SpdyStream*> ActiveStreamMap;
-  typedef std::set<SpdyStream*> CreatedStreamSet;
+  using PendingStreamRequestQueue =
+      base::circular_deque<base::WeakPtr<SpdyStreamRequest>>;
+  using ActiveStreamMap = std::map<SpdyStreamId, SpdyStream*>;
+  using CreatedStreamSet = std::set<SpdyStream*>;
 
   enum AvailabilityState {
     // The session is available in its socket pool and can be used
@@ -1158,16 +1153,19 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
 
   // A queue of stream IDs that have been send-stalled at some point
   // in the past.
-  std::deque<SpdyStreamId> stream_send_unstall_queue_[NUM_PRIORITIES];
+  base::circular_deque<SpdyStreamId> stream_send_unstall_queue_[NUM_PRIORITIES];
 
   NetLogWithSource net_log_;
 
   // Versions of QUIC which may be used.
-  const QuicVersionVector quic_supported_versions_;
+  const QuicTransportVersionVector quic_supported_versions_;
 
   // Outside of tests, these should always be true.
   bool enable_sending_initial_data_;
   bool enable_ping_based_connection_checking_;
+
+  // If true, alt-svc headers advertising QUIC in IETF format will be supported.
+  bool support_ietf_format_quic_altsvc_;
 
   // |connection_at_risk_of_loss_time_| is an optimization to avoid sending
   // wasteful preface pings (when we just got some data).

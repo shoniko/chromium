@@ -33,11 +33,10 @@ class WebNotificationTray : public message_center::MessageCenterTrayDelegate {
   // MessageCenterTrayDelegate implementation.
   bool ShowPopups() override;
   void HidePopups() override;
-  bool ShowMessageCenter() override;
+  bool ShowMessageCenter(bool show_by_click) override;
   void HideMessageCenter() override;
   void OnMessageCenterTrayChanged() override;
   bool ShowNotifierSettings() override;
-  bool IsContextMenuEnabled() const override;
 
   message_center::MessageCenterTray* GetMessageCenterTray() override;
 

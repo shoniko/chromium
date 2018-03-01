@@ -108,7 +108,7 @@ class MojoCdmTest : public ::testing::Test {
       }
     }
 
-    MojoCdm::Create(key_system, url::Origin(GURL(kTestSecurityOrigin)),
+    MojoCdm::Create(key_system, url::Origin::Create(GURL(kTestSecurityOrigin)),
                     CdmConfig(), std::move(remote_cdm),
                     base::Bind(&MockCdmClient::OnSessionMessage,
                                base::Unretained(&cdm_client_)),
@@ -135,6 +135,9 @@ class MojoCdmTest : public ::testing::Test {
     EXPECT_EQ(SUCCESS, expected_result);
     mojo_cdm_ = cdm;
     remote_cdm_ = cdm_factory_.GetCreatedCdm();
+    EXPECT_EQ(kClearKeyKeySystem, remote_cdm_->GetKeySystem());
+    EXPECT_EQ(kTestSecurityOrigin,
+              remote_cdm_->GetSecurityOrigin().Serialize());
   }
 
   void ForceConnectionError() {

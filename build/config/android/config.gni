@@ -44,7 +44,7 @@ if (is_android) {
   if (!defined(default_android_sdk_root)) {
     default_android_sdk_root = "//third_party/android_tools/sdk"
     default_android_sdk_version = "26"
-    default_android_sdk_build_tools_version = "26.0.0"
+    default_android_sdk_build_tools_version = "26.0.2"
     default_android_sdk_tools_version_suffix = "-25.3.2"
   }
 
@@ -63,8 +63,7 @@ if (is_android) {
   }
 
   if (!defined(default_android_keystore_path)) {
-    default_android_keystore_path =
-        "//build/android/ant/chromium-debug.keystore"
+    default_android_keystore_path = "//build/android/chromium-debug.keystore"
     default_android_keystore_name = "chromiumdebugkey"
     default_android_keystore_password = "chromium"
   }
@@ -137,8 +136,8 @@ if (is_android) {
     # Mark APKs as android:debuggable="true".
     debuggable_apks = !is_official_build
 
-    # Set to true to enable the Errorprone compiler
-    use_errorprone_java_compiler = false
+    # Set to false to disable the Errorprone compiler
+    use_errorprone_java_compiler = true
 
     # Enables EMMA Java code coverage. Instruments classes during build to
     # produce .ec files during runtime
@@ -177,6 +176,12 @@ if (is_android) {
   # We need a second declare_args block to make sure we are using the overridden
   # value of the arguments set above.
   declare_args() {
+    if (defined(default_android_sdk_platform_version)) {
+      android_sdk_platform_version = default_android_sdk_platform_version
+    } else {
+      android_sdk_platform_version = android_sdk_version
+    }
+
     # Speed up dexing using dx --incremental.
     enable_incremental_dx = is_java_debug
   }
@@ -218,7 +223,8 @@ if (is_android) {
   # than just the current one) since these are needed by the Android toolchain
   # file to define toolchains for all possible targets in one pass.
 
-  android_sdk = "${android_sdk_root}/platforms/android-${android_sdk_version}"
+  android_sdk =
+      "${android_sdk_root}/platforms/android-${android_sdk_platform_version}"
 
   # Path to the Android NDK and SDK.
   android_ndk_include_dir = "$android_ndk_root/usr/include"
@@ -361,13 +367,8 @@ if (is_android) {
   }
 
   if (defined(android_secondary_abi_cpu)) {
-    if (is_clang) {
-      android_secondary_abi_toolchain =
-          "//build/toolchain/android:android_clang_${android_secondary_abi_cpu}"
-    } else {
-      android_secondary_abi_toolchain =
-          "//build/toolchain/android:android_${android_secondary_abi_cpu}"
-    }
+    android_secondary_abi_toolchain =
+        "//build/toolchain/android:android_clang_${android_secondary_abi_cpu}"
   }
 }
 

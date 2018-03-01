@@ -17,8 +17,10 @@ import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityEvent;
+import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
+import android.widget.LinearLayout;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -39,6 +41,7 @@ import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.testing.local.LocalRobolectricTestRunner;
 
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * A robolectric test for {@link AutocompleteEditText} class.
@@ -60,6 +63,8 @@ public class AutocompleteEditTextTest {
 
     private InOrder mInOrder;
     private TestAutocompleteEditText mAutocomplete;
+    private LinearLayout mFocusPlaceHolder;
+
     private Context mContext;
     private InputConnection mInputConnection;
     private Verifier mVerifier;
@@ -90,6 +95,7 @@ public class AutocompleteEditTextTest {
     private class TestAutocompleteEditText extends AutocompleteEditText {
         private AtomicInteger mVerifierCallCount = new AtomicInteger();
         private AtomicInteger mAccessibilityVerifierCallCount = new AtomicInteger();
+        private AtomicReference<String> mKeyboardPackageName = new AtomicReference<>("dummy.ime");
 
         public TestAutocompleteEditText(Context context, AttributeSet attrs) {
             super(context, attrs);
@@ -142,6 +148,15 @@ public class AutocompleteEditTextTest {
         public int getAndResetAccessibilityVerifierCallCount() {
             return mAccessibilityVerifierCallCount.getAndSet(0);
         }
+
+        @Override
+        public String getKeyboardPackageName() {
+            return mKeyboardPackageName.get();
+        }
+
+        public void setKeyboardPackageName(String packageName) {
+            mKeyboardPackageName.set(packageName);
+        }
     }
 
     public AutocompleteEditTextTest() {
@@ -160,13 +175,16 @@ public class AutocompleteEditTextTest {
 
         mVerifier = spy(new Verifier());
         mAutocomplete = new TestAutocompleteEditText(mContext, null);
+        mFocusPlaceHolder = new LinearLayout(mContext);
+        mFocusPlaceHolder.setFocusable(true);
+        mFocusPlaceHolder.addView(mAutocomplete);
         assertNotNull(mAutocomplete);
 
         // Pretend that the view is shown in the activity hierarchy, which is for accessibility
         // testing.
         Activity activity = Robolectric.buildActivity(Activity.class).create().get();
-        activity.setContentView(mAutocomplete);
-        assertNotNull(mAutocomplete.getParent());
+        activity.setContentView(mFocusPlaceHolder);
+        assertNotNull(mFocusPlaceHolder.getParent());
         mIsShown = true;
         assertTrue(mAutocomplete.isShown());
 
@@ -181,7 +199,7 @@ public class AutocompleteEditTextTest {
         mInOrder = inOrder(mVerifier);
         assertTrue(mAutocomplete.requestFocus());
         verifyOnPopulateAccessibilityEvent(
-                AccessibilityEvent.TYPE_VIEW_FOCUSED, "", "", 1, -1, -1, -1, -1);
+                AccessibilityEvent.TYPE_VIEW_FOCUSED, "", "", 2, -1, -1, -1, -1);
         assertNotNull(mAutocomplete.onCreateInputConnection(new EditorInfo()));
         mInputConnection = mAutocomplete.getInputConnection();
         assertNotNull(mInputConnection);
@@ -738,7 +756,7 @@ public class AutocompleteEditTextTest {
         if (isUsingSpannableModel()) {
             // Pretend that we have deleted 'o' first.
             mInOrder.verify(mVerifier).onUpdateSelection(4, 4);
-            // We restore 'o', and clears autocomplete text instead.
+            // We restore 'o', and clear autocomplete text instead.
             mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
             assertTrue(mAutocomplete.isCursorVisible());
             // Autocomplete removed.
@@ -772,12 +790,18 @@ public class AutocompleteEditTextTest {
         assertTexts("hello", "");
     }
 
+    private boolean isComposing() {
+        return BaseInputConnection.getComposingSpanStart(mAutocomplete.getText())
+                != BaseInputConnection.getComposingSpanEnd(mAutocomplete.getText());
+    }
+
     @Test
     @Features(@Features.Register(
             value = ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE, enabled = true))
     public void testDelete_SetComposingTextWithSpannableModel() {
         // User types "hello".
         assertTrue(mInputConnection.setComposingText("hello", 1));
+        assertTrue(isComposing());
         mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
         verifyOnPopulateAccessibilityEvent(
                 AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello", "", -1, 0, -1, 0, 5);
@@ -800,9 +824,10 @@ public class AutocompleteEditTextTest {
         assertTrue(mInputConnection.setComposingText("hell", 1));
         // Pretend that we have deleted 'o'.
         mInOrder.verify(mVerifier).onUpdateSelection(4, 4);
-        // We restore 'o', and clear autocomplete text instead.
+        // We restore 'o', finish composition, and clear autocomplete text instead.
         mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
         assertTrue(mAutocomplete.isCursorVisible());
+        assertFalse(isComposing());
         // Remove autocomplete.
         verifyOnPopulateAccessibilityEvent(
                 AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello", "hello world", -1, 5, -1, 6, 0);
@@ -819,6 +844,29 @@ public class AutocompleteEditTextTest {
         mInOrder.verifyNoMoreInteractions();
         assertFalse(mAutocomplete.shouldAutocomplete());
         assertTexts("hello", "");
+    }
+
+    @Test
+    @Features(@Features.Register(
+            value = ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE, enabled = true))
+    public void testDelete_SamsungKeyboardWithSpannableModel() {
+        mAutocomplete.setKeyboardPackageName("com.sec.android.inputmethod");
+        // User types "hello".
+        assertTrue(mInputConnection.setComposingText("hello", 1));
+        assertTrue(isComposing());
+        assertTrue(mAutocomplete.shouldAutocomplete());
+        // The controller kicks in.
+        mAutocomplete.setAutocompleteText("hello", " world");
+        assertTexts("hello", " world");
+
+        // User deletes autocomplete.
+        assertTrue(mInputConnection.setComposingText("hell", 1));
+        // Remove autocomplete.
+        assertFalse(mAutocomplete.shouldAutocomplete());
+        assertTexts("hello", "");
+        // Make sure that we do not finish composing text for Samsung keyboard - it does not update
+        // its internal states when we ask this. (crbug.com/766888).
+        assertTrue(isComposing());
     }
 
     @Test
@@ -1103,5 +1151,109 @@ public class AutocompleteEditTextTest {
         // On Android JB, TextView#onSaveInstanceState() calls new SpannableString(mText). This
         // should not crash.
         new SpannableString(mAutocomplete.getText());
+    }
+
+    // crbug.com/759876
+    @Test
+    @Features(@Features.Register(
+            value = ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE, enabled = true))
+    public void testFocusInAndSelectAllWithSpannableModel() {
+        internalTestFocusInAndSelectAll();
+    }
+
+    // crbug.com/759876
+    @Test
+    @Features(@Features.Register(
+            value = ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE, enabled = false))
+    public void testFocusInAndSelectAllWithoutSpannableModel() {
+        internalTestFocusInAndSelectAll();
+    }
+
+    private void internalTestFocusInAndSelectAll() {
+        final String url = "https://google.com";
+        final int len = url.length();
+        mAutocomplete.setIgnoreTextChangesForAutocomplete(true);
+        mAutocomplete.setText(url);
+        mAutocomplete.setIgnoreTextChangesForAutocomplete(false);
+
+        mInOrder.verifyNoMoreInteractions();
+        assertVerifierCallCounts(0, 0);
+
+        assertTrue(mFocusPlaceHolder.requestFocus());
+
+        mInOrder.verifyNoMoreInteractions();
+        assertVerifierCallCounts(0, 0);
+
+        // LocationBarLayout does this.
+        mAutocomplete.setSelectAllOnFocus(true);
+
+        assertTrue(mAutocomplete.requestFocus());
+
+        if (isUsingSpannableModel()) {
+            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
+                    url, "", 18, 18, 18, -1, -1);
+        }
+        mInOrder.verify(mVerifier).onUpdateSelection(len, len);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, url, "", 18, 18, 18, -1, -1);
+        mInOrder.verify(mVerifier).onUpdateSelection(0, len);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, url, "", 18, 0, 18, -1, -1);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_FOCUSED, url, "", 2, -1, -1, -1, -1);
+
+        if (isUsingSpannableModel()) {
+            assertVerifierCallCounts(2, 4);
+        } else {
+            assertVerifierCallCounts(2, 3);
+        }
+        mInOrder.verifyNoMoreInteractions();
+    }
+
+    @Test
+    @Features(@Features.Register(
+            value = ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE, enabled = true))
+    public void testNonMatchingBatchEditWithSpannableModel() {
+        internalNonMatchingBatchEdit();
+    }
+
+    @Test
+    @Features(@Features.Register(
+            value = ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE, enabled = false))
+    public void testNonMatchingBatchEditWithoutSpannableModel() {
+        internalNonMatchingBatchEdit();
+    }
+
+    // crbug.com/764749
+    private void internalNonMatchingBatchEdit() {
+        // beginBatchEdit() was not matched by endBatchEdit(), for some reason.
+        mInputConnection.beginBatchEdit();
+
+        // Restart input should reset batch edit count.
+        assertNotNull(mAutocomplete.onCreateInputConnection(new EditorInfo()));
+        mInputConnection = mAutocomplete.getInputConnection();
+
+        assertTrue(mInputConnection.commitText("a", 1));
+        // Works again.
+        assertTrue(mAutocomplete.shouldAutocomplete());
+    }
+
+    // crbug.com/768323
+    @Test
+    @Features(@Features.Register(
+            value = ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE, enabled = true))
+    public void testFocusLossHidesCursorWithSpannableModel() {
+        assertTrue(mAutocomplete.isFocused());
+        assertTrue(mAutocomplete.isCursorVisible());
+
+        // AutocompleteEditText loses focus, and this hides cursor.
+        assertTrue(mFocusPlaceHolder.requestFocus());
+
+        assertFalse(mAutocomplete.isFocused());
+        assertFalse(mAutocomplete.isCursorVisible());
+
+        // Some IME operations may arrive after focus loss, but this should never show cursor.
+        mInputConnection.getTextBeforeCursor(1, 0);
+        assertFalse(mAutocomplete.isCursorVisible());
     }
 }

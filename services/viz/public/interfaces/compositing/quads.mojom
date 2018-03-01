@@ -39,6 +39,8 @@ struct RenderPassQuadState {
   gfx.mojom.PointF filters_origin;
   // Render surface's non-normalized texture rect.
   gfx.mojom.RectF tex_coord_rect;
+
+  bool force_anti_aliasing_off;
 };
 
 struct SolidColorQuadState {
@@ -52,14 +54,10 @@ struct StreamVideoQuadState {
   gfx.mojom.Transform matrix;
 };
 
-enum SurfaceDrawQuadType {
-  PRIMARY,
-  FALLBACK,
-};
-
 struct SurfaceQuadState {
-  SurfaceId surface;
-  SurfaceDrawQuadType surface_draw_quad_type;
+  SurfaceId primary_surface_id;
+  SurfaceId? fallback_surface_id;
+  uint32 default_background_color;
 };
 
 struct TextureQuadState {
@@ -81,6 +79,7 @@ struct TileQuadState {
   bool swizzle_contents;
   uint32 resource_id;
   bool nearest_neighbor;
+  bool force_anti_aliasing_off;
 };
 
 enum YUVColorSpace {

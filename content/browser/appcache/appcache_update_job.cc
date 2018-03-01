@@ -27,7 +27,7 @@ namespace content {
 
 namespace {
 
-const int kBufferSize = 32768;
+const int kAppCacheFetchBufferSize = 32768;
 const size_t kMaxConcurrentUrlFetches = 2;
 
 std::string FormatUrlErrorMessage(
@@ -63,6 +63,30 @@ bool IsEvictableError(AppCacheUpdateJob::ResultType result,
       NOTREACHED();
       return true;
   }
+}
+
+bool CanUseExistingResource(const net::HttpResponseInfo* http_info) {
+  // Check HTTP caching semantics based on max-age and expiration headers.
+  if (!http_info->headers || http_info->headers->RequiresValidation(
+                                 http_info->request_time,
+                                 http_info->response_time, base::Time::Now())) {
+    return false;
+  }
+
+  // Responses with a "vary" header generally get treated as expired,
+  // but we special case the "Origin" header since we know it's invariant.
+  // Also, content decoding is handled by the network library, the appcache
+  // stores decoded response bodies, so we can safely ignore varying on
+  // the "Accept-Encoding" header.
+  std::string value;
+  size_t iter = 0;
+  while (http_info->headers->EnumerateHeader(&iter, "vary", &value)) {
+    if (!base::EqualsCaseInsensitiveASCII(value, "Accept-Encoding") &&
+        !base::EqualsCaseInsensitiveASCII(value, "Origin")) {
+      return false;
+    }
+  }
+  return true;
 }
 
 void EmptyCompletionCallback(int result) {}
@@ -313,7 +337,7 @@ void AppCacheUpdateJob::FetchManifest(bool is_first_fetch) {
       new URLFetcher(manifest_url_,
                      is_first_fetch ? URLFetcher::MANIFEST_FETCH
                                     : URLFetcher::MANIFEST_REFETCH,
-                     this, kBufferSize);
+                     this, kAppCacheFetchBufferSize);
 
   if (is_first_fetch) {
     // Maybe load the cached headers to make a condiditional request.
@@ -914,10 +938,9 @@ void AppCacheUpdateJob::CheckIfManifestChanged() {
   manifest_response_reader_.reset(
       storage_->CreateResponseReader(manifest_url_,
                                      entry->response_id()));
-  read_manifest_buffer_ = new net::IOBuffer(kBufferSize);
+  read_manifest_buffer_ = new net::IOBuffer(kAppCacheFetchBufferSize);
   manifest_response_reader_->ReadData(
-      read_manifest_buffer_.get(),
-      kBufferSize,
+      read_manifest_buffer_.get(), kAppCacheFetchBufferSize,
       base::Bind(&AppCacheUpdateJob::OnManifestDataReadComplete,
                  base::Unretained(this)));  // async read
 }
@@ -926,8 +949,7 @@ void AppCacheUpdateJob::OnManifestDataReadComplete(int result) {
   if (result > 0) {
     loaded_manifest_data_.append(read_manifest_buffer_->data(), result);
     manifest_response_reader_->ReadData(
-        read_manifest_buffer_.get(),
-        kBufferSize,
+        read_manifest_buffer_.get(), kAppCacheFetchBufferSize,
         base::Bind(&AppCacheUpdateJob::OnManifestDataReadComplete,
                    base::Unretained(this)));  // read more
   } else {
@@ -1009,8 +1031,9 @@ void AppCacheUpdateJob::FetchUrls() {
                MaybeLoadFromNewestCache(url_to_fetch.url, entry)) {
       // Continues asynchronously after data is loaded from newest cache.
     } else {
-      URLFetcher* fetcher = new URLFetcher(
-          url_to_fetch.url, URLFetcher::URL_FETCH, this, kBufferSize);
+      URLFetcher* fetcher =
+          new URLFetcher(url_to_fetch.url, URLFetcher::URL_FETCH, this,
+                         kAppCacheFetchBufferSize);
       if (url_to_fetch.existing_response_info.get() &&
           group_->newest_complete_cache()) {
         AppCacheEntry* existing_entry =
@@ -1133,7 +1156,7 @@ void AppCacheUpdateJob::FetchMasterEntries() {
       }
     } else {
       URLFetcher* fetcher = new URLFetcher(url, URLFetcher::MASTER_ENTRY_FETCH,
-                                           this, kBufferSize);
+                                           this, kAppCacheFetchBufferSize);
       fetcher->Start();
       master_entry_fetches_.insert(PendingUrlFetches::value_type(url, fetcher));
     }
@@ -1221,36 +1244,25 @@ void AppCacheUpdateJob::OnResponseInfoLoaded(
 
   if (!http_info) {
     LoadFromNewestCacheFailed(url, NULL);  // no response found
+  } else if (!CanUseExistingResource(http_info)) {
+    LoadFromNewestCacheFailed(url, response_info);
   } else {
-    // Check if response can be re-used according to HTTP caching semantics.
-    // Responses with a "vary" header get treated as expired.
-    const std::string name = "vary";
-    std::string value;
-    size_t iter = 0;
-    if (!http_info->headers.get() ||
-        http_info->headers->RequiresValidation(http_info->request_time,
-                                               http_info->response_time,
-                                               base::Time::Now()) ||
-        http_info->headers->EnumerateHeader(&iter, name, &value)) {
-      LoadFromNewestCacheFailed(url, response_info);
-    } else {
-      DCHECK(group_->newest_complete_cache());
-      AppCacheEntry* copy_me = group_->newest_complete_cache()->GetEntry(url);
-      DCHECK(copy_me);
-      DCHECK(copy_me->response_id() == response_id);
+    DCHECK(group_->newest_complete_cache());
+    AppCacheEntry* copy_me = group_->newest_complete_cache()->GetEntry(url);
+    DCHECK(copy_me);
+    DCHECK_EQ(copy_me->response_id(), response_id);
 
-      AppCache::EntryMap::iterator it = url_file_list_.find(url);
-      DCHECK(it != url_file_list_.end());
-      AppCacheEntry& entry = it->second;
-      entry.set_response_id(response_id);
-      entry.set_response_size(copy_me->response_size());
-      inprogress_cache_->AddOrModifyEntry(url, entry);
-      NotifyAllProgress(url);
-      ++url_fetches_completed_;
-    }
+    AppCache::EntryMap::iterator it = url_file_list_.find(url);
+    DCHECK(it != url_file_list_.end());
+    AppCacheEntry& entry = it->second;
+    entry.set_response_id(response_id);
+    entry.set_response_size(copy_me->response_size());
+    inprogress_cache_->AddOrModifyEntry(url, entry);
+    NotifyAllProgress(url);
+    ++url_fetches_completed_;
   }
-  loading_responses_.erase(found);
 
+  loading_responses_.erase(found);
   MaybeCompleteUpdate();
 }
 

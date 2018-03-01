@@ -46,10 +46,10 @@
 #include "core/page/scrolling/ScrollingCoordinator.h"
 #include "core/paint/compositing/PaintLayerCompositor.h"
 #include "core/probe/CoreProbes.h"
+#include "core/style/ComputedStyle.h"
 #include "platform/Histogram.h"
 #include "platform/geometry/DoubleRect.h"
 #include "platform/geometry/FloatSize.h"
-#include "platform/graphics/CompositorMutableProperties.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
 #include "platform/scroll/Scrollbar.h"
@@ -74,7 +74,7 @@ VisualViewport::~VisualViewport() {
   SendUMAMetrics();
 }
 
-DEFINE_TRACE(VisualViewport) {
+void VisualViewport::Trace(blink::Visitor* visitor) {
   visitor->Trace(page_);
   ScrollableArea::Trace(visitor);
 }
@@ -289,11 +289,6 @@ bool VisualViewport::DidSetScaleOrLocation(float scale,
     if (ScrollingCoordinator* coordinator = GetPage().GetScrollingCoordinator())
       coordinator->ScrollableAreaScrollLayerDidChange(this);
 
-    if (!GetPage().GetSettings().GetInertVisualViewport()) {
-      if (Document* document = MainFrame()->GetDocument())
-        document->EnqueueScrollEventForNode(document);
-    }
-
     EnqueueScrollEvent();
 
     MainFrame()->View()->DidChangeScrollOffset();
@@ -371,12 +366,10 @@ void VisualViewport::CreateLayerTree() {
   inner_viewport_container_layer_->SetSize(FloatSize(size_));
 
   inner_viewport_scroll_layer_->PlatformLayer()->SetScrollable(size_);
-  if (MainFrame()) {
-    if (Document* document = MainFrame()->GetDocument()) {
-      inner_viewport_scroll_layer_->SetElementId(
-          CompositorElementIdFromUniqueObjectId(unique_id_));
-    }
-  }
+  DCHECK(MainFrame());
+  DCHECK(MainFrame()->GetDocument());
+  inner_viewport_scroll_layer_->SetElementId(
+      CompositorElementIdFromUniqueObjectId(unique_id_));
 
   root_transform_layer_->AddChild(inner_viewport_container_layer_.get());
   inner_viewport_container_layer_->AddChild(overscroll_elasticity_layer_.get());
@@ -446,9 +439,15 @@ void VisualViewport::SetupScrollbar(WebScrollbar::Orientation orientation) {
                     : web_overlay_scrollbar_vertical_;
 
   ScrollbarThemeOverlay& theme = ScrollbarThemeOverlay::MobileTheme();
-  int thumb_thickness = theme.ThumbThickness();
-  int scrollbar_thickness = theme.ScrollbarThickness(kRegularScrollbar);
-  int scrollbar_margin = theme.ScrollbarMargin();
+  int thumb_thickness = clampTo<int>(
+      std::floor(GetPage().GetChromeClient().WindowToViewportScalar(
+          theme.ThumbThickness())));
+  int scrollbar_thickness = clampTo<int>(
+      std::floor(GetPage().GetChromeClient().WindowToViewportScalar(
+          theme.ScrollbarThickness(kRegularScrollbar))));
+  int scrollbar_margin = clampTo<int>(
+      std::floor(GetPage().GetChromeClient().WindowToViewportScalar(
+          theme.ScrollbarMargin())));
 
   if (!web_scrollbar_layer) {
     ScrollingCoordinator* coordinator = GetPage().GetScrollingCoordinator();
@@ -590,9 +589,11 @@ IntPoint VisualViewport::ClampDocumentOffsetAtScale(const IntPoint& offset,
 
   IntSize visual_viewport_max =
       FlooredIntSize(FloatSize(ContentsSize()) - scaled_size);
-  IntSize max = view->MaximumScrollOffsetInt() + visual_viewport_max;
+  IntSize max = view->LayoutViewportScrollableArea()->MaximumScrollOffsetInt() +
+                visual_viewport_max;
   IntSize min =
-      view->MinimumScrollOffsetInt();  // VisualViewportMin should be (0, 0)
+      view->LayoutViewportScrollableArea()
+          ->MinimumScrollOffsetInt();  // VisualViewportMin should be (0, 0)
 
   IntSize clamped = ToIntSize(offset);
   clamped = clamped.ShrunkTo(max);
@@ -601,7 +602,11 @@ IntPoint VisualViewport::ClampDocumentOffsetAtScale(const IntPoint& offset,
 }
 
 void VisualViewport::SetBrowserControlsAdjustment(float adjustment) {
+  if (browser_controls_adjustment_ == adjustment)
+    return;
+
   browser_controls_adjustment_ = adjustment;
+  EnqueueResizeEvent();
 }
 
 float VisualViewport::BrowserControlsAdjustment() const {
@@ -660,7 +665,7 @@ IntRect VisualViewport::VisibleContentRect(
   return rect;
 }
 
-RefPtr<WebTaskRunner> VisualViewport::GetTimerTaskRunner() const {
+scoped_refptr<WebTaskRunner> VisualViewport::GetTimerTaskRunner() const {
   return TaskRunnerHelper::Get(TaskType::kUnspecedTimer, MainFrame());
 }
 
@@ -704,7 +709,7 @@ void VisualViewport::PaintContents(const GraphicsLayer*,
 LocalFrame* VisualViewport::MainFrame() const {
   return GetPage().MainFrame() && GetPage().MainFrame()->IsLocalFrame()
              ? GetPage().DeprecatedLocalMainFrame()
-             : 0;
+             : nullptr;
 }
 
 bool VisualViewport::ScheduleAnimation() {
@@ -866,6 +871,10 @@ void VisualViewport::NotifyRootFrameViewport() const {
     return;
 
   root_frame_viewport->DidUpdateVisualViewport();
+}
+
+ScrollbarTheme& VisualViewport::GetPageScrollbarTheme() const {
+  return GetPage().GetScrollbarTheme();
 }
 
 String VisualViewport::DebugName(const GraphicsLayer* graphics_layer) const {

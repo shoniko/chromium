@@ -12,8 +12,7 @@ import android.text.TextUtils;
 import android.util.Pair;
 import android.view.View;
 
-import junit.framework.Assert;
-
+import org.junit.Assert;
 import org.junit.rules.TestWatcher;
 import org.junit.runner.Description;
 
@@ -103,6 +102,13 @@ public class RenderTestRule extends TestWatcher {
         public RenderTestException(String message) {
             super(message);
         }
+    }
+
+    /**
+     * Constructor using {@code "chrome/test/data/android/render_tests"} as default golden folder.
+     */
+    public RenderTestRule() {
+        this("chrome/test/data/android/render_tests");
     }
 
     public RenderTestRule(String goldenFolder) {

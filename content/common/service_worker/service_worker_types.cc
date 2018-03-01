@@ -133,25 +133,6 @@ size_t ServiceWorkerResponse::EstimatedStructSize() {
   return size;
 }
 
-ServiceWorkerObjectInfo::ServiceWorkerObjectInfo()
-    : handle_id(kInvalidServiceWorkerHandleId),
-      state(blink::kWebServiceWorkerStateUnknown),
-      version_id(kInvalidServiceWorkerVersionId) {}
-
-bool ServiceWorkerObjectInfo::IsValid() const {
-  return handle_id != kInvalidServiceWorkerHandleId &&
-         version_id != kInvalidServiceWorkerVersionId;
-}
-
-ServiceWorkerRegistrationOptions::ServiceWorkerRegistrationOptions(
-    const GURL& scope)
-    : scope(scope) {}
-
-ServiceWorkerRegistrationObjectInfo::ServiceWorkerRegistrationObjectInfo()
-    : handle_id(kInvalidServiceWorkerRegistrationHandleId),
-      registration_id(kInvalidServiceWorkerRegistrationId) {
-}
-
 ServiceWorkerClientQueryOptions::ServiceWorkerClientQueryOptions()
     : client_type(blink::kWebServiceWorkerClientTypeWindow),
       include_uncontrolled(false) {}
@@ -163,7 +144,7 @@ ExtendableMessageEventSource::ExtendableMessageEventSource(
     : client_info(client_info) {}
 
 ExtendableMessageEventSource::ExtendableMessageEventSource(
-    const ServiceWorkerObjectInfo& service_worker_info)
+    const blink::mojom::ServiceWorkerObjectInfo& service_worker_info)
     : service_worker_info(service_worker_info) {}
 
 NavigationPreloadState::NavigationPreloadState()

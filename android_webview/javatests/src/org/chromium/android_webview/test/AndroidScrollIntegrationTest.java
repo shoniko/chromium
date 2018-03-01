@@ -21,8 +21,7 @@ import org.junit.runner.RunWith;
 
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwScrollOffsetManager;
-import org.chromium.android_webview.test.AwTestBase.PopupInfo;
-import org.chromium.android_webview.test.AwTestBase.TestDependencyFactory;
+import org.chromium.android_webview.test.AwActivityTestRule.PopupInfo;
 import org.chromium.android_webview.test.util.AwTestTouchUtils;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.android_webview.test.util.JavascriptEventObserver;
@@ -287,10 +286,9 @@ public class AndroidScrollIntegrationTest {
         final String firstFrameObserverName = "firstFrameObserver";
         mActivityTestRule.enableJavaScriptOnUiThread(testContainerView.getAwContents());
 
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(
-                () -> firstFrameObserver.register(testContainerView.getContentViewCore(),
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
+                firstFrameObserver.register(testContainerView.getWebContents(),
                         firstFrameObserverName));
-
         mActivityTestRule.loadDataSync(testContainerView.getAwContents(),
                 contentsClient.getOnPageFinishedHelper(),
                 makeTestPage(onscrollObserverName, firstFrameObserverName, extraContent),
@@ -321,9 +319,8 @@ public class AndroidScrollIntegrationTest {
         final int targetScrollYPix = (int) Math.ceil(targetScrollYCss * deviceDIPScale);
         final JavascriptEventObserver onscrollObserver = new JavascriptEventObserver();
 
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(
-                () -> onscrollObserver.register(testContainerView.getContentViewCore(),
-                        "onscrollObserver"));
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
+                onscrollObserver.register(testContainerView.getWebContents(), "onscrollObserver"));
 
         loadTestPageAndWaitForFirstFrame(testContainerView, contentsClient, "onscrollObserver", "");
 
@@ -645,9 +642,9 @@ public class AndroidScrollIntegrationTest {
 
         assertScrollOnMainSync(testContainerView, 0, 0);
 
-        final int maxScrollYPix =
-                mActivityTestRule.runTestOnUiThreadAndGetResult(
-                        () -> (testContainerView.getAwContents().computeVerticalScrollRange()
+        final int maxScrollYPix = ThreadUtils.runOnUiThreadBlocking(
+                ()
+                        -> (testContainerView.getAwContents().computeVerticalScrollRange()
                                 - testContainerView.getHeight()));
 
         final CallbackHelper onScrollToCallbackHelper =
@@ -847,8 +844,7 @@ public class AndroidScrollIntegrationTest {
         scrollToOnMainSync(testContainerView, 0, targetScrollYPix);
 
         final int scrolledYPix =
-                mActivityTestRule.runTestOnUiThreadAndGetResult(
-                        () -> testContainerView.getScrollY());
+                ThreadUtils.runOnUiThreadBlocking(() -> testContainerView.getScrollY());
 
         Assert.assertTrue(scrolledYPix > 0);
 

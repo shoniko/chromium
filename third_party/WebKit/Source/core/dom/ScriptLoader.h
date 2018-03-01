@@ -30,6 +30,7 @@
 #include "platform/bindings/TraceWrapperMember.h"
 #include "platform/loader/fetch/IntegrityMetadata.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
+#include "platform/loader/fetch/ScriptFetchOptions.h"
 #include "platform/wtf/text/TextEncoding.h"
 #include "platform/wtf/text/TextPosition.h"
 #include "platform/wtf/text/WTFString.h"
@@ -55,14 +56,14 @@ class CORE_EXPORT ScriptLoader : public GarbageCollectedFinalized<ScriptLoader>,
   static ScriptLoader* Create(ScriptElementBase* element,
                               bool created_by_parser,
                               bool is_evaluated,
-                              bool created_during_document_write = false) {
+                              bool created_during_document_write) {
     return new ScriptLoader(element, created_by_parser, is_evaluated,
                             created_during_document_write);
   }
 
   ~ScriptLoader() override;
-  DECLARE_VIRTUAL_TRACE();
-  DECLARE_TRACE_WRAPPERS();
+  virtual void Trace(blink::Visitor*);
+  void TraceWrappers(const ScriptWrappableVisitor*) const;
 
   enum LegacyTypeSupport {
     kDisallowLegacyTypeInTypeAttribute,
@@ -102,8 +103,6 @@ class CORE_EXPORT ScriptLoader : public GarbageCollectedFinalized<ScriptLoader>,
   bool WillExecuteWhenDocumentFinishedParsing() const {
     return will_execute_when_document_finished_parsing_;
   }
-  ScriptResource* GetResource() { return resource_.Get(); }
-
   void SetHaveFiredLoadEvent(bool have_fired_load) {
     have_fired_load_ = have_fired_load;
   }
@@ -127,6 +126,8 @@ class CORE_EXPORT ScriptLoader : public GarbageCollectedFinalized<ScriptLoader>,
            DocumentWriteIntervention::kDoNotFetchDocWrittenScript;
   }
   void SetFetchDocWrittenScriptDeferIdle();
+
+  const String& Nonce() const { return nonce_; }
 
   // To support script streaming, the ScriptRunner may need to access the
   // PendingScript. This breaks the intended layering, so please use with
@@ -159,9 +160,7 @@ class CORE_EXPORT ScriptLoader : public GarbageCollectedFinalized<ScriptLoader>,
   // https://html.spec.whatwg.org/#fetch-a-module-script-tree
   void FetchModuleScriptTree(const KURL&,
                              Modulator*,
-                             const String& nonce,
-                             ParserDisposition,
-                             WebURLRequest::FetchCredentialsMode);
+                             const ScriptFetchOptions&);
 
   enum class ExecuteScriptResult {
     kShouldFireErrorEvent,
@@ -240,6 +239,8 @@ class CORE_EXPORT ScriptLoader : public GarbageCollectedFinalized<ScriptLoader>,
 
   TraceWrapperMember<PendingScript> pending_script_;
   TraceWrapperMember<ModulePendingScriptTreeClient> module_tree_client_;
+
+  String nonce_;
 
   // The context document at the time when PrepareScript() is executed.
   // This is only used to check whether the script element is moved between

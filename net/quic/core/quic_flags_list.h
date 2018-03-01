@@ -37,12 +37,6 @@ QUIC_FLAG(bool,
 // If true, disable pacing in QUIC.
 QUIC_FLAG(bool, FLAGS_quic_disable_pacing_for_perf_tests, false)
 
-// If true, QUIC public reset packets will have the \"pre-v33\" public header
-// flags.
-QUIC_FLAG(bool,
-          FLAGS_quic_reloadable_flag_quic_use_old_public_reset_packets,
-          true)
-
 // If true, QUIC will use cheap stateless rejects without creating a full
 // connection.
 QUIC_FLAG(bool,
@@ -54,10 +48,6 @@ QUIC_FLAG(bool,
 QUIC_FLAG(bool,
           FLAGS_quic_reloadable_flag_quic_respect_http2_settings_frame,
           true)
-
-// If true, v33 QUIC client uses 1 bit to specify 8-byte connection id in
-// public flag.
-QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_remove_v33_hacks2, false)
 
 // If true, allows packets to be buffered in anticipation of a future CHLO, and
 // allow CHLO packets to be buffered until next iteration of the event loop.
@@ -100,7 +90,7 @@ QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_enable_random_padding, true)
 
 // If true, export a varz mapping QUIC non 0-rtt handshake with corresponding
 // frontend service.
-QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_account_handshake, false)
+QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_account_handshake, true)
 
 // Allows the 3RTO QUIC connection option to close a QUIC connection after
 // 3RTOs if there are no open streams.
@@ -108,13 +98,6 @@ QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_enable_3rtos, false)
 
 // If true, enable experiment for testing PCC congestion-control.
 QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_enable_pcc, false)
-
-// If true, enable QUIC v40.
-QUIC_FLAG(bool, FLAGS_quic_enable_version_40, true)
-
-// In QUIC, QuicSession gets notified when stream frames are acked, discarded or
-// retransmitted.
-QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_use_stream_notifier2, true)
 
 // When true, defaults to BBR congestion control instead of Cubic.
 QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_default_to_bbr, false)
@@ -125,43 +108,13 @@ QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_bbr_rate_recovery, false)
 
 // If true, allow trailing headers with duplicate keys, and combine the values
 // from duplicate keys into a single delimted header.
-QUIC_FLAG(bool,
-          FLAGS_quic_reloadable_flag_quic_handle_duplicate_trailers,
-          false)
-
-// If true, disables support for QUIC version 36.
-QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_disable_version_36, true)
-
-// If true, disables support for the packets-based QUIC congestion control
-// algorithms.
-QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_disable_packets_based_cc, false)
+QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_handle_duplicate_trailers, true)
 
 // When enabled, ack frame uses a deque internally instead of a set.
 QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_frames_deque2, false)
 
-// If true, QUIC packet creator passes a stack allocated SerializedPacket to the
-// connection.
-QUIC_FLAG(bool,
-          FLAGS_quic_reloadable_flag_quic_clear_packet_before_handed_over,
-          true)
-
-// If true, enable QUIC v41.
-QUIC_FLAG(bool, FLAGS_quic_enable_version_41, false)
-
-// Small optimization for QuicSentPacketManager::HandleAckForSentPackets.
-QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_handle_acks, true)
-
-// When true, respect configured limits on header list size.
-QUIC_FLAG(bool, FLAGS_quic_restart_flag_quic_header_list_size, false)
-
-// When true, allows the LRTT connection option to cause QUIC BBR to exit
-// STARTUP when in recovery and there has been no bandwidth increase for 1RTT.
-QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_bbr_exit_startup_on_loss, true)
-
-// If true, application data is saved before consumption in QUIC.
-QUIC_FLAG(bool,
-          FLAGS_quic_reloadable_flag_quic_save_data_before_consumption2,
-          true)
+// If true, enable QUIC v42.
+QUIC_FLAG(bool, FLAGS_quic_enable_version_42, false)
 
 // If buffered data in QUIC stream is less than this threshold, buffers all
 // provided data or asks upper layer for more data.
@@ -170,42 +123,52 @@ QUIC_FLAG(uint32_t, FLAGS_quic_buffered_data_threshold, 8192u)
 // Max size of data slice in bytes for QUIC stream send buffer.
 QUIC_FLAG(uint32_t, FLAGS_quic_send_buffer_max_data_slice_size, 4096u)
 
-// Enables the BBR1 and BBR2 QUIC connection options, which enable two forms of
-// ack aggregation that prevent persistent standing queues.
-QUIC_FLAG(bool,
-          FLAGS_quic_reloadable_flag_quic_bbr_ack_aggregation_bytes4,
-          true)
+// If true, QUIC supports both QUIC Crypto and TLS 1.3 for the handshake
+// protocol.
+QUIC_FLAG(bool, FLAGS_quic_supports_tls_handshake, false)
 
 // Add 4 new ack decimation modes to QUIC that are entirely time based at 1/4
 // or 1/8 RTT.
 QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_ack_decimation, false)
 
-// Enables using the ConsumeDataFastPath more often for large transfers.
-QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_consuming_data_faster, false)
-
-// If true, in QUIC, set dispatcher framer\'s version to client packet's
-// version in QuicDispatcher::OnStatelessRejectorProcessDone.
-QUIC_FLAG(
-    bool,
-    FLAGS_quic_reloadable_flag_quic_set_version_on_async_get_proof_returns,
-    false)
-
 // If true, check for packet number underflow when reading ack blocks.
-QUIC_FLAG(bool,
-          FLAGS_quic_reloadable_flag_sanitize_framer_addrange_input,
-          false)
-
-// If true, change QUIC connection to start peer migration only when peer
-// address is changed on server side. For peer address change on client side,
-// update the peer ip address only.
-QUIC_FLAG(bool,
-          FLAGS_quic_reloadable_flag_quic_disable_peer_migration_on_client,
-          true)
+QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_sanitize_framer_addrange_input, true)
 
 // If true, QUIC v40 is enabled which includes changes to RST_STREAM, ACK
 // and STREAM frames match IETF format.
-QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_enable_version_40, false)
+QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_enable_version_41, true)
 
 // If true, QUIC can take ownership of data provided in a reference counted
 // memory to avoid data copy.
 QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_use_mem_slices, false)
+
+// Allow QUIC to accept initial packet numbers that are random, not 1.
+QUIC_FLAG(bool, FLAGS_quic_restart_flag_quic_enable_accept_random_ipn, false)
+
+// Report the more analogous TLS 1.3 cipher suites rather than TLS 1.2 ECDHE_RSA
+// ciphers in QuicDecrypters.
+QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_use_tls13_cipher_suites, false)
+
+// If true, read and write QUIC version labels in network byte order.
+QUIC_FLAG(bool,
+          FLAGS_quic_reloadable_flag_quic_use_net_byte_order_version_label,
+          false)
+
+// If true, send stateless reset token in SHLO. This token is used in IETF
+// public reset packet.
+QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_send_reset_token_in_shlo, false)
+
+// Default enable all cubic fixes in QUIC Cubic by default.
+QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_enable_cubic_fixes, false)
+
+// If true, enable QUIC v43.
+QUIC_FLAG(bool, FLAGS_quic_enable_version_43, false)
+
+// If true, allows one address change when UDP proxying.
+QUIC_FLAG(bool,
+          FLAGS_quic_reloadable_flag_quic_allow_address_change_for_udp_proxy,
+          false)
+
+// If true, allow a new BBR connection option to use a slower STARTUP once loss
+// occurs
+QUIC_FLAG(bool, FLAGS_quic_reloadable_flag_quic_bbr_slower_startup, false)

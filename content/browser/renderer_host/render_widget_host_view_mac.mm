@@ -400,6 +400,10 @@ void RenderWidgetHostViewMac::BrowserCompositorMacOnBeginFrame() {
   UpdateNeedsBeginFramesInternal();
 }
 
+viz::LocalSurfaceId RenderWidgetHostViewMac::GetLocalSurfaceId() const {
+  return local_surface_id_;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // AcceleratedWidgetMacNSView, public:
 
@@ -452,6 +456,7 @@ RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget,
 
   viz::FrameSinkId frame_sink_id =
       render_widget_host_->AllocateFrameSinkId(is_guest_view_hack_);
+  local_surface_id_ = local_surface_id_allocator_.GenerateId();
   browser_compositor_.reset(
       new BrowserCompositorMac(this, this, render_widget_host_->is_hidden(),
                                [cocoa_view_ window], frame_sink_id));
@@ -805,6 +810,11 @@ void RenderWidgetHostViewMac::SetBounds(const gfx::Rect& rect) {
   if (rect.size().IsEmpty())
     return;
 
+  if (rect.size() != last_size_) {
+    local_surface_id_ = local_surface_id_allocator_.GenerateId();
+    last_size_ = rect.size();
+  }
+
   // Ignore the position of |rect| for non-popup rwhvs. This is because
   // background tabs do not have a window, but the window is required for the
   // coordinate conversions. Popups are always for a visible tab.
@@ -1067,6 +1077,8 @@ void RenderWidgetHostViewMac::Destroy() {
 
   if (text_input_manager_)
     text_input_manager_->RemoveObserver(this);
+
+  mouse_wheel_phase_handler_.IgnorePendingWheelEndEvent();
 
   // We get this call just before |render_widget_host_| deletes
   // itself.  But we are owned by |cocoa_view_|, which may be retained
@@ -1426,7 +1438,7 @@ void RenderWidgetHostViewMac::DidCreateNewRendererCompositorFrameSink(
 
 void RenderWidgetHostViewMac::SubmitCompositorFrame(
     const viz::LocalSurfaceId& local_surface_id,
-    cc::CompositorFrame frame) {
+    viz::CompositorFrame frame) {
   TRACE_EVENT0("browser", "RenderWidgetHostViewMac::OnSwapCompositorFrame");
 
   last_frame_root_background_color_ = frame.metadata.root_background_color;
@@ -1518,12 +1530,12 @@ viz::FrameSinkId RenderWidgetHostViewMac::GetFrameSinkId() {
 
 viz::FrameSinkId RenderWidgetHostViewMac::FrameSinkIdAtPoint(
     viz::SurfaceHittestDelegate* delegate,
-    const gfx::Point& point,
-    gfx::Point* transformed_point) {
+    const gfx::PointF& point,
+    gfx::PointF* transformed_point) {
   // The surface hittest happens in device pixels, so we need to convert the
   // |point| from DIPs to pixels before hittesting.
   float scale_factor = ui::GetScaleFactorForNativeView(cocoa_view_);
-  gfx::Point point_in_pixels = gfx::ConvertPointToPixel(scale_factor, point);
+  gfx::PointF point_in_pixels = gfx::ConvertPointToPixel(scale_factor, point);
   viz::SurfaceId id =
       browser_compositor_->GetDelegatedFrameHost()->SurfaceIdAtPoint(
           delegate, point_in_pixels, transformed_point);
@@ -1542,9 +1554,22 @@ bool RenderWidgetHostViewMac::ShouldRouteEvent(
   // TODO(wjmaclean): Update this function if RenderWidgetHostViewMac implements
   // OnTouchEvent(), to match what we are doing in RenderWidgetHostViewAura.
   DCHECK(WebInputEvent::IsMouseEventType(event.GetType()) ||
-         event.GetType() == WebInputEvent::kMouseWheel);
+         event.GetType() == WebInputEvent::kMouseWheel ||
+         WebInputEvent::IsPinchGestureEventType(event.GetType()));
   return render_widget_host_->delegate() &&
          render_widget_host_->delegate()->GetInputEventRouter();
+}
+
+void RenderWidgetHostViewMac::SendGesturePinchEvent(WebGestureEvent* event) {
+  DCHECK(WebInputEvent::IsPinchGestureEventType(event->GetType()));
+  if (ShouldRouteEvent(*event)) {
+    DCHECK(event->source_device ==
+           blink::WebGestureDevice::kWebGestureDeviceTouchpad);
+    render_widget_host_->delegate()->GetInputEventRouter()->RouteGestureEvent(
+        this, event, ui::LatencyInfo(ui::SourceEventType::WHEEL));
+    return;
+  }
+  render_widget_host_->ForwardGestureEvent(*event);
 }
 
 void RenderWidgetHostViewMac::ProcessMouseEvent(
@@ -1571,13 +1596,13 @@ void RenderWidgetHostViewMac::ProcessGestureEvent(
 }
 
 bool RenderWidgetHostViewMac::TransformPointToLocalCoordSpace(
-    const gfx::Point& point,
+    const gfx::PointF& point,
     const viz::SurfaceId& original_surface,
-    gfx::Point* transformed_point) {
+    gfx::PointF* transformed_point) {
   // Transformations use physical pixels rather than DIP, so conversion
   // is necessary.
   float scale_factor = ui::GetScaleFactorForNativeView(cocoa_view_);
-  gfx::Point point_in_pixels = gfx::ConvertPointToPixel(scale_factor, point);
+  gfx::PointF point_in_pixels = gfx::ConvertPointToPixel(scale_factor, point);
   if (!browser_compositor_->GetDelegatedFrameHost()
            ->TransformPointToLocalCoordSpace(point_in_pixels, original_surface,
                                              transformed_point))
@@ -1587,9 +1612,9 @@ bool RenderWidgetHostViewMac::TransformPointToLocalCoordSpace(
 }
 
 bool RenderWidgetHostViewMac::TransformPointToCoordSpaceForView(
-    const gfx::Point& point,
+    const gfx::PointF& point,
     RenderWidgetHostViewBase* target_view,
-    gfx::Point* transformed_point) {
+    gfx::PointF* transformed_point) {
   if (target_view == this) {
     *transformed_point = point;
     return true;
@@ -1639,13 +1664,13 @@ void RenderWidgetHostViewMac::SetBackgroundColor(SkColor color) {
   // to set a reasonable color to show before the web content generates its
   // first frame. This will be overridden by the web contents.
   SetBackgroundLayerColor(color);
+  browser_compositor_->SetBackgroundColor(color);
 
   DCHECK(SkColorGetA(color) == SK_AlphaOPAQUE ||
          SkColorGetA(color) == SK_AlphaTRANSPARENT);
   bool opaque = SkColorGetA(color) == SK_AlphaOPAQUE;
   if (background_is_opaque_ != opaque) {
     background_is_opaque_ = opaque;
-    browser_compositor_->SetHasTransparentBackground(!opaque);
     if (render_widget_host_)
       render_widget_host_->SetBackgroundOpaque(opaque);
   }
@@ -1742,10 +1767,14 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
     return;
 
   if (changed_metrics & DisplayObserver::DISPLAY_METRIC_DEVICE_SCALE_FACTOR) {
+    if (display.device_scale_factor() != last_device_scale_factor_) {
+      local_surface_id_ = local_surface_id_allocator_.GenerateId();
+      last_device_scale_factor_ = display.device_scale_factor();
+    }
     RenderWidgetHostImpl* host =
         RenderWidgetHostImpl::From(GetRenderWidgetHost());
     if (host && host->delegate())
-      host->delegate()->UpdateDeviceScaleFactor(display.device_scale_factor());
+      host->WasResized();
   }
 
   UpdateBackingStoreProperties();
@@ -1800,6 +1829,14 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
   // See http://crbug.com/684388.
   [[self window] makeFirstResponder:nil];
   [NSApp updateWindows];
+
+  // Debug key to check if the current input context still holds onto the view.
+  NSTextInputContext* currentContext = [NSTextInputContext currentInputContext];
+  base::debug::ScopedCrashKey textInputContextCrashKey(
+      "text-input-context-client",
+      currentContext && [currentContext client] == self
+          ? "text input still held on"
+          : "text input no longer held on");
 
   [super dealloc];
 }
@@ -2296,12 +2333,15 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
     NativeWebKeyboardEvent fakeEvent = event;
     fakeEvent.SetType(blink::WebInputEvent::kKeyUp);
     fakeEvent.skip_in_browser = true;
-    widgetHost->ForwardKeyboardEventWithLatencyInfo(fakeEvent, latency_info);
+    ui::LatencyInfo fake_event_latency_info = latency_info;
+    fake_event_latency_info.set_source_event_type(ui::SourceEventType::OTHER);
+    widgetHost->ForwardKeyboardEventWithLatencyInfo(fakeEvent,
+                                                    fake_event_latency_info);
     // Not checking |renderWidgetHostView_->render_widget_host_| here because
     // a key event with |skip_in_browser| == true won't be handled by browser,
     // thus it won't destroy the widget.
 
-    widgetHost->ForwardKeyboardEventWithCommands(event, latency_info,
+    widgetHost->ForwardKeyboardEventWithCommands(event, fake_event_latency_info,
                                                  &editCommands_);
 
     // Calling ForwardKeyboardEventWithCommands() could have destroyed the
@@ -2399,7 +2439,8 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
   if (gestureBeginPinchSent_) {
     WebGestureEvent endEvent(WebGestureEventBuilder::Build(event, self));
     endEvent.SetType(WebInputEvent::kGesturePinchEnd);
-    renderWidgetHostView_->render_widget_host_->ForwardGestureEvent(endEvent);
+    endEvent.source_device = blink::WebGestureDevice::kWebGestureDeviceTouchpad;
+    renderWidgetHostView_->SendGesturePinchEvent(&endEvent);
     gestureBeginPinchSent_ = NO;
   }
 }
@@ -2717,14 +2758,16 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
     }
     WebGestureEvent beginEvent(*gestureBeginEvent_);
     beginEvent.SetType(WebInputEvent::kGesturePinchBegin);
-    renderWidgetHostView_->render_widget_host_->ForwardGestureEvent(beginEvent);
+    beginEvent.source_device =
+        blink::WebGestureDevice::kWebGestureDeviceTouchpad;
+    renderWidgetHostView_->SendGesturePinchEvent(&beginEvent);
     gestureBeginPinchSent_ = YES;
   }
 
   // Send a GesturePinchUpdate event.
   WebGestureEvent updateEvent = WebGestureEventBuilder::Build(event, self);
   updateEvent.data.pinch_update.zoom_disabled = !pinchHasReachedZoomThreshold_;
-  renderWidgetHostView_->render_widget_host_->ForwardGestureEvent(updateEvent);
+  renderWidgetHostView_->SendGesturePinchEvent(&updateEvent);
 }
 
 - (void)viewWillMoveToWindow:(NSWindow*)newWindow {

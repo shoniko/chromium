@@ -37,7 +37,6 @@
 #include "bindings/core/v8/ScriptController.h"
 #include "bindings/core/v8/serialization/SerializedScriptValue.h"
 #include "bindings/core/v8/serialization/SerializedScriptValueFactory.h"
-#include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/TaskRunnerHelper.h"
@@ -51,11 +50,11 @@
 #include "core/loader/ThreadableLoader.h"
 #include "core/probe/CoreProbes.h"
 #include "modules/eventsource/EventSourceInit.h"
-#include "platform/HTTPNames.h"
 #include "platform/loader/fetch/ResourceError.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
 #include "platform/loader/fetch/ResourceRequest.h"
 #include "platform/loader/fetch/ResourceResponse.h"
+#include "platform/network/http_names.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/wtf/text/StringBuilder.h"
 #include "public/platform/WebURLRequest.h"
@@ -213,12 +212,13 @@ void EventSource::close() {
     connect_timer_.Stop();
   }
 
+  state_ = kClosed;
+
   if (loader_) {
     loader_->Cancel();
     loader_ = nullptr;
   }
 
-  state_ = kClosed;
 }
 
 const AtomicString& EventSource::InterfaceName() const {
@@ -282,7 +282,6 @@ void EventSource::DidReceiveResponse(
     DispatchEvent(Event::Create(EventTypeNames::open));
   } else {
     loader_->Cancel();
-    DispatchEvent(Event::Create(EventTypeNames::error));
   }
 }
 
@@ -302,16 +301,25 @@ void EventSource::DidFinishLoading(unsigned long, double) {
 }
 
 void EventSource::DidFail(const ResourceError& error) {
-  DCHECK_NE(kClosed, state_);
   DCHECK(loader_);
+  if (error.IsCancellation() && state_ == kClosed) {
+    NetworkRequestEnded();
+    return;
+  }
+
+  DCHECK_NE(kClosed, state_);
 
   if (error.IsAccessCheck()) {
     AbortConnectionAttempt();
     return;
   }
 
-  if (error.IsCancellation())
-    state_ = kClosed;
+  if (error.IsCancellation()) {
+    // When the loading is cancelled for an external reason (e.g.,
+    // window.stop()), dispatch an error event and do not reconnect.
+    AbortConnectionAttempt();
+    return;
+  }
   NetworkRequestEnded();
 }
 
@@ -326,7 +334,7 @@ void EventSource::OnMessageEvent(const AtomicString& event_type,
                                  const AtomicString& last_event_id) {
   MessageEvent* e = MessageEvent::Create();
   e->initMessageEvent(event_type, false, false, data, event_stream_origin_,
-                      last_event_id, 0, nullptr);
+                      last_event_id, nullptr, nullptr);
 
   probe::willDispatchEventSourceEvent(GetExecutionContext(), this, event_type,
                                       last_event_id, data);
@@ -338,7 +346,7 @@ void EventSource::OnReconnectionTimeSet(unsigned long long reconnection_time) {
 }
 
 void EventSource::AbortConnectionAttempt() {
-  DCHECK_EQ(kConnecting, state_);
+  DCHECK_NE(kClosed, state_);
 
   loader_ = nullptr;
   state_ = kClosed;
@@ -356,7 +364,7 @@ bool EventSource::HasPendingActivity() const {
   return state_ != kClosed;
 }
 
-DEFINE_TRACE(EventSource) {
+void EventSource::Trace(blink::Visitor* visitor) {
   visitor->Trace(parser_);
   visitor->Trace(loader_);
   EventTargetWithInlineData::Trace(visitor);

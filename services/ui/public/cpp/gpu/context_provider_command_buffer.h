@@ -27,6 +27,7 @@
 namespace gpu {
 class CommandBufferProxyImpl;
 class GpuChannelHost;
+struct GpuFeatureInfo;
 class TransferBuffer;
 namespace gles2 {
 class GLES2CmdHelper;
@@ -66,7 +67,7 @@ class ContextProviderCommandBuffer
   uint32_t GetCopyTextureInternalFormat();
 
   // viz::ContextProvider implementation.
-  bool BindToCurrentThread() override;
+  gpu::ContextResult BindToCurrentThread() override;
   void DetachFromThread() override;
   gpu::gles2::GLES2Interface* ContextGL() override;
   gpu::ContextSupport* ContextSupport() override;
@@ -74,7 +75,8 @@ class ContextProviderCommandBuffer
   viz::ContextCacheController* CacheController() override;
   void InvalidateGrContext(uint32_t state) override;
   base::Lock* GetLock() override;
-  gpu::Capabilities ContextCapabilities() override;
+  const gpu::Capabilities& ContextCapabilities() const override;
+  const gpu::GpuFeatureInfo& GetGpuFeatureInfo() const override;
   void SetLostContextCallback(
       const LostContextCallback& lost_context_callback) override;
 
@@ -108,8 +110,8 @@ class ContextProviderCommandBuffer
   base::ThreadChecker main_thread_checker_;
   base::ThreadChecker context_thread_checker_;
 
-  bool bind_succeeded_ = false;
-  bool bind_failed_ = false;
+  bool bind_tried_ = false;
+  gpu::ContextResult bind_result_;
 
   const int32_t stream_id_;
   const gpu::SchedulingPriority stream_priority_;

@@ -29,7 +29,8 @@
 #include "platform/weborigin/SecurityOrigin.h"
 
 #include <memory>
-#include "platform/RuntimeEnabledFeatures.h"
+#include "net/base/url_util.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/KnownPorts.h"
 #include "platform/weborigin/SchemeRegistry.h"
@@ -49,7 +50,7 @@ namespace blink {
 const int kInvalidPort = 0;
 const int kMaxAllowedPort = 65535;
 
-static URLSecurityOriginMap* g_url_origin_map = 0;
+static URLSecurityOriginMap* g_url_origin_map = nullptr;
 
 static SecurityOrigin* GetOriginFromMap(const KURL& url) {
   if (g_url_origin_map)
@@ -76,7 +77,7 @@ KURL SecurityOrigin::ExtractInnerURL(const KURL& url) {
     return *url.InnerURL();
   // FIXME: Update this callsite to use the innerURL member function when
   // we finish implementing it.
-  return KURL(kParsedURLString, url.GetPath());
+  return KURL(url.GetPath());
 }
 
 void SecurityOrigin::SetMap(URLSecurityOriginMap* map) {
@@ -181,22 +182,22 @@ RefPtr<SecurityOrigin> SecurityOrigin::Create(const KURL& url) {
     return origin;
 
   if (ShouldTreatAsUniqueOrigin(url))
-    return AdoptRef(new SecurityOrigin());
+    return WTF::AdoptRef(new SecurityOrigin());
 
   if (ShouldUseInnerURL(url))
-    return AdoptRef(new SecurityOrigin(ExtractInnerURL(url)));
+    return WTF::AdoptRef(new SecurityOrigin(ExtractInnerURL(url)));
 
-  return AdoptRef(new SecurityOrigin(url));
+  return WTF::AdoptRef(new SecurityOrigin(url));
 }
 
 RefPtr<SecurityOrigin> SecurityOrigin::CreateUnique() {
-  RefPtr<SecurityOrigin> origin = AdoptRef(new SecurityOrigin());
+  RefPtr<SecurityOrigin> origin = WTF::AdoptRef(new SecurityOrigin());
   DCHECK(origin->IsUnique());
   return origin;
 }
 
 RefPtr<SecurityOrigin> SecurityOrigin::IsolatedCopy() const {
-  return AdoptRef(new SecurityOrigin(this));
+  return WTF::AdoptRef(new SecurityOrigin(this));
 }
 
 void SecurityOrigin::SetDomainFromDOM(const String& new_domain) {
@@ -298,10 +299,10 @@ bool SecurityOrigin::CanRequest(const KURL& url) const {
 
   // We call isSameSchemeHostPort here instead of canAccess because we want
   // to ignore document.domain effects.
-  if (IsSameSchemeHostPort(target_origin.Get()))
+  if (IsSameSchemeHostPort(target_origin.get()))
     return true;
 
-  if (SecurityPolicy::IsAccessWhiteListed(this, target_origin.Get()))
+  if (SecurityPolicy::IsAccessWhiteListed(this, target_origin.get()))
     return true;
 
   return false;
@@ -398,28 +399,10 @@ bool SecurityOrigin::IsLocal() const {
 }
 
 bool SecurityOrigin::IsLocalhost() const {
-  // Note: net::isLocalhost has looser checks which allow uppercase hosts, as
-  // well as hosts like "a.localhost". The net code is also less optimized and
-  // slower (mainly string and vector allocations).
-  if (host_ == "localhost")
-    return true;
-
-  if (host_ == "[::1]")
-    return true;
-
-  // Test if m_host matches 127.0.0.1/8
-  DCHECK(host_.ContainsOnlyASCII());
-  StringUTF8Adaptor utf8(host_);
-  Vector<uint8_t, 4> ip_number;
-  ip_number.resize(4);
-
-  int num_components;
-  url::Component host_component(0, utf8.length());
-  url::CanonHostInfo::Family family = url::IPv4AddressToNumber(
-      utf8.Data(), host_component, &(ip_number)[0], &num_components);
-  if (family != url::CanonHostInfo::IPV4)
-    return false;
-  return ip_number[0] == 127;
+  // We special-case "[::1]" here because `net::IsLocalhost` expects a
+  // canonicalization that excludes the braces; a simple string comparison is
+  // simpler than trying to adjust Blink's canonicalization.
+  return host_ == "[::1]" || net::IsLocalhost(host_.Ascii().data());
 }
 
 String SecurityOrigin::ToString() const {
@@ -587,19 +570,18 @@ bool SecurityOrigin::HasSuboriginAndShouldAllowCredentialsFor(
     return false;
 
   RefPtr<SecurityOrigin> other = SecurityOrigin::Create(url);
-  return IsSameSchemeHostPort(other.Get());
+  return IsSameSchemeHostPort(other.get());
 }
 
 bool SecurityOrigin::AreSameSchemeHostPort(const KURL& a, const KURL& b) {
   RefPtr<SecurityOrigin> origin_a = SecurityOrigin::Create(a);
   RefPtr<SecurityOrigin> origin_b = SecurityOrigin::Create(b);
-  return origin_b->IsSameSchemeHostPort(origin_a.Get());
+  return origin_b->IsSameSchemeHostPort(origin_a.get());
 }
 
 const KURL& SecurityOrigin::UrlWithUniqueSecurityOrigin() {
   DCHECK(IsMainThread());
-  DEFINE_STATIC_LOCAL(const KURL, unique_security_origin_url,
-                      (kParsedURLString, "data:,"));
+  DEFINE_STATIC_LOCAL(const KURL, unique_security_origin_url, ("data:,"));
   return unique_security_origin_url;
 }
 

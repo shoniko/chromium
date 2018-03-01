@@ -247,9 +247,8 @@ class TabStripModel {
       TabStripModelObserver::TabChangeType change_type);
 
   // Cause a tab to display a UI indication to the user that it needs their
-  // attention. The UI indication will be cleared when the tab is next
-  // activated. Only call this for a tab that is not the active tab.
-  void TabNeedsAttentionAt(int index);
+  // attention.
+  void SetTabNeedsAttentionAt(int index, bool attention);
 
   // Close all tabs at once. Code can use closing_all() above to defer
   // operations that might otherwise by invoked by the flurry of detach/select
@@ -550,7 +549,7 @@ class TabStripModel {
   Profile* profile_;
 
   // True if all tabs are currently being closed via CloseAllTabs.
-  bool closing_all_;
+  bool closing_all_ = false;
 
   // An object that determines where new Tabs should be inserted and where
   // selection should move when a Tab is closed.
@@ -561,8 +560,9 @@ class TabStripModel {
 
   ui::ListSelectionModel selection_model_;
 
-  // TODO(sky): remove this; used for debugging 291265.
-  bool in_notify_;
+  // Indicates if observers are currently being notified to catch reentrancy
+  // bugs. See for example http://crbug.com/529407
+  bool in_notify_ = false;
 
   base::WeakPtrFactory<TabStripModel> weak_factory_;
 

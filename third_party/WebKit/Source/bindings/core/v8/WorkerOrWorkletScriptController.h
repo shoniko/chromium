@@ -78,7 +78,7 @@ class CORE_EXPORT WorkerOrWorkletScriptController
   void DisableEval(const String&);
 
   // Used by Inspector agents:
-  ScriptState* GetScriptState() { return script_state_.Get(); }
+  ScriptState* GetScriptState() { return script_state_.get(); }
 
   // Used by V8 bindings:
   v8::Local<v8::Context> GetContext() {
@@ -87,10 +87,10 @@ class CORE_EXPORT WorkerOrWorkletScriptController
   }
 
   RejectedPromises* GetRejectedPromises() const {
-    return rejected_promises_.Get();
+    return rejected_promises_.get();
   }
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   bool IsContextInitialized() const {
     return script_state_ && !!script_state_->PerContextData();

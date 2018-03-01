@@ -4,13 +4,13 @@
 
 #include "modules/remoteplayback/AvailabilityCallbackWrapper.h"
 
-#include "bindings/modules/v8/remote_playback_availability_callback.h"
+#include "bindings/modules/v8/v8_remote_playback_availability_callback.h"
 #include "modules/remoteplayback/RemotePlayback.h"
 
 namespace blink {
 
 AvailabilityCallbackWrapper::AvailabilityCallbackWrapper(
-    RemotePlaybackAvailabilityCallback* callback)
+    V8RemotePlaybackAvailabilityCallback* callback)
     : bindings_cb_(callback) {}
 
 AvailabilityCallbackWrapper::AvailabilityCallbackWrapper(WTF::Closure callback)
@@ -27,11 +27,12 @@ void AvailabilityCallbackWrapper::Run(RemotePlayback* remote_playback,
   bindings_cb_->call(remote_playback, new_availability);
 }
 
-DEFINE_TRACE(AvailabilityCallbackWrapper) {
+void AvailabilityCallbackWrapper::Trace(blink::Visitor* visitor) {
   visitor->Trace(bindings_cb_);
 }
 
-DEFINE_TRACE_WRAPPERS(AvailabilityCallbackWrapper) {
+void AvailabilityCallbackWrapper::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(bindings_cb_);
 }
 

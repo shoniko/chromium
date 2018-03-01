@@ -99,6 +99,7 @@ class CORE_EXPORT HTMLLinkElement final : public HTMLElement,
   bool LoadLink(const String& type,
                 const String& as,
                 const String& media,
+                const String& nonce,
                 ReferrerPolicy,
                 const KURL&);
   bool IsAlternate() const {
@@ -109,9 +110,9 @@ class CORE_EXPORT HTMLLinkElement final : public HTMLElement,
   }
   bool IsCreatedByParser() const { return created_by_parser_; }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
-  DECLARE_VIRTUAL_TRACE_WRAPPERS();
+  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  private:
   HTMLLinkElement(Document&, bool created_by_parser);
@@ -148,7 +149,7 @@ class CORE_EXPORT HTMLLinkElement final : public HTMLElement,
   void DidStopLinkPrerender() override;
   void DidSendLoadForLinkPrerender() override;
   void DidSendDOMContentLoadedForLinkPrerender() override;
-  RefPtr<WebTaskRunner> GetLoadingTaskRunner() override;
+  scoped_refptr<WebTaskRunner> GetLoadingTaskRunner() override;
 
   Member<LinkResource> link_;
   Member<LinkLoader> link_loader_;

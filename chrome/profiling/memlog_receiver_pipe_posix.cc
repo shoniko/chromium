@@ -8,6 +8,7 @@
 #include "base/logging.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/threading/thread.h"
+#include "build/build_config.h"
 #include "chrome/profiling/memlog_receiver_pipe.h"
 #include "chrome/profiling/memlog_stream_receiver.h"
 #include "mojo/edk/embedder/platform_channel_utils_posix.h"
@@ -26,61 +27,63 @@ const int kReadBufferSize = 1024 * 64;
 
 }  // namespace
 
-MemlogReceiverPipe::MemlogReceiverPipe(base::ScopedPlatformFile file)
-    : handle_(mojo::edk::PlatformHandle(file.release())),
+MemlogReceiverPipe::MemlogReceiverPipe(mojo::edk::ScopedPlatformHandle handle)
+    : MemlogReceiverPipeBase(std::move(handle)),
       controller_(FROM_HERE),
-      read_buffer_(new char[kReadBufferSize]) {
-  base::MessageLoopForIO::current()->WatchFileDescriptor(
-      handle_.get().handle, true, base::MessageLoopForIO::WATCH_READ,
-      &controller_, this);
-}
+      read_buffer_(new char[kReadBufferSize]) {}
 
 MemlogReceiverPipe::~MemlogReceiverPipe() {}
 
 void MemlogReceiverPipe::StartReadingOnIOThread() {
+  base::MessageLoopForIO::current()->WatchFileDescriptor(
+      handle_.get().handle, true, base::MessageLoopForIO::WATCH_READ,
+      &controller_, this);
   OnFileCanReadWithoutBlocking(handle_.get().handle);
-}
-
-void MemlogReceiverPipe::SetReceiver(
-    scoped_refptr<base::TaskRunner> task_runner,
-    scoped_refptr<MemlogStreamReceiver> receiver) {
-  receiver_task_runner_ = task_runner;
-  receiver_ = receiver;
-}
-
-void MemlogReceiverPipe::ReportError() {
-  handle_.reset();
 }
 
 void MemlogReceiverPipe::OnFileCanReadWithoutBlocking(int fd) {
   ssize_t bytes_read = 0;
   do {
     base::circular_deque<mojo::edk::PlatformHandle> dummy_for_receive;
+
+#if defined(OS_MACOSX)
+    // macOS uses a pipe rather than a socket, so we cannot call
+    // PlatformChannelRecvmsg. See the creation in ProfilingProcessHost for more
+    // details.
+    bytes_read = HANDLE_EINTR(
+        read(handle_.get().handle, read_buffer_.get(), kReadBufferSize));
+#else
     bytes_read = mojo::edk::PlatformChannelRecvmsg(
         handle_.get(), read_buffer_.get(), kReadBufferSize, &dummy_for_receive);
+#endif
     if (bytes_read > 0) {
       receiver_task_runner_->PostTask(
-          FROM_HERE, base::BindOnce(&ReceiverPipeStreamDataThunk,
-                                    base::MessageLoop::current()->task_runner(),
-                                    scoped_refptr<MemlogReceiverPipe>(this),
-                                    receiver_, std::move(read_buffer_),
-                                    static_cast<size_t>(bytes_read)));
+          FROM_HERE,
+          base::BindOnce(&MemlogReceiverPipe::OnStreamDataThunk, this,
+                         base::MessageLoop::current()->task_runner(),
+                         std::move(read_buffer_),
+                         static_cast<size_t>(bytes_read)));
       read_buffer_.reset(new char[kReadBufferSize]);
       return;
     } else if (bytes_read == 0) {
       // Other end closed the pipe.
-      if (receiver_) {
-        controller_.StopWatchingFileDescriptor();
-        DCHECK(receiver_task_runner_);
-        receiver_task_runner_->PostTask(
-            FROM_HERE,
-            base::BindOnce(&MemlogStreamReceiver::OnStreamComplete, receiver_));
-      }
+
+      // Temporary debugging for https://crbug.com/765836.
+      LOG(ERROR) << "Memlog debugging: 0 bytes read. Closing pipe";
+      controller_.StopWatchingFileDescriptor();
+      DCHECK(receiver_task_runner_);
+      receiver_task_runner_->PostTask(
+          FROM_HERE,
+          base::BindOnce(&MemlogStreamReceiver::OnStreamComplete, receiver_));
       return;
     } else {
       if (errno != EAGAIN && errno != EWOULDBLOCK) {
         controller_.StopWatchingFileDescriptor();
         PLOG(ERROR) << "Problem reading socket.";
+        DCHECK(receiver_task_runner_);
+        receiver_task_runner_->PostTask(
+            FROM_HERE,
+            base::BindOnce(&MemlogStreamReceiver::OnStreamComplete, receiver_));
       }
     }
   } while (bytes_read > 0);

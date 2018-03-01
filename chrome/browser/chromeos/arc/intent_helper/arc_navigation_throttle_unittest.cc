@@ -36,19 +36,51 @@ std::vector<mojom::IntentHandlerInfoPtr> CreateArray(size_t num_elements,
 }  // namespace
 
 TEST(ArcNavigationThrottleTest, TestShouldOverrideUrlLoading) {
-  // A navigation within the same domain shouldn't be overridden.
+  // A navigation within the same domain shouldn't be overridden except if the
+  // domain is google.com.
   EXPECT_FALSE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
       GURL("http://google.com"), GURL("http://google.com/")));
-  EXPECT_FALSE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
+  EXPECT_TRUE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
       GURL("http://google.com"), GURL("http://a.google.com/")));
-  EXPECT_FALSE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
+  EXPECT_TRUE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
       GURL("http://a.google.com"), GURL("http://google.com/")));
-  EXPECT_FALSE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
+  EXPECT_TRUE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
       GURL("http://a.google.com"), GURL("http://b.google.com/")));
-  EXPECT_FALSE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
+  EXPECT_TRUE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
       GURL("http://a.google.com"), GURL("http://b.c.google.com/")));
-  EXPECT_FALSE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
+  EXPECT_TRUE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
       GURL("http://a.b.google.com"), GURL("http://c.google.com/")));
+  EXPECT_TRUE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
+      GURL("http://a.b.google.com"), GURL("http://b.google.com")));
+  EXPECT_TRUE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
+      GURL("http://b.google.com"), GURL("http://a.b.google.com")));
+  EXPECT_FALSE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
+      GURL("http://notg.com"), GURL("http://notg.com")));
+  EXPECT_FALSE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
+      GURL("http://a.notg.com"), GURL("http://notg.com")));
+  EXPECT_FALSE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
+      GURL("http://notg.com"), GURL("http://a.notg.com")));
+  EXPECT_FALSE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
+      GURL("http://a.notg.com"), GURL("http://b.notg.com")));
+  EXPECT_FALSE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
+      GURL("http://a.notg.com"), GURL("http://a.b.notg.com")));
+  EXPECT_FALSE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
+      GURL("http://a.b.notg.com"), GURL("http://c.notg.com")));
+
+  // Same as last tests, except for "play.google.com".
+  EXPECT_TRUE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
+      GURL("http://google.com"), GURL("http://play.google.com/fake_app")));
+  EXPECT_TRUE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
+      GURL("https://www.google.com.mx"),
+      GURL("https://play.google.com/fake_app")));
+  EXPECT_TRUE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
+      GURL("https://mail.google.com"),
+      GURL("https://play.google.com/fake_app")));
+  EXPECT_FALSE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
+      GURL("https://play.google.com/search"),
+      GURL("https://play.google.com/fake_app")));
+  EXPECT_TRUE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
+      GURL("http://not_google.com"), GURL("http://play.google.com/fake_app")));
 
   // If either of two paramters is empty, the function should return false.
   EXPECT_FALSE(ArcNavigationThrottle::ShouldOverrideUrlLoadingForTesting(
@@ -167,28 +199,30 @@ TEST(ArcNavigationThrottleTest, TestGetDestinationPlatform) {
 
   // Under any other CloseReason, stay in Chrome only if the package is Chrome.
   // Otherwise redirect to ARC.
+  EXPECT_EQ(ArcNavigationThrottle::Platform::CHROME,
+            ArcNavigationThrottle::GetDestinationPlatform(
+                chrome_app,
+                ArcNavigationThrottle::CloseReason::OBSOLETE_ALWAYS_PRESSED));
   EXPECT_EQ(
       ArcNavigationThrottle::Platform::CHROME,
       ArcNavigationThrottle::GetDestinationPlatform(
-          chrome_app, ArcNavigationThrottle::CloseReason::ALWAYS_PRESSED));
-  EXPECT_EQ(
-      ArcNavigationThrottle::Platform::CHROME,
-      ArcNavigationThrottle::GetDestinationPlatform(
-          chrome_app, ArcNavigationThrottle::CloseReason::JUST_ONCE_PRESSED));
+          chrome_app,
+          ArcNavigationThrottle::CloseReason::OBSOLETE_JUST_ONCE_PRESSED));
   EXPECT_EQ(ArcNavigationThrottle::Platform::CHROME,
             ArcNavigationThrottle::GetDestinationPlatform(
                 chrome_app,
                 ArcNavigationThrottle::CloseReason::PREFERRED_ACTIVITY_FOUND));
 
   // Go to ARC on any other case.
-  EXPECT_EQ(
-      ArcNavigationThrottle::Platform::ARC,
-      ArcNavigationThrottle::GetDestinationPlatform(
-          non_chrome_app, ArcNavigationThrottle::CloseReason::ALWAYS_PRESSED));
   EXPECT_EQ(ArcNavigationThrottle::Platform::ARC,
             ArcNavigationThrottle::GetDestinationPlatform(
                 non_chrome_app,
-                ArcNavigationThrottle::CloseReason::JUST_ONCE_PRESSED));
+                ArcNavigationThrottle::CloseReason::OBSOLETE_ALWAYS_PRESSED));
+  EXPECT_EQ(
+      ArcNavigationThrottle::Platform::ARC,
+      ArcNavigationThrottle::GetDestinationPlatform(
+          non_chrome_app,
+          ArcNavigationThrottle::CloseReason::OBSOLETE_JUST_ONCE_PRESSED));
   EXPECT_EQ(ArcNavigationThrottle::Platform::ARC,
             ArcNavigationThrottle::GetDestinationPlatform(
                 non_chrome_app,

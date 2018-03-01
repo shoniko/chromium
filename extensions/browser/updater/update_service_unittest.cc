@@ -11,6 +11,7 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "components/crx_file/id_util.h"
 #include "components/update_client/update_client.h"
@@ -53,10 +54,10 @@ class FakeUpdateClient : public update_client::UpdateClient {
   void RemoveObserver(Observer* observer) override {}
   void Install(const std::string& id,
                const CrxDataCallback& crx_data_callback,
-               const update_client::Callback& callback) override {}
+               update_client::Callback callback) override {}
   void Update(const std::vector<std::string>& ids,
               const CrxDataCallback& crx_data_callback,
-              const update_client::Callback& callback) override;
+              update_client::Callback callback) override;
   bool GetCrxUpdateState(
       const std::string& id,
       update_client::CrxUpdateItem* update_item) const override {
@@ -67,7 +68,7 @@ class FakeUpdateClient : public update_client::UpdateClient {
   void SendUninstallPing(const std::string& id,
                          const base::Version& version,
                          int reason,
-                         const update_client::Callback& callback) override {
+                         update_client::Callback callback) override {
     uninstall_pings_.emplace_back(id, version, reason);
   }
 
@@ -86,7 +87,7 @@ FakeUpdateClient::FakeUpdateClient() {}
 
 void FakeUpdateClient::Update(const std::vector<std::string>& ids,
                               const CrxDataCallback& crx_data_callback,
-                              const update_client::Callback& callback) {
+                              update_client::Callback callback) {
   crx_data_callback.Run(ids, &data_);
 }
 
@@ -262,11 +263,13 @@ TEST_F(UpdateServiceTest, BasicUpdateOperations) {
   // Test the install callback.
   base::ScopedTempDir new_version_dir;
   ASSERT_TRUE(new_version_dir.CreateUniqueTempDir());
-  std::unique_ptr<base::DictionaryValue> new_manifest(
-      extension1->manifest()->value()->DeepCopy());
-  new_manifest->SetString("version", "2.0");
 
-  installer->Install(std::move(new_manifest), new_version_dir.GetPath());
+  installer->Install(
+      new_version_dir.GetPath(),
+      base::Bind([](const update_client::CrxInstaller::Result& result) {
+        EXPECT_EQ(0, result.error);
+        EXPECT_EQ(0, result.extended_error);
+      }));
 
   scoped_refptr<content::MessageLoopRunner> loop_runner =
       new content::MessageLoopRunner();

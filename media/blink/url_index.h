@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "base/memory/memory_pressure_listener.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
@@ -255,15 +256,19 @@ class MEDIA_BLINK_EXPORT UrlIndex {
   virtual scoped_refptr<UrlData> NewUrlData(const GURL& url,
                                             UrlData::CORSMode cors_mode);
 
+  void OnMemoryPressure(
+      base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level);
+
   ResourceFetchContext* fetch_context_;
   using UrlDataMap = std::map<UrlData::KeyType, scoped_refptr<UrlData>>;
-  UrlDataMap unindexed_data_;
   UrlDataMap indexed_data_;
   scoped_refptr<MultiBuffer::GlobalLRU> lru_;
 
   // log2 of block size in multibuffer cache. Defaults to kBlockSizeShift.
   // Currently only changed for testing purposes.
   const int block_shift_;
+
+  base::MemoryPressureListener memory_pressure_listener_;
 };
 
 }  // namespace media

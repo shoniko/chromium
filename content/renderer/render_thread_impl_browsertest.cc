@@ -17,6 +17,7 @@
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -28,6 +29,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/service_manager_connection.h"
 #include "content/public/common/service_names.mojom.h"
@@ -85,7 +87,7 @@ class TestTaskCounter : public base::SingleThreadTaskRunner {
   TestTaskCounter() : count_(0) {}
 
   // SingleThreadTaskRunner implementation.
-  bool PostDelayedTask(const tracked_objects::Location&,
+  bool PostDelayedTask(const base::Location&,
                        base::OnceClosure,
                        base::TimeDelta) override {
     base::AutoLock auto_lock(lock_);
@@ -93,7 +95,7 @@ class TestTaskCounter : public base::SingleThreadTaskRunner {
     return true;
   }
 
-  bool PostNonNestableDelayedTask(const tracked_objects::Location&,
+  bool PostNonNestableDelayedTask(const base::Location&,
                                   base::OnceClosure,
                                   base::TimeDelta) override {
     base::AutoLock auto_lock(lock_);
@@ -201,7 +203,7 @@ class RenderThreadImplBrowserTest : public testing::Test {
                                   nullptr, io_task_runner);
 
     mock_process_.reset(new MockRenderProcess);
-    test_task_counter_ = make_scoped_refptr(new TestTaskCounter());
+    test_task_counter_ = base::MakeRefCounted<TestTaskCounter>();
 
     // RenderThreadImpl expects the browser to pass these flags.
     base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
@@ -229,8 +231,8 @@ class RenderThreadImplBrowserTest : public testing::Test {
     cmd->InitFromArgv(old_argv);
 
     run_loop_ = base::MakeUnique<base::RunLoop>();
-    test_msg_filter_ = make_scoped_refptr(
-        new QuitOnTestMsgFilter(run_loop_->QuitWhenIdleClosure()));
+    test_msg_filter_ = base::MakeRefCounted<QuitOnTestMsgFilter>(
+        run_loop_->QuitWhenIdleClosure());
     thread_->AddFilter(test_msg_filter_.get());
   }
 
@@ -265,6 +267,17 @@ class RenderThreadImplBrowserTest : public testing::Test {
   std::unique_ptr<base::RunLoop> run_loop_;
 };
 
+class RenderThreadImplMojoInputMessagesDisabledBrowserTest
+    : public RenderThreadImplBrowserTest {
+ public:
+  RenderThreadImplMojoInputMessagesDisabledBrowserTest() {
+    feature_list_.InitAndDisableFeature(features::kMojoInputMessages);
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
 void CheckRenderThreadInputHandlerManager(RenderThreadImpl* thread) {
   ASSERT_TRUE(thread->input_handler_manager());
 }
@@ -280,12 +293,13 @@ void CheckRenderThreadInputHandlerManager(RenderThreadImpl* thread) {
 #define MAYBE_InputHandlerManagerDestroyedAfterCompositorThread \
   InputHandlerManagerDestroyedAfterCompositorThread
 #endif
-TEST_F(RenderThreadImplBrowserTest,
+TEST_F(RenderThreadImplMojoInputMessagesDisabledBrowserTest,
        WILL_LEAK(MAYBE_InputHandlerManagerDestroyedAfterCompositorThread)) {
   ASSERT_TRUE(thread_->input_handler_manager());
 
   thread_->compositor_task_runner()->PostTask(
-      FROM_HERE, base::Bind(&CheckRenderThreadInputHandlerManager, thread_));
+      FROM_HERE,
+      base::BindOnce(&CheckRenderThreadInputHandlerManager, thread_));
 }
 
 // Disabled under LeakSanitizer due to memory leaks.

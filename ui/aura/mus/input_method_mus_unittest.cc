@@ -86,7 +86,7 @@ TEST_F(InputMethodMusTest, PendingCallbackRunFromDestruction) {
     InputMethodMusTestApi::SetInputMethod(&input_method_mus,
                                           &test_input_method);
     std::unique_ptr<EventResultCallback> callback =
-        base::MakeUnique<EventResultCallback>(base::Bind(
+        std::make_unique<EventResultCallback>(base::Bind(
             &RunFunctionWithEventResult, &was_event_result_callback_run));
 
     ui::EventDispatchDetails details =
@@ -122,7 +122,7 @@ TEST_F(InputMethodMusTest, PendingCallbackRunFromOnDidChangeFocusedClient) {
   TestInputMethod test_input_method;
   InputMethodMusTestApi::SetInputMethod(&input_method_mus, &test_input_method);
   std::unique_ptr<EventResultCallback> callback =
-      base::MakeUnique<EventResultCallback>(base::Bind(
+      std::make_unique<EventResultCallback>(base::Bind(
           &RunFunctionWithEventResult, &was_event_result_callback_run));
   ui::EventDispatchDetails details =
       InputMethodMusTestApi::CallSendKeyEventToInputMethod(
@@ -188,7 +188,7 @@ TEST_F(InputMethodMusTest, ChangeTextInputTypeWhileProcessingCallback) {
   TestInputMethod test_input_method;
   InputMethodMusTestApi::SetInputMethod(&input_method_mus, &test_input_method);
   std::unique_ptr<EventResultCallback> callback =
-      base::MakeUnique<EventResultCallback>(base::Bind(
+      std::make_unique<EventResultCallback>(base::Bind(
           &RunFunctionWithEventResult, &was_event_result_callback_run));
   const ui::KeyEvent key_event(ui::ET_KEY_PRESSED, ui::VKEY_RETURN, 0);
   ui::EventDispatchDetails details =
@@ -203,7 +203,6 @@ TEST_F(InputMethodMusTest, ChangeTextInputTypeWhileProcessingCallback) {
 
   // Callback should have been run.
   EXPECT_TRUE(was_event_result_callback_run);
-  EXPECT_TRUE(input_method_delegate.was_dispatch_key_event_post_ime_called());
 }
 
 }  // namespace aura

@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import datetime
 import json
 
 from webkitpy.common.checkout.git_mock import MockGit
@@ -15,7 +16,8 @@ from webkitpy.common.system.log_testing import LoggingTestCase
 from webkitpy.layout_tests.builder_list import BuilderList
 from webkitpy.w3c.chromium_commit_mock import MockChromiumCommit
 from webkitpy.w3c.local_wpt import LocalWPT
-from webkitpy.w3c.test_importer import TestImporter
+from webkitpy.w3c.local_wpt_mock import MockLocalWPT
+from webkitpy.w3c.test_importer import TestImporter, ROTATIONS_URL
 from webkitpy.w3c.wpt_github_mock import MockWPTGitHub
 
 
@@ -153,6 +155,7 @@ class TestImporterTest(LoggingTestCase):
             [['git', 'cl', 'try'], ['git', 'cl', 'set-close']])
 
     def test_apply_exportable_commits_locally(self):
+        # TODO(robertma): Consider using MockLocalWPT.
         host = MockHost()
         importer = TestImporter(host, wpt_github=MockWPTGitHub(pull_requests=[]))
         fake_commit = MockChromiumCommit(
@@ -193,8 +196,7 @@ class TestImporterTest(LoggingTestCase):
         importer = TestImporter(host, wpt_github=wpt_github)
         commit = MockChromiumCommit(host, subject='My fake commit')
         importer.exportable_but_not_exported_commits = lambda _: [commit]
-        local_wpt = LocalWPT(host)
-        local_wpt.apply_patch = lambda _: 'Failed'  # Failure to apply patch.
+        local_wpt = MockLocalWPT(apply_patch=['Failed'])    # Failure to apply patch.
         applied = importer.apply_exportable_commits_locally(local_wpt)
         self.assertIsNone(applied)
 
@@ -313,14 +315,34 @@ class TestImporterTest(LoggingTestCase):
             '  external/wpt/baz\n\n',
             description)
 
-    def test_cc_part(self):
-        directory_owners = {
-            ('someone@chromium.org',): ['external/wpt/foo', 'external/wpt/bar'],
-            ('x@chromium.org', 'y@chromium.org'): ['external/wpt/baz'],
-        }
-        self.assertEqual(
-            TestImporter._cc_part(directory_owners),
-            ['--cc=someone@chromium.org', '--cc=x@chromium.org', '--cc=y@chromium.org'])
+    def test_tbr_reviewer_no_response_uses_backup(self):
+        host = MockHost()
+        importer = TestImporter(host)
+        self.assertEqual('qyearsley@chromium.org', importer.tbr_reviewer())
+        self.assertLog([
+            'ERROR: Exception while fetching current sheriff: '
+            'No JSON object could be decoded\n'
+        ])
+
+    def test_tbr_reviewer(self):
+        host = MockHost()
+        today = datetime.date.fromtimestamp(host.time()).isoformat()
+        host.web.urls[ROTATIONS_URL] = json.dumps({
+            'calendar': [
+                {
+                    'date': '2017-01-01',
+                    'participants': [['other-sheriff'], ['last-sheriff']],
+                },
+                {
+                    'date': today,
+                    'participants': [['other-sheriff'], ['current-sheriff']],
+                },
+            ],
+            'rotations': ['other-rotation', 'ecosystem_infra']
+        })
+        importer = TestImporter(host)
+        self.assertEqual('current-sheriff@chromium.org', importer.tbr_reviewer())
+        self.assertLog([])
 
     def test_generate_manifest_successful_run(self):
         # This test doesn't test any aspect of the real manifest script, it just
@@ -335,7 +357,8 @@ class TestImporterTest(LoggingTestCase):
             [
                 [
                     'python',
-                    blink_path + '/Tools/Scripts/webkitpy/thirdparty/wpt/wpt/manifest',
+                    blink_path + '/Tools/Scripts/webkitpy/thirdparty/wpt/wpt/wpt',
+                    'manifest',
                     '--work',
                     '--tests-root',
                     blink_path + '/LayoutTests/external/wpt',
@@ -346,6 +369,17 @@ class TestImporterTest(LoggingTestCase):
                     blink_path + '/LayoutTests/external/WPT_BASE_MANIFEST.json',
                 ]
             ])
+
+    def test_only_wpt_manifest_changed(self):
+        host = MockHost()
+        git = host.git()
+        git.changed_files = lambda: ['third_party/WebKit/LayoutTests/external/WPT_BASE_MANIFEST.json',
+                                     'third_party/WebKit/LayoutTests/external/wpt/foo/x.html']
+        importer = TestImporter(host)
+        self.assertFalse(importer._only_wpt_manifest_changed())
+
+        git.changed_files = lambda: ['third_party/WebKit/LayoutTests/external/WPT_BASE_MANIFEST.json']
+        self.assertTrue(importer._only_wpt_manifest_changed())
 
     def test_delete_orphaned_baselines_basic(self):
         host = MockHost()

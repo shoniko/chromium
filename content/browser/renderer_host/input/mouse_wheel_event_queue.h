@@ -5,13 +5,14 @@
 #ifndef CONTENT_BROWSER_RENDERER_HOST_INPUT_MOUSE_WHEEL_EVENT_QUEUE_H_
 #define CONTENT_BROWSER_RENDERER_HOST_INPUT_MOUSE_WHEEL_EVENT_QUEUE_H_
 
-#include <deque>
 #include <memory>
 
+#include "base/containers/circular_deque.h"
 #include "base/time/time.h"
 #include "content/browser/renderer_host/event_with_latency_info.h"
 #include "content/common/content_export.h"
-#include "content/common/input/input_event_ack_state.h"
+#include "content/public/common/input_event_ack_source.h"
+#include "content/public/common/input_event_ack_state.h"
 #include "third_party/WebKit/public/platform/WebInputEvent.h"
 
 namespace content {
@@ -30,6 +31,7 @@ class CONTENT_EXPORT MouseWheelEventQueueClient {
       const blink::WebGestureEvent& event,
       const ui::LatencyInfo& latency_info) = 0;
   virtual void OnMouseWheelEventAck(const MouseWheelEventWithLatencyInfo& event,
+                                    InputEventAckSource ack_source,
                                     InputEventAckState ack_result) = 0;
 };
 
@@ -54,7 +56,8 @@ class CONTENT_EXPORT MouseWheelEventQueue {
 
   // Notifies the queue that a mouse wheel event has been processed by the
   // renderer.
-  void ProcessMouseWheelAck(InputEventAckState ack_result,
+  void ProcessMouseWheelAck(InputEventAckSource ack_source,
+                            InputEventAckState ack_result,
                             const ui::LatencyInfo& latency_info);
 
   // When GestureScrollBegin is received, and it is a different source
@@ -80,7 +83,7 @@ class CONTENT_EXPORT MouseWheelEventQueue {
 
   MouseWheelEventQueueClient* client_;
 
-  std::deque<std::unique_ptr<QueuedWebMouseWheelEvent>> wheel_queue_;
+  base::circular_deque<std::unique_ptr<QueuedWebMouseWheelEvent>> wheel_queue_;
   std::unique_ptr<QueuedWebMouseWheelEvent> event_sent_for_gesture_ack_;
 
   // True if a non-synthetic GSB needs to be sent before a GSU is sent.

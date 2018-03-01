@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_COCOA_BROWSER_DIALOGS_VIEWS_MAC_H_
 #define CHROME_BROWSER_UI_COCOA_BROWSER_DIALOGS_VIEWS_MAC_H_
 
+#include "chrome/browser/safe_browsing/chrome_password_protection_service.h"
 #include "ui/gfx/native_widget_types.h"
 
 class Browser;
@@ -31,6 +32,12 @@ struct SecurityInfo;
 }
 
 namespace chrome {
+
+// Whether to use toolkit-views rather than Cocoa for dialogs ready to "pilot".
+bool ShowPilotDialogsWithViewsToolkit();
+
+// Whether to show all dialogs with toolkit-views on Mac, rather than Cocoa.
+bool ShowAllDialogsWithViewsToolkit();
 
 // Shows a Views page info bubble on the given |browser|.
 void ShowPageInfoBubbleViews(Browser* browser,
@@ -91,6 +98,11 @@ void ShowImportLockDialogViews(gfx::NativeWindow parent,
 
 // Shows the first run bubble.
 void ShowFirstRunBubbleViews(Browser* browser);
+
+void ShowPasswordReuseWarningDialog(
+    content::WebContents* web_contents,
+    safe_browsing::ChromePasswordProtectionService* service,
+    safe_browsing::OnWarningDone done_callback);
 
 }  // namespace chrome
 

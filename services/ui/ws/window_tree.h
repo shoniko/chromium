@@ -9,13 +9,14 @@
 
 #include <map>
 #include <memory>
-#include <queue>
 #include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "base/callback.h"
+#include "base/containers/flat_map.h"
+#include "base/containers/queue.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
@@ -52,6 +53,8 @@ class TargetedEvent;
 class WindowManagerDisplayRoot;
 class WindowManagerState;
 class WindowServer;
+
+struct EventLocation;
 
 namespace test {
 class WindowTreeTestApi;
@@ -94,6 +97,10 @@ class WindowTree : public mojom::WindowTree,
   void set_embedder_intercepts_events() { embedder_intercepts_events_ = true; }
   bool embedder_intercepts_events() const {
     return embedder_intercepts_events_;
+  }
+
+  void set_can_change_root_window_visibility(bool value) {
+    can_change_root_window_visibility_ = value;
   }
 
   const UserId& user_id() const { return user_id_; }
@@ -199,6 +206,7 @@ class WindowTree : public mojom::WindowTree,
   using DispatchEventCallback = base::OnceCallback<void(mojom::EventResult)>;
   void DispatchInputEvent(ServerWindow* target,
                           const ui::Event& event,
+                          const EventLocation& event_location,
                           DispatchEventCallback callback);
 
   bool IsWaitingForNewTopLevelWindow(uint32_t wm_change_id);
@@ -298,6 +306,11 @@ class WindowTree : public mojom::WindowTree,
                             ServerWindow* target_window,
                             int64_t display_id);
 
+  // Before the ClientWindowId gets sent back to the client, making sure we
+  // reset the high 16 bits back to 0 if it's being sent back to the client
+  // that created the window.
+  Id ClientWindowIdToTransportId(const ClientWindowId& client_window_id) const;
+
  private:
   friend class test::WindowTreeTestApi;
 
@@ -327,7 +340,7 @@ class WindowTree : public mojom::WindowTree,
 
   bool ShouldRouteToWindowManager(const ServerWindow* window) const;
 
-  ClientWindowId ClientWindowIdForWindow(const ServerWindow* window) const;
+  Id TransportIdForWindow(const ServerWindow* window) const;
 
   // Returns true if |id| is a valid WindowId for a new window.
   bool IsValidIdForNewWindow(const ClientWindowId& id) const;
@@ -394,6 +407,7 @@ class WindowTree : public mojom::WindowTree,
 
   void DispatchInputEventImpl(ServerWindow* target,
                               const ui::Event& event,
+                              const EventLocation& event_location,
                               DispatchEventCallback callback);
 
   // Returns true if the client has a pointer watcher and this event matches.
@@ -414,22 +428,25 @@ class WindowTree : public mojom::WindowTree,
       const display::Display& display_to_create,
       const display::ViewportMetrics& transport_viewport_metrics,
       bool is_primary_display,
-      const ClientWindowId& client_window_id);
+      const ClientWindowId& client_window_id,
+      const std::vector<display::Display>& mirrors);
 
   bool ProcessSwapDisplayRoots(int64_t display_id1, int64_t display_id2);
   bool ProcessSetBlockingContainers(std::vector<mojom::BlockingContainersPtr>
                                         transport_all_blocking_containers);
 
-  // Returns the ClientWindowId from a transport id or WindowId. Uses id_ as the
-  // ClientWindowId::client_id part if it was invalid. These functions do a
-  // straight mapping, there may not be a window with the returned id.
+  // Returns the ClientWindowId from a transport id. Uses id_ as the
+  // ClientWindowId::client_id part if it was invalid. This function
+  // do a straight mapping, there may not be a window with the returned id.
   ClientWindowId MakeClientWindowId(Id transport_window_id) const;
-  ClientWindowId MakeClientWindowId(const WindowId& id) const;
 
-  // Before the ClientWindowId gets sent back to the client, making sure we
-  // reset the high 16 bits back to 0 if it's being sent back to the client
-  // that created the window.
-  Id ClientWindowIdToTransportId(const ClientWindowId& client_window_id) const;
+  // Returns the WindowTreeClient previously scheduled for an embed with the
+  // given |token| from ScheduleEmbed(). If this client is the result of an
+  // Embed() and ScheduleEmbed() was not called on this client, then this
+  // recurses to the parent WindowTree. Recursing enables an acestor to call
+  // ScheduleEmbed() and the ancestor to communicate the token with the client.
+  mojom::WindowTreeClientPtr GetAndRemoveScheduledEmbedWindowTreeClient(
+      const base::UnguessableToken& token);
 
   // WindowTree:
   void NewWindow(uint32_t change_id,
@@ -493,6 +510,12 @@ class WindowTree : public mojom::WindowTree,
              mojom::WindowTreeClientPtr client,
              uint32_t flags,
              const EmbedCallback& callback) override;
+  void ScheduleEmbed(mojom::WindowTreeClientPtr client,
+                     const ScheduleEmbedCallback& callback) override;
+  void EmbedUsingToken(Id transport_window_id,
+                       const base::UnguessableToken& token,
+                       uint32_t flags,
+                       const EmbedUsingTokenCallback& callback) override;
   void SetFocus(uint32_t change_id, Id transport_window_id) override;
   void SetCanFocus(Id transport_window_id, bool can_focus) override;
   void SetEventTargetingPolicy(Id transport_window_id,
@@ -501,10 +524,10 @@ class WindowTree : public mojom::WindowTree,
                  Id transport_window_id,
                  ui::CursorData cursor) override;
   void SetWindowTextInputState(Id transport_window_id,
-                               mojo::TextInputStatePtr state) override;
+                               ui::mojom::TextInputStatePtr state) override;
   void SetImeVisibility(Id transport_window_id,
                         bool visible,
-                        mojo::TextInputStatePtr state) override;
+                        ui::mojom::TextInputStatePtr state) override;
   void OnWindowInputEventAck(uint32_t event_id,
                              mojom::EventResult result) override;
   void DeactivateWindow(Id window_id) override;
@@ -554,12 +577,14 @@ class WindowTree : public mojom::WindowTree,
                       mojom::WmViewportMetricsPtr viewport_metrics,
                       bool is_primary_display,
                       Id window_id,
+                      const std::vector<display::Display>& mirrors,
                       const SetDisplayRootCallback& callback) override;
   void SetDisplayConfiguration(
       const std::vector<display::Display>& displays,
       std::vector<ui::mojom::WmViewportMetricsPtr> transport_metrics,
       int64_t primary_display_id,
       int64_t internal_display_id,
+      const std::vector<display::Display>& mirrors,
       const SetDisplayConfigurationCallback& callback) override;
   void SwapDisplayRoots(int64_t display_id1,
                         int64_t display_id2,
@@ -683,7 +708,7 @@ class WindowTree : public mojom::WindowTree,
   // WindowManager the current event came from.
   WindowManagerState* event_source_wms_ = nullptr;
 
-  std::queue<std::unique_ptr<TargetedEvent>> event_queue_;
+  base::queue<std::unique_ptr<TargetedEvent>> event_queue_;
 
   // TODO(sky): move all window manager specific state into struct to make it
   // clear what applies only to the window manager.
@@ -702,6 +727,15 @@ class WindowTree : public mojom::WindowTree,
   // WmMoveDragImage. Non-null while we're waiting for a response.
   struct DragMoveState;
   std::unique_ptr<DragMoveState> drag_move_state_;
+
+  // Holds WindowTreeClients passed to ScheduleEmbed(). Entries are removed
+  // when EmbedUsingToken() is called.
+  using ScheduledEmbeds =
+      base::flat_map<base::UnguessableToken, mojom::WindowTreeClientPtr>;
+  ScheduledEmbeds scheduled_embeds_;
+
+  // Controls whether the client can change the visibility of the roots.
+  bool can_change_root_window_visibility_ = true;
 
   // A weak ptr factory for callbacks from the window manager for when we send
   // a image move. All weak ptrs are invalidated when a drag is completed.

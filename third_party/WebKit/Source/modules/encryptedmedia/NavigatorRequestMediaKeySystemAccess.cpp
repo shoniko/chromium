@@ -9,7 +9,6 @@
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "core/dom/DOMException.h"
-#include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/frame/Deprecation.h"
@@ -25,6 +24,7 @@
 #include "platform/bindings/V8ThrowException.h"
 #include "platform/network/ParsedContentType.h"
 #include "platform/network/mime/ContentType.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/WTFString.h"
@@ -38,6 +38,11 @@
 namespace blink {
 
 namespace {
+
+const char kEncryptedMediaFeaturePolicyConsoleWarning[] =
+    "Encrypted Media access has been blocked because of a Feature Policy "
+    "applied to the current document. See https://goo.gl/EuHzyv for more "
+    "details.";
 
 static WebVector<WebEncryptedMediaInitDataType> ConvertInitDataTypes(
     const Vector<String>& init_data_types) {
@@ -117,7 +122,7 @@ class MediaKeySystemAccessInitializer final : public EncryptedMediaRequest {
 
   ScriptPromise Promise() { return resolver_->Promise(); }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(resolver_);
     EncryptedMediaRequest::Trace(visitor);
   }
@@ -273,6 +278,26 @@ ScriptPromise NavigatorRequestMediaKeySystemAccess::requestMediaKeySystemAccess(
   ExecutionContext* execution_context = ExecutionContext::From(script_state);
   Document* document = ToDocument(execution_context);
 
+  if (RuntimeEnabledFeatures::FeaturePolicyForPermissionsEnabled()) {
+    if (!document->GetFrame() ||
+        !document->GetFrame()->IsFeatureEnabled(
+            WebFeaturePolicyFeature::kEncryptedMedia)) {
+      UseCounter::Count(document,
+                        WebFeature::kEncryptedMediaDisabledByFeaturePolicy);
+      document->AddConsoleMessage(
+          ConsoleMessage::Create(kJSMessageSource, kWarningMessageLevel,
+                                 kEncryptedMediaFeaturePolicyConsoleWarning));
+      return ScriptPromise::RejectWithDOMException(
+          script_state,
+          DOMException::Create(
+              kSecurityError,
+              "requestMediaKeySystemAccess is disabled by feature policy."));
+    }
+  } else {
+    Deprecation::CountDeprecationFeaturePolicy(
+        *document, WebFeaturePolicyFeature::kEncryptedMedia);
+  }
+
   // From https://w3c.github.io/encrypted-media/#common-key-systems
   // All user agents MUST support the common key systems described in this
   // section.
@@ -334,8 +359,6 @@ ScriptPromise NavigatorRequestMediaKeySystemAccess::requestMediaKeySystemAccess(
   UseCounter::Count(*document, WebFeature::kEncryptedMediaSecureOrigin);
   UseCounter::CountCrossOriginIframe(
       *document, WebFeature::kEncryptedMediaCrossOriginIframe);
-  Deprecation::CountDeprecationFeaturePolicy(*document,
-                                             WebFeaturePolicyFeature::kEme);
 
   // 4. Let origin be the origin of document.
   //    (Passed with the execution context.)

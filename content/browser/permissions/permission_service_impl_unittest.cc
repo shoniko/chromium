@@ -59,7 +59,8 @@ class TestPermissionManager : public MockPermissionManager {
 
 class PermissionServiceImplTest : public RenderViewHostTestHarness {
  public:
-  PermissionServiceImplTest() : origin_(GURL("https://www.google.com")) {}
+  PermissionServiceImplTest()
+      : origin_(url::Origin::Create(GURL("https://www.google.com"))) {}
 
   void SetUp() override {
     RenderViewHostTestHarness::SetUp();
@@ -161,7 +162,8 @@ TEST_F(PermissionServiceImplTest, HasPermissionWithFeaturePolicy) {
   // Ensure that the policy is ignored if kUseFeaturePolicyForPermissions is
   // disabled.
   base::test::ScopedFeatureList empty_feature_list;
-  empty_feature_list.Init();
+  empty_feature_list.InitAndDisableFeature(
+      features::kUseFeaturePolicyForPermissions);
   EXPECT_EQ(PermissionStatus::GRANTED, HasPermission(PermissionName::MIDI));
 }
 
@@ -186,4 +188,4 @@ TEST_F(PermissionServiceImplTest, RequestPermissionsWithFeaturePolicy) {
   EXPECT_EQ(PermissionStatus::GRANTED, result[1]);
 }
 
-}  // namespace
+}  // namespace content

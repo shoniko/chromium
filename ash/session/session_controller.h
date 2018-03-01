@@ -121,12 +121,13 @@ class ASH_EXPORT SessionController : public mojom::SessionController {
   // device (i.e. first time login on the device).
   bool IsUserFirstLogin() const;
 
-  // Returns true if the current user session is a kiosk session (either
-  // chrome app kiosk or ARC kiosk).
-  bool IsKioskSession() const;
-
   // Locks the screen. The locking happens asynchronously.
   void LockScreen();
+
+  // Requests signing out all users, ending the current session.
+  // NOTE: This should only be called from LockStateController, other callers
+  // should use LockStateController::RequestSignOut() instead.
+  void RequestSignOut();
 
   // Switches to another active user with |account_id| (if that user has
   // already signed in).
@@ -139,13 +140,20 @@ class ASH_EXPORT SessionController : public mojom::SessionController {
   // Show the multi-profile login UI to add another user to this session.
   void ShowMultiProfileLogin();
 
+  // Returns the PrefService used at the signin screen, which is tied to an
+  // incognito profile in chrome and is valid until the browser exits.
+  PrefService* GetSigninScreenPrefService() const;
+
   // Returns the PrefService for |account_id| or null if one does not exist.
   PrefService* GetUserPrefServiceForUser(const AccountId& account_id);
 
   // Returns the PrefService for the last active user that had one or null if no
-  // PrefService connection has been successfully established. Returns the
-  // signin screen profile prefs when at the login screen.
-  PrefService* GetLastActiveUserPrefService();
+  // PrefService connection has been successfully established.
+  PrefService* GetLastActiveUserPrefService() const;
+
+  // Before login returns the signin screen profile prefs. After login returns
+  // the active user profile prefs. Returns null early during startup.
+  PrefService* GetActivePrefService() const;
 
   void AddObserver(SessionObserver* observer);
   void RemoveObserver(SessionObserver* observer);
@@ -168,11 +176,19 @@ class ASH_EXPORT SessionController : public mojom::SessionController {
   void NotifyChromeTerminating() override;
   void SetSessionLengthLimit(base::TimeDelta length_limit,
                              base::TimeTicks start_time) override;
+  void CanSwitchActiveUser(CanSwitchActiveUserCallback callback) override;
+  void ShowMultiprofilesIntroDialog(
+      ShowMultiprofilesIntroDialogCallback callback) override;
+  void ShowTeleportWarningDialog(
+      ShowTeleportWarningDialogCallback callback) override;
+  void ShowMultiprofilesSessionAbortedDialog(
+      const std::string& user_email) override;
 
   // Test helpers.
   void ClearUserSessionsForTest();
   void FlushMojoForTest();
   void LockScreenAndFlushForTest();
+  void SetSigninScreenPrefServiceForTest(std::unique_ptr<PrefService> prefs);
   void ProvideUserPrefServiceForTest(const AccountId& account_id,
                                      std::unique_ptr<PrefService> pref_service);
 

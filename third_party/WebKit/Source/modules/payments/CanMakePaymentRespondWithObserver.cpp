@@ -50,10 +50,10 @@ void CanMakePaymentRespondWithObserver::OnResponseFulfilled(
 void CanMakePaymentRespondWithObserver::OnNoResponse() {
   DCHECK(GetExecutionContext());
   ServiceWorkerGlobalScopeClient::From(GetExecutionContext())
-      ->RespondToCanMakePaymentEvent(event_id_, false, event_dispatch_time_);
+      ->RespondToCanMakePaymentEvent(event_id_, true, event_dispatch_time_);
 }
 
-DEFINE_TRACE(CanMakePaymentRespondWithObserver) {
+void CanMakePaymentRespondWithObserver::Trace(blink::Visitor* visitor) {
   RespondWithObserver::Trace(visitor);
 }
 

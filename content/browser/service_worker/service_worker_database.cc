@@ -19,10 +19,11 @@
 #include "content/browser/service_worker/service_worker_database.pb.h"
 #include "content/browser/service_worker/service_worker_metrics.h"
 #include "content/common/service_worker/service_worker_utils.h"
+#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_object.mojom.h"
+#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_registration.mojom.h"
 #include "third_party/leveldatabase/env_chromium.h"
-#include "third_party/leveldatabase/src/helpers/memenv/memenv.h"
+#include "third_party/leveldatabase/leveldb_chrome.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
-#include "third_party/leveldatabase/src/include/leveldb/env.h"
 #include "third_party/leveldatabase/src/include/leveldb/write_batch.h"
 #include "url/origin.h"
 
@@ -275,12 +276,11 @@ const char* ServiceWorkerDatabase::StatusToString(
 }
 
 ServiceWorkerDatabase::RegistrationData::RegistrationData()
-    : registration_id(kInvalidServiceWorkerRegistrationId),
-      version_id(kInvalidServiceWorkerVersionId),
+    : registration_id(blink::mojom::kInvalidServiceWorkerRegistrationId),
+      version_id(blink::mojom::kInvalidServiceWorkerVersionId),
       is_active(false),
       has_fetch_handler(false),
-      resources_total_size_bytes(0) {
-}
+      resources_total_size_bytes(0) {}
 
 ServiceWorkerDatabase::RegistrationData::RegistrationData(
     const RegistrationData& other) = default;
@@ -588,7 +588,7 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::WriteRegistration(
   DCHECK(old_registration);
   DCHECK(!resources.empty());
   Status status = LazyOpen(true);
-  old_registration->version_id = kInvalidServiceWorkerVersionId;
+  old_registration->version_id = blink::mojom::kInvalidServiceWorkerVersionId;
   if (status != STATUS_OK)
     return status;
 
@@ -789,7 +789,7 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::DeleteRegistration(
     std::vector<int64_t>* newly_purgeable_resources) {
   DCHECK(sequence_checker_.CalledOnValidSequence());
   DCHECK(deleted_version);
-  deleted_version->version_id = kInvalidServiceWorkerVersionId;
+  deleted_version->version_id = blink::mojom::kInvalidServiceWorkerVersionId;
   Status status = LazyOpen(false);
   if (IsNewOrNonexistentDatabase(status))
     return STATUS_OK;
@@ -854,7 +854,7 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::ReadUserData(
     const std::vector<std::string>& user_data_names,
     std::vector<std::string>* user_data_values) {
   DCHECK(sequence_checker_.CalledOnValidSequence());
-  DCHECK_NE(kInvalidServiceWorkerRegistrationId, registration_id);
+  DCHECK_NE(blink::mojom::kInvalidServiceWorkerRegistrationId, registration_id);
   DCHECK(!user_data_names.empty());
   DCHECK(user_data_values);
 
@@ -885,7 +885,7 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::ReadUserDataByKeyPrefix(
     const std::string& user_data_name_prefix,
     std::vector<std::string>* user_data_values) {
   DCHECK(sequence_checker_.CalledOnValidSequence());
-  DCHECK_NE(kInvalidServiceWorkerRegistrationId, registration_id);
+  DCHECK_NE(blink::mojom::kInvalidServiceWorkerRegistrationId, registration_id);
   DCHECK(user_data_values);
 
   Status status = LazyOpen(false);
@@ -930,7 +930,7 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::WriteUserData(
     const GURL& origin,
     const std::vector<std::pair<std::string, std::string>>& name_value_pairs) {
   DCHECK(sequence_checker_.CalledOnValidSequence());
-  DCHECK_NE(kInvalidServiceWorkerRegistrationId, registration_id);
+  DCHECK_NE(blink::mojom::kInvalidServiceWorkerRegistrationId, registration_id);
   DCHECK(!name_value_pairs.empty());
 
   Status status = LazyOpen(false);
@@ -958,7 +958,7 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::DeleteUserData(
     int64_t registration_id,
     const std::vector<std::string>& user_data_names) {
   DCHECK(sequence_checker_.CalledOnValidSequence());
-  DCHECK_NE(kInvalidServiceWorkerRegistrationId, registration_id);
+  DCHECK_NE(blink::mojom::kInvalidServiceWorkerRegistrationId, registration_id);
   DCHECK(!user_data_names.empty());
 
   Status status = LazyOpen(false);
@@ -982,7 +982,7 @@ ServiceWorkerDatabase::DeleteUserDataByKeyPrefixes(
     const std::vector<std::string>& user_data_name_prefixes) {
   // Example |user_data_name_prefixes| is {"abc", "xyz"}.
   DCHECK(sequence_checker_.CalledOnValidSequence());
-  DCHECK_NE(kInvalidServiceWorkerRegistrationId, registration_id);
+  DCHECK_NE(blink::mojom::kInvalidServiceWorkerRegistrationId, registration_id);
 
   Status status = LazyOpen(false);
   if (IsNewOrNonexistentDatabase(status))
@@ -1278,7 +1278,7 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::LazyOpen(
   leveldb_env::Options options;
   options.create_if_missing = create_if_missing;
   if (IsDatabaseInMemory()) {
-    env_.reset(leveldb::NewMemEnv(leveldb::Env::Default()));
+    env_.reset(leveldb_chrome::NewMemEnv(leveldb::Env::Default()));
     options.env = env_.get();
   } else {
     options.env = g_service_worker_env.Pointer();
@@ -1424,7 +1424,8 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::ParseRegistrationData(
     out->foreign_fetch_scopes.push_back(sub_scope_url);
   }
   for (int i = 0; i < data.foreign_fetch_origin_size(); ++i) {
-    url::Origin parsed_origin(GURL(data.foreign_fetch_origin(i)));
+    url::Origin parsed_origin =
+        url::Origin::Create(GURL(data.foreign_fetch_origin(i)));
     if (parsed_origin.unique()) {
       DLOG(ERROR) << "Foreign fetch origin '" << data.foreign_fetch_origin(i)
                   << "' is not valid.";
@@ -1434,7 +1435,7 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::ParseRegistrationData(
   }
   if (data.has_origin_trial_tokens()) {
     const ServiceWorkerOriginTrialInfo& info = data.origin_trial_tokens();
-    TrialTokenValidator::FeatureToTokensMap origin_trial_tokens;
+    blink::TrialTokenValidator::FeatureToTokensMap origin_trial_tokens;
     for (int i = 0; i < info.features_size(); ++i) {
       const auto& feature = info.features(i);
       for (int j = 0; j < feature.tokens_size(); ++j)
@@ -1845,9 +1846,8 @@ bool ServiceWorkerDatabase::IsOpen() {
   return db_ != NULL;
 }
 
-void ServiceWorkerDatabase::Disable(
-    const tracked_objects::Location& from_here,
-    Status status) {
+void ServiceWorkerDatabase::Disable(const base::Location& from_here,
+                                    Status status) {
   if (status != STATUS_OK) {
     DLOG(ERROR) << "Failed at: " << from_here.ToString()
                 << " with error: " << StatusToString(status);
@@ -1857,25 +1857,22 @@ void ServiceWorkerDatabase::Disable(
   db_.reset();
 }
 
-void ServiceWorkerDatabase::HandleOpenResult(
-    const tracked_objects::Location& from_here,
-    Status status) {
+void ServiceWorkerDatabase::HandleOpenResult(const base::Location& from_here,
+                                             Status status) {
   if (status != STATUS_OK)
     Disable(from_here, status);
   ServiceWorkerMetrics::CountOpenDatabaseResult(status);
 }
 
-void ServiceWorkerDatabase::HandleReadResult(
-    const tracked_objects::Location& from_here,
-    Status status) {
+void ServiceWorkerDatabase::HandleReadResult(const base::Location& from_here,
+                                             Status status) {
   if (status != STATUS_OK)
     Disable(from_here, status);
   ServiceWorkerMetrics::CountReadDatabaseResult(status);
 }
 
-void ServiceWorkerDatabase::HandleWriteResult(
-    const tracked_objects::Location& from_here,
-    Status status) {
+void ServiceWorkerDatabase::HandleWriteResult(const base::Location& from_here,
+                                              Status status) {
   if (status != STATUS_OK)
     Disable(from_here, status);
   ServiceWorkerMetrics::CountWriteDatabaseResult(status);

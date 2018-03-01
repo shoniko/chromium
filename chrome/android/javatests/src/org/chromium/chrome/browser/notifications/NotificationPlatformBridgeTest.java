@@ -29,6 +29,7 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.SuppressFBWarnings;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
@@ -248,7 +249,7 @@ public class NotificationPlatformBridgeTest {
     @RetryOnFailure
     public void testDefaultNotificationProperties() throws Exception {
         mNotificationTestRule.setNotificationContentSettingForCurrentOrigin(ContentSetting.ALLOW);
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Context context = InstrumentationRegistry.getTargetContext();
 
         Notification notification =
                 mNotificationTestRule.showAndGetNotification("MyNotification", "{ body: 'Hello' }");
@@ -338,7 +339,7 @@ public class NotificationPlatformBridgeTest {
     @Feature({"Browser", "Notifications"})
     public void testReplyToNotification() throws Exception {
         mNotificationTestRule.setNotificationContentSettingForCurrentOrigin(ContentSetting.ALLOW);
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Context context = InstrumentationRegistry.getTargetContext();
 
         // +5 engagement from notification permission and +0.5 from navigating to the test page.
         Assert.assertEquals(5.5, getEngagementScoreBlocking(), 0);
@@ -377,7 +378,7 @@ public class NotificationPlatformBridgeTest {
     @Feature({"Browser", "Notifications"})
     public void testReplyToNotificationWithEmptyReply() throws Exception {
         mNotificationTestRule.setNotificationContentSettingForCurrentOrigin(ContentSetting.ALLOW);
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Context context = InstrumentationRegistry.getTargetContext();
 
         // +5 engagement from notification permission and +0.5 from navigating to the test page.
         Assert.assertEquals(5.5, getEngagementScoreBlocking(), 0);
@@ -580,7 +581,7 @@ public class NotificationPlatformBridgeTest {
 
         Assert.assertEquals("MyNotification", NotificationTestUtil.getExtraTitle(notification));
 
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Context context = InstrumentationRegistry.getTargetContext();
         Bitmap smallIcon = NotificationTestUtil.getSmallIconFromNotification(context, notification);
         Assert.assertNotNull(smallIcon);
 
@@ -633,7 +634,7 @@ public class NotificationPlatformBridgeTest {
 
         Assert.assertEquals("MyNotification", NotificationTestUtil.getExtraTitle(notification));
 
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Context context = InstrumentationRegistry.getTargetContext();
         Bitmap largeIcon = NotificationTestUtil.getLargeIconFromNotification(context, notification);
         Assert.assertNotNull(largeIcon);
         Assert.assertEquals(Color.RED, largeIcon.getPixel(0, 0));
@@ -656,7 +657,7 @@ public class NotificationPlatformBridgeTest {
 
         Assert.assertEquals("NoIconNotification", NotificationTestUtil.getExtraTitle(notification));
 
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Context context = InstrumentationRegistry.getTargetContext();
         Assert.assertNotNull(
                 NotificationTestUtil.getLargeIconFromNotification(context, notification));
 
@@ -702,6 +703,13 @@ public class NotificationPlatformBridgeTest {
         mNotificationTestRule.waitForNotificationManagerMutation();
         Assert.assertTrue(mNotificationTestRule.getNotificationEntries().isEmpty());
         Assert.assertEquals(6.5, getEngagementScoreBlocking(), 0);
+
+        // This metric only applies on N+, where we schedule a job to handle the click.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            Assert.assertEquals(1,
+                    RecordHistogram.getHistogramTotalCountForTesting(
+                            "Notifications.Android.JobStartDelay"));
+        }
     }
 
     /**
@@ -738,6 +746,12 @@ public class NotificationPlatformBridgeTest {
                 return 2 == mNotificationTestRule.getActivity().getCurrentTabModel().getCount();
             }
         });
+        // This metric only applies on N+, where we schedule a job to handle the click.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            Assert.assertEquals(1,
+                    RecordHistogram.getHistogramTotalCountForTesting(
+                            "Notifications.Android.JobStartDelay"));
+        }
     }
 
     /**

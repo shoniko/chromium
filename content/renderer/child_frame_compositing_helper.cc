@@ -13,10 +13,10 @@
 #include "cc/layers/surface_layer.h"
 #include "cc/paint/paint_image.h"
 #include "cc/paint/paint_image_builder.h"
+#include "components/viz/common/frame_sinks/copy_output_request.h"
+#include "components/viz/common/frame_sinks/copy_output_result.h"
 #include "components/viz/common/gpu/context_provider.h"
-#include "components/viz/common/quads/copy_output_request.h"
-#include "components/viz/common/quads/copy_output_result.h"
-#include "components/viz/common/quads/single_release_callback.h"
+#include "components/viz/common/resources/single_release_callback.h"
 #include "components/viz/common/surfaces/sequence_surface_reference_factory.h"
 #include "components/viz/common/surfaces/stub_surface_reference_factory.h"
 #include "components/viz/common/switches.h"
@@ -173,17 +173,19 @@ ChildFrameCompositingHelper::ChildFrameCompositingHelper(
   enable_surface_references_ =
       !base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableSurfaceReferences);
-  scoped_refptr<ThreadSafeSender> sender(
-      RenderThreadImpl::current()->thread_safe_sender());
   if (enable_surface_references_) {
     surface_reference_factory_ = new viz::StubSurfaceReferenceFactory();
-  } else if (render_frame_proxy_) {
-    surface_reference_factory_ =
-        new IframeSurfaceReferenceFactory(sender, host_routing_id_);
   } else {
-    surface_reference_factory_ = new BrowserPluginSurfaceReferenceFactory(
-        sender, host_routing_id_,
-        browser_plugin_->browser_plugin_instance_id());
+    scoped_refptr<ThreadSafeSender> sender(
+        RenderThreadImpl::current()->thread_safe_sender());
+    if (render_frame_proxy_) {
+      surface_reference_factory_ =
+          new IframeSurfaceReferenceFactory(sender, host_routing_id_);
+    } else {
+      surface_reference_factory_ = new BrowserPluginSurfaceReferenceFactory(
+          sender, host_routing_id_,
+          browser_plugin_->browser_plugin_instance_id());
+    }
   }
 }
 
@@ -239,7 +241,7 @@ void ChildFrameCompositingHelper::ChildFrameGone() {
         web_layer_->Bounds().height > sad_bitmap->height()) {
       scoped_refptr<cc::PictureImageLayer> sad_layer =
           cc::PictureImageLayer::Create();
-      sad_layer->SetImage(cc::PaintImageBuilder()
+      sad_layer->SetImage(cc::PaintImageBuilder::WithDefault()
                               .set_id(cc::PaintImage::kNonLazyStableId)
                               .set_image(SkImage::MakeFromBitmap(*sad_bitmap))
                               .TakePaintImage());
@@ -271,11 +273,12 @@ void ChildFrameCompositingHelper::SetPrimarySurfaceInfo(
 
   surface_layer_ = cc::SurfaceLayer::Create(surface_reference_factory_);
   surface_layer_->SetMasksToBounds(true);
+  surface_layer_->SetDefaultBackgroundColor(SK_ColorTRANSPARENT);
 
   viz::SurfaceInfo modified_surface_info(surface_info.id(), scale_factor,
                                          surface_info.size_in_pixels());
   surface_layer_->SetPrimarySurfaceInfo(modified_surface_info);
-  surface_layer_->SetFallbackSurfaceInfo(fallback_surface_info_);
+  surface_layer_->SetFallbackSurfaceId(fallback_surface_id_);
 
   std::unique_ptr<cc_blink::WebLayerImpl> layer(
       new cc_blink::WebLayerImpl(surface_layer_));
@@ -292,17 +295,10 @@ void ChildFrameCompositingHelper::SetPrimarySurfaceInfo(
       static_cast<cc_blink::WebLayerImpl*>(web_layer_.get())->layer());
 }
 
-void ChildFrameCompositingHelper::SetFallbackSurfaceInfo(
-    const viz::SurfaceInfo& surface_info,
+void ChildFrameCompositingHelper::SetFallbackSurfaceId(
+    const viz::SurfaceId& surface_id,
     const viz::SurfaceSequence& sequence) {
-  fallback_surface_info_ = surface_info;
-  float scale_factor = surface_info.device_scale_factor();
-  // TODO(oshima): This is a stopgap fix so that the compositor does not
-  // scaledown the content when 2x frame data is added to 1x parent frame data.
-  // Fix this in cc/.
-  if (IsUseZoomForDSFEnabled())
-    scale_factor = 1.0f;
-
+  fallback_surface_id_ = surface_id;
   // The RWHV creates a destruction dependency on the surface that needs to be
   // satisfied. The reference factory will satisfy it when a new reference has
   // been created.
@@ -318,9 +314,7 @@ void ChildFrameCompositingHelper::SetFallbackSurfaceInfo(
     }
   }
 
-  viz::SurfaceInfo modified_surface_info(surface_info.id(), scale_factor,
-                                         surface_info.size_in_pixels());
-  surface_layer_->SetFallbackSurfaceInfo(modified_surface_info);
+  surface_layer_->SetFallbackSurfaceId(surface_id);
 }
 
 void ChildFrameCompositingHelper::UpdateVisibility(bool visible) {

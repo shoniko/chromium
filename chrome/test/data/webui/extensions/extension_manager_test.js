@@ -8,7 +8,7 @@ cr.define('extension_manager_tests', function() {
   var TestNames = {
     ItemOrder: 'item order',
     ItemListVisibility: 'item list visibility',
-    ShowItems: 'show items',
+    SplitItems: 'split items',
     ChangePages: 'change pages',
     UrlNavigationToDetails: 'url navigation to details',
     UpdateItemData: 'update item data',
@@ -83,13 +83,11 @@ cr.define('extension_manager_tests', function() {
     test(assert(TestNames.ItemListVisibility), function() {
       var extension = getDataByName(manager.extensions, 'My extension 1');
 
-      var listHasItemWithName = function(name) {
-        return !!manager.$['items-list'].items.find(function(el) {
-          return el.name == name;
-        });
-      };
+      var list = manager.$['items-list'];
+      var listHasItemWithName = (name) =>
+          !!list.extensions.find(el => el.name == name);
 
-      expectEquals(manager.extensions, manager.$['items-list'].items);
+      expectEquals(manager.extensions, manager.$['items-list'].extensions);
       expectTrue(listHasItemWithName('My extension 1'));
 
       manager.removeItem(extension);
@@ -101,7 +99,7 @@ cr.define('extension_manager_tests', function() {
       expectTrue(listHasItemWithName('My extension 1'));
     });
 
-    test(assert(TestNames.ShowItems), function() {
+    test(assert(TestNames.SplitItems), function() {
       var sectionHasItemWithName = function(section, name) {
         return !!manager[section].find(function(el) {
           return el.name == name;
@@ -114,36 +112,22 @@ cr.define('extension_manager_tests', function() {
           'apps', 'Platform App Test: minimal platform app'));
       expectTrue(sectionHasItemWithName('apps', 'hosted_app'));
       expectTrue(sectionHasItemWithName('apps', 'Packaged App Test'));
-
-      // Toggle between extensions and apps and back again.
-      expectEquals(manager.extensions, manager.$['items-list'].items);
-      extensions.navigation.navigateTo(
-          {page: Page.LIST, type: extensions.ShowingType.APPS});
-      expectEquals(manager.apps, manager.$['items-list'].items);
-      extensions.navigation.navigateTo(
-          {page: Page.LIST, type: extensions.ShowingType.EXTENSIONS});
-      expectEquals(manager.extensions, manager.$['items-list'].items);
-      // Repeating a selection should have no change.
-      extensions.navigation.navigateTo(
-          {page: Page.LIST, type: extensions.ShowingType.EXTENSIONS});
-      expectEquals(manager.extensions, manager.$['items-list'].items);
     });
 
     test(assert(TestNames.ChangePages), function() {
+      MockInteractions.tap(
+          manager.$$('extensions-toolbar').$$('cr-toolbar').$$('#menuButton'));
+      Polymer.dom.flush();
+
       // We start on the item list.
-      MockInteractions.tap(manager.$.sidebar.$['sections-extensions']);
+      MockInteractions.tap(manager.$$('#sidebar').$['sections-extensions']);
       Polymer.dom.flush();
       isActiveView(Page.LIST);
 
       // Switch: item list -> keyboard shortcuts.
-      MockInteractions.tap(manager.$.sidebar.$['sections-shortcuts']);
+      MockInteractions.tap(manager.$$('#sidebar').$['sections-shortcuts']);
       Polymer.dom.flush();
       isActiveView(Page.SHORTCUTS);
-
-      // Switch: keyboard shortcuts -> item list.
-      MockInteractions.tap(manager.$.sidebar.$['sections-apps']);
-      Polymer.dom.flush();
-      isActiveView(Page.LIST);
 
       // Switch: item list -> detail view.
       var item = manager.$['items-list'].$$('extensions-item');
@@ -153,9 +137,14 @@ cr.define('extension_manager_tests', function() {
       isActiveView(Page.DETAILS);
 
       // Switch: detail view -> keyboard shortcuts.
-      MockInteractions.tap(manager.$.sidebar.$['sections-shortcuts']);
+      MockInteractions.tap(manager.$$('#sidebar').$['sections-shortcuts']);
       Polymer.dom.flush();
       isActiveView(Page.SHORTCUTS);
+
+      // We get back on the item list.
+      MockInteractions.tap(manager.$$('#sidebar').$['sections-extensions']);
+      Polymer.dom.flush();
+      isActiveView(Page.LIST);
     });
 
     test(assert(TestNames.UrlNavigationToDetails), function() {

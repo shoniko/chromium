@@ -6,37 +6,41 @@
 #define NGPhysicalBoxFragment_h
 
 #include "core/CoreExport.h"
+#include "core/layout/ng/geometry/ng_physical_offset_rect.h"
 #include "core/layout/ng/inline/ng_baseline.h"
-#include "core/layout/ng/ng_physical_fragment.h"
+#include "core/layout/ng/ng_physical_container_fragment.h"
 
 namespace blink {
 
-class CORE_EXPORT NGPhysicalBoxFragment final : public NGPhysicalFragment {
+class CORE_EXPORT NGPhysicalBoxFragment final
+    : public NGPhysicalContainerFragment {
  public:
   // This modifies the passed-in children vector.
   NGPhysicalBoxFragment(LayoutObject* layout_object,
                         const ComputedStyle& style,
                         NGPhysicalSize size,
-                        NGPhysicalSize overflow,
-                        Vector<RefPtr<NGPhysicalFragment>>& children,
+                        const NGPhysicalOffsetRect& contents_visual_rect,
+                        Vector<scoped_refptr<NGPhysicalFragment>>& children,
                         Vector<NGBaseline>& baselines,
+                        NGBoxType box_type,
                         unsigned,  // NGBorderEdges::Physical
-                        RefPtr<NGBreakToken> break_token = nullptr);
-
-  // Returns the total size, including the contents outside of the border-box.
-  NGPhysicalSize OverflowSize() const { return overflow_; }
-
-  const Vector<RefPtr<NGPhysicalFragment>>& Children() const {
-    return children_;
-  }
+                        scoped_refptr<NGBreakToken> break_token = nullptr);
 
   const NGBaseline* Baseline(const NGBaselineRequest&) const;
 
-  RefPtr<NGPhysicalFragment> CloneWithoutOffset() const;
+  // Visual rect of this box in the local coordinate. Does not include children
+  // even if they overflow this box.
+  const NGPhysicalOffsetRect LocalVisualRect() const;
+
+  // Visual rect of children in the local coordinate.
+  const NGPhysicalOffsetRect& ContentsVisualRect() const {
+    return contents_visual_rect_;
+  }
+
+  scoped_refptr<NGPhysicalFragment> CloneWithoutOffset() const;
 
  private:
-  NGPhysicalSize overflow_;
-  Vector<RefPtr<NGPhysicalFragment>> children_;
+  NGPhysicalOffsetRect contents_visual_rect_;
   Vector<NGBaseline> baselines_;
 };
 

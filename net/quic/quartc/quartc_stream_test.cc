@@ -36,14 +36,11 @@ class MockQuicSession : public QuicSession {
   ~MockQuicSession() override {}
 
   // Writes outgoing data from QuicStream to a string.
-  QuicConsumedData WritevData(
-      QuicStream* stream,
-      QuicStreamId id,
-      QuicIOVector iovector,
-      QuicStreamOffset offset,
-      StreamSendingState state,
-      QuicReferenceCountedPointer<
-          QuicAckListenerInterface> /*ack_notifier_delegate*/) override {
+  QuicConsumedData WritevData(QuicStream* stream,
+                              QuicStreamId id,
+                              QuicIOVector iovector,
+                              QuicStreamOffset offset,
+                              StreamSendingState state) override {
     if (!writable_) {
       return QuicConsumedData(0, false);
     }
@@ -72,9 +69,7 @@ class MockQuicSession : public QuicSession {
     return nullptr;
   }
 
-  QuartcStream* CreateOutgoingDynamicStream(SpdyPriority priority) override {
-    return nullptr;
-  }
+  QuartcStream* CreateOutgoingDynamicStream() override { return nullptr; }
 
   const QuicCryptoStream* GetCryptoStream() const override { return nullptr; }
   QuicCryptoStream* GetMutableCryptoStream() override { return nullptr; }
@@ -180,7 +175,7 @@ class QuartcStreamTest : public ::testing::Test,
     connection_.reset(new QuicConnection(
         0, QuicSocketAddress(ip, 0), this /*QuicConnectionHelperInterface*/,
         alarm_factory_.get(), new DummyPacketWriter(), owns_writer, perspective,
-        AllSupportedVersions()));
+        AllSupportedTransportVersions()));
 
     session_.reset(
         new MockQuicSession(connection_.get(), QuicConfig(), &write_buffer_));
@@ -198,10 +193,6 @@ class QuartcStreamTest : public ::testing::Test,
 
   QuicRandom* GetRandomGenerator() override {
     return QuicRandom::GetInstance();
-  }
-
-  QuicBufferAllocator* GetStreamFrameBufferAllocator() override {
-    return &buffer_allocator_;
   }
 
   QuicBufferAllocator* GetStreamSendBufferAllocator() override {
@@ -246,33 +237,18 @@ TEST_F(QuartcStreamTest, NoBuffer) {
   stream_->Write("Foo bar", 7, kDefaultParam);
   // The data will not be buffered.
   EXPECT_EQ(0ul, write_buffer_.size());
-  if (session_->save_data_before_consumption()) {
-    EXPECT_TRUE(stream_->HasBufferedData());
-  } else {
-    EXPECT_FALSE(stream_->HasBufferedData());
-  }
+  EXPECT_TRUE(stream_->HasBufferedData());
   EXPECT_EQ(0u, stream_->bytes_written());
   // The stream is writable, but there's nothing to send.
   session_->set_writable(true);
   stream_->OnCanWrite();
-  if (session_->save_data_before_consumption()) {
-    EXPECT_EQ(7u, stream_->bytes_written());
-    EXPECT_EQ(7ul, write_buffer_.size());
-  } else {
-    EXPECT_EQ(0u, stream_->bytes_written());
-    EXPECT_EQ(0ul, write_buffer_.size());
-  }
+  EXPECT_EQ(7u, stream_->bytes_written());
+  EXPECT_EQ(7ul, write_buffer_.size());
   EXPECT_FALSE(stream_->HasBufferedData());
 
   stream_->Write("xyzzy", 5, kDefaultParam);
-  if (session_->save_data_before_consumption()) {
-    EXPECT_EQ("Foo barxyzzy", write_buffer_);
-    EXPECT_EQ(12u, stream_->bytes_written());
-  } else {
-    // The stream threw away the previous data.  It only sends this.
-    EXPECT_EQ("xyzzy", write_buffer_);
-    EXPECT_EQ(5u, stream_->bytes_written());
-  }
+  EXPECT_EQ("Foo barxyzzy", write_buffer_);
+  EXPECT_EQ(12u, stream_->bytes_written());
 }
 
 // Finish writing to a stream.

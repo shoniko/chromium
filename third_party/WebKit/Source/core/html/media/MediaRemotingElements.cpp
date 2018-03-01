@@ -7,7 +7,7 @@
 #include "core/dom/ShadowRoot.h"
 #include "core/events/MouseEvent.h"
 #include "core/geometry/DOMRect.h"
-#include "core/html/HTMLVideoElement.h"
+#include "core/html/media/HTMLVideoElement.h"
 #include "core/input/EventHandler.h"
 #include "platform/text/PlatformLocale.h"
 #include "public/platform/WebLocalizedString.h"
@@ -28,7 +28,7 @@ class MediaRemotingExitButtonElement::MouseEventsListener final
     return this == &other;
   }
 
-  void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(element_);
     EventListener::Trace(visitor);
   }
@@ -75,7 +75,7 @@ HTMLVideoElement& MediaRemotingExitButtonElement::GetVideoElement() const {
   return interstitial_->GetVideoElement();
 }
 
-DEFINE_TRACE(MediaRemotingExitButtonElement) {
+void MediaRemotingExitButtonElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(interstitial_);
   visitor->Trace(listener_);
   HTMLDivElement::Trace(visitor);

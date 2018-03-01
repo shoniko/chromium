@@ -8,8 +8,14 @@
 #include <string>
 
 #include "base/macros.h"
+#include "base/optional.h"
+#include "third_party/skia/include/core/SkColor.h"
 
 class Browser;
+
+namespace gfx {
+class ImageSkia;
+}
 
 namespace extensions {
 
@@ -17,7 +23,10 @@ namespace extensions {
 class HostedAppBrowserController {
  public:
   // Indicates whether |browser| is a hosted app browser.
-  static bool IsForHostedApp(Browser* browser);
+  static bool IsForHostedApp(const Browser* browser);
+
+  // Returns whether |browser| uses the experimental hosted app experience.
+  static bool IsForExperimentalHostedAppBrowser(const Browser* browser);
 
   explicit HostedAppBrowserController(Browser* browser);
   ~HostedAppBrowserController();
@@ -30,6 +39,15 @@ class HostedAppBrowserController {
   // currently visible or not. If |animate| is set, the change will be
   // animated.
   void UpdateLocationBarVisibility(bool animate) const;
+
+  // Returns the app icon for the window to use in the task list.
+  gfx::ImageSkia GetWindowAppIcon() const;
+
+  // Returns the icon to be displayed in the window title bar.
+  gfx::ImageSkia GetWindowIcon() const;
+
+  // Returns the color of the title bar.
+  base::Optional<SkColor> GetThemeColor() const;
 
  private:
   Browser* browser_;

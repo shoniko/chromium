@@ -52,18 +52,17 @@
 #include "core/workers/WorkerInspectorProxy.h"
 #include "core/workers/WorkerScriptLoader.h"
 #include "platform/CrossThreadFunctional.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/heap/Handle.h"
 #include "platform/heap/Persistent.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/loader/fetch/ResourceResponse.h"
 #include "platform/network/ContentSecurityPolicyParsers.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/wtf/Functional.h"
 #include "platform/wtf/PtrUtil.h"
 #include "public/platform/WebContentSettingsClient.h"
-#include "public/platform/WebMessagePortChannel.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURL.h"
 #include "public/platform/WebURLRequest.h"
@@ -90,9 +89,14 @@ void WebSharedWorkerImpl::TerminateWorkerThread() {
   if (asked_to_terminate_)
     return;
   asked_to_terminate_ = true;
+  if (shadow_page_ && !shadow_page_->WasInitialized()) {
+    client_->WorkerScriptLoadFailed();
+    delete this;
+    return;
+  }
   if (main_script_loader_) {
     main_script_loader_->Cancel();
-    main_script_loader_.Clear();
+    main_script_loader_ = nullptr;
     client_->WorkerScriptLoadFailed();
     delete this;
     return;
@@ -161,9 +165,13 @@ WebSharedWorkerImpl::CreateClientMessageLoop() {
   return client_->CreateDevToolsMessageLoop();
 }
 
+const WebString& WebSharedWorkerImpl::GetInstrumentationToken() {
+  return instrumentation_token_;
+}
+
 void WebSharedWorkerImpl::CountFeature(WebFeature feature) {
   DCHECK(IsMainThread());
-  client_->CountFeature(static_cast<uint32_t>(feature));
+  client_->CountFeature(feature);
 }
 
 void WebSharedWorkerImpl::PostMessageToPageInspector(int session_id,
@@ -185,8 +193,7 @@ void WebSharedWorkerImpl::DidTerminateWorkerThread() {
   delete this;
 }
 
-void WebSharedWorkerImpl::Connect(
-    std::unique_ptr<WebMessagePortChannel> web_channel) {
+void WebSharedWorkerImpl::Connect(MessagePortChannel web_channel) {
   DCHECK(IsMainThread());
   // The HTML spec requires to queue a connect event using the DOM manipulation
   // task source.
@@ -200,7 +207,7 @@ void WebSharedWorkerImpl::Connect(
 }
 
 void WebSharedWorkerImpl::ConnectTaskOnWorkerThread(
-    std::unique_ptr<WebMessagePortChannel> channel) {
+    MessagePortChannel channel) {
   // Wrap the passed-in channel in a MessagePort, and send it off via a connect
   // event.
   DCHECK(worker_thread_->IsCurrentThread());
@@ -219,7 +226,9 @@ void WebSharedWorkerImpl::StartWorkerContext(
     WebContentSecurityPolicyType policy_type,
     WebAddressSpace creation_address_space,
     bool data_saver_enabled,
-    mojo::ScopedMessagePipeHandle content_settings_handle) {
+    const WebString& instrumentation_token,
+    mojo::ScopedMessagePipeHandle content_settings_handle,
+    mojo::ScopedMessagePipeHandle interface_provider) {
   DCHECK(IsMainThread());
   url_ = url;
   name_ = name;
@@ -227,7 +236,9 @@ void WebSharedWorkerImpl::StartWorkerContext(
   // Chrome doesn't use interface versioning.
   content_settings_info_ = mojom::blink::WorkerContentSettingsProxyPtrInfo(
       std::move(content_settings_handle), 0u);
+  pending_interface_provider_.set_handle(std::move(interface_provider));
 
+  instrumentation_token_ = instrumentation_token;
   shadow_page_ = WTF::MakeUnique<WorkerShadowPage>(this);
   shadow_page_->GetSettings()->SetDataSaverEnabled(data_saver_enabled);
 
@@ -301,21 +312,18 @@ void WebSharedWorkerImpl::OnScriptLoaderFinished() {
 
   ContentSecurityPolicy* content_security_policy =
       main_script_loader_->ReleaseContentSecurityPolicy();
-  WorkerThreadStartMode start_mode =
-      worker_inspector_proxy_->WorkerStartMode(document);
-  std::unique_ptr<WorkerSettings> worker_settings =
-      WTF::WrapUnique(new WorkerSettings(
-          shadow_page_->GetDocument()->GetFrame()->GetSettings()));
+  auto worker_settings = std::make_unique<WorkerSettings>(
+      shadow_page_->GetDocument()->GetFrame()->GetSettings());
   auto global_scope_creation_params =
-      WTF::MakeUnique<GlobalScopeCreationParams>(
+      std::make_unique<GlobalScopeCreationParams>(
           url_, document->UserAgent(), main_script_loader_->SourceText(),
-          nullptr, start_mode,
+          nullptr /* cached_meta_data */,
           content_security_policy ? content_security_policy->Headers().get()
                                   : nullptr,
           main_script_loader_->GetReferrerPolicy(), starter_origin,
           worker_clients, main_script_loader_->ResponseAddressSpace(),
           main_script_loader_->OriginTrialTokens(), std::move(worker_settings),
-          kV8CacheOptionsDefault);
+          kV8CacheOptionsDefault, std::move(pending_interface_provider_));
 
   // SharedWorker can sometimes run tasks that are initiated by/associated with
   // a document's frame but these documents can be from a different process. So
@@ -330,14 +338,16 @@ void WebSharedWorkerImpl::OnScriptLoaderFinished() {
       name_, ThreadableLoadingContext::Create(*document), *reporting_proxy_);
   probe::scriptImported(document, main_script_loader_->Identifier(),
                         main_script_loader_->SourceText());
-  main_script_loader_.Clear();
+  main_script_loader_ = nullptr;
 
   auto thread_startup_data = WorkerBackingThreadStartupData::CreateDefault();
   thread_startup_data.atomics_wait_mode =
       WorkerBackingThreadStartupData::AtomicsWaitMode::kAllow;
 
-  GetWorkerThread()->Start(std::move(global_scope_creation_params),
-                           thread_startup_data, task_runners);
+  GetWorkerThread()->Start(
+      std::move(global_scope_creation_params), thread_startup_data,
+      worker_inspector_proxy_->ShouldPauseOnWorkerStart(document),
+      task_runners);
   worker_inspector_proxy_->WorkerThreadCreated(document, GetWorkerThread(),
                                                url_);
   client_->WorkerScriptLoaded();
@@ -352,19 +362,17 @@ void WebSharedWorkerImpl::PauseWorkerContextOnStart() {
   pause_worker_context_on_start_ = true;
 }
 
-void WebSharedWorkerImpl::AttachDevTools(const WebString& host_id,
-                                         int session_id) {
+void WebSharedWorkerImpl::AttachDevTools(int session_id) {
   WebDevToolsAgent* devtools_agent = shadow_page_->DevToolsAgent();
   if (devtools_agent)
-    devtools_agent->Attach(host_id, session_id);
+    devtools_agent->Attach(session_id);
 }
 
-void WebSharedWorkerImpl::ReattachDevTools(const WebString& host_id,
-                                           int session_id,
+void WebSharedWorkerImpl::ReattachDevTools(int session_id,
                                            const WebString& saved_state) {
   WebDevToolsAgent* devtools_agent = shadow_page_->DevToolsAgent();
   if (devtools_agent)
-    devtools_agent->Reattach(host_id, session_id, saved_state);
+    devtools_agent->Reattach(session_id, saved_state);
   ResumeStartup();
 }
 

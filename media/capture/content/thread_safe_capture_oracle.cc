@@ -47,13 +47,17 @@ ThreadSafeCaptureOracle::ThreadSafeCaptureOracle(
     const VideoCaptureParams& params,
     bool enable_auto_throttling)
     : client_(std::move(client)),
-      oracle_(base::TimeDelta::FromMicroseconds(static_cast<int64_t>(
-                  1000000.0 / params.requested_format.frame_rate +
-                  0.5 /* to round to nearest int */)),
-              params.requested_format.frame_size,
-              params.resolution_change_policy,
-              enable_auto_throttling),
-      params_(params) {}
+      oracle_(enable_auto_throttling),
+      params_(params) {
+  DCHECK_GE(params.requested_format.frame_rate, 1e-6f);
+  oracle_.SetMinCapturePeriod(base::TimeDelta::FromMicroseconds(
+      static_cast<int64_t>(1000000.0 / params.requested_format.frame_rate +
+                           0.5 /* to round to nearest int */)));
+  const auto constraints = params.SuggestConstraints();
+  oracle_.SetCaptureSizeConstraints(constraints.min_frame_size,
+                                    constraints.max_frame_size,
+                                    constraints.fixed_aspect_ratio);
+}
 
 ThreadSafeCaptureOracle::~ThreadSafeCaptureOracle() {
 }
@@ -215,9 +219,8 @@ void ThreadSafeCaptureOracle::Stop() {
   client_.reset();
 }
 
-void ThreadSafeCaptureOracle::ReportError(
-    const tracked_objects::Location& from_here,
-    const std::string& reason) {
+void ThreadSafeCaptureOracle::ReportError(const base::Location& from_here,
+                                          const std::string& reason) {
   base::AutoLock guard(lock_);
   if (client_)
     client_->OnError(from_here, reason);

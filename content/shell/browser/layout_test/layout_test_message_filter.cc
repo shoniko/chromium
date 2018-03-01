@@ -92,7 +92,7 @@ bool LayoutTestMessageFilter::OnMessageReceived(const IPC::Message& message) {
 
 void LayoutTestMessageFilter::OnReadFileToString(
     const base::FilePath& local_file, std::string* contents) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::ReadFileToString(local_file, contents);
 }
 
@@ -133,8 +133,8 @@ void LayoutTestMessageFilter::OnSetDatabaseQuota(int quota) {
 
 void LayoutTestMessageFilter::OnSimulateWebNotificationClick(
     const std::string& title,
-    int action_index,
-    const base::NullableString16& reply) {
+    const base::Optional<int>& action_index,
+    const base::Optional<base::string16>& reply) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   LayoutTestNotificationManager* manager =
       LayoutTestContentBrowserClient::Get()->GetLayoutTestNotificationManager();

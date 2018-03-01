@@ -13,6 +13,10 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace reading_list {
 
 // Test class.
@@ -42,7 +46,9 @@ class TestFaviconWebStateDispatcherObserver : public web::WebStateObserver {
       : web::WebStateObserver(web_state), owner_(owner) {}
 
   // WebStateObserver implementation:
-  void WebStateDestroyed() override { owner_->WebStateDestroyed(); };
+  void WebStateDestroyed(web::WebState* web_state) override {
+    owner_->WebStateDestroyed();
+  };
 
  private:
   FaviconWebStateDispatcherTest* owner_;  // weak, owns this object.

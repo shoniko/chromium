@@ -16,6 +16,7 @@
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "ui/message_center/change_queue.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_observer.h"
 #include "ui/message_center/message_center_types.h"
@@ -24,16 +25,16 @@
 #include "ui/message_center/popup_timers_controller.h"
 
 namespace message_center {
-class MessageCenterImpl;
 
 namespace internal {
-class ChangeQueue;
-}
+class ScopedNotificationsIterationLock;
+};
 
 // The default implementation of MessageCenter.
-class MessageCenterImpl : public MessageCenter,
-                          public NotificationBlocker::Observer,
-                          public message_center::NotifierSettingsObserver {
+class MESSAGE_CENTER_EXPORT MessageCenterImpl
+    : public MessageCenter,
+      public NotificationBlocker::Observer,
+      public message_center::NotifierSettingsObserver {
  public:
   MessageCenterImpl();
   ~MessageCenterImpl() override;
@@ -50,7 +51,6 @@ class MessageCenterImpl : public MessageCenter,
   bool HasPopupNotifications() const override;
   bool IsQuietMode() const override;
   bool IsLockedState() const override;
-  bool HasClickedListener(const std::string& id) override;
   message_center::Notification* FindVisibleNotificationById(
       const std::string& id) override;
   const NotificationList::Notifications& GetVisibleNotifications() override;
@@ -68,7 +68,6 @@ class MessageCenterImpl : public MessageCenter,
   void SetNotificationButtonIcon(const std::string& notification_id,
                                  int button_index,
                                  const gfx::Image& image) override;
-  void DisableNotificationsByNotifier(const NotifierId& notifier_id) override;
   void ClickOnNotification(const std::string& id) override;
   void ClickOnNotificationButton(const std::string& id,
                                  int button_index) override;
@@ -77,7 +76,8 @@ class MessageCenterImpl : public MessageCenter,
                               bool mark_notification_as_read) override;
   void DisplayedNotification(const std::string& id,
                              const DisplaySource source) override;
-  void SetNotifierSettingsProvider(NotifierSettingsProvider* provider) override;
+  void SetNotifierSettingsProvider(
+      std::unique_ptr<NotifierSettingsProvider> provider) override;
   NotifierSettingsProvider* GetNotifierSettingsProvider() override;
   void SetQuietMode(bool in_quiet_mode) override;
   void SetLockedState(bool locked) override;
@@ -86,15 +86,11 @@ class MessageCenterImpl : public MessageCenter,
   void PausePopupTimers() override;
   const base::string16& GetProductOSName() const override;
   void SetProductOSName(const base::string16& product_os_name) override;
-  void ForceNotificationFlush(const std::string& id) override;
 
   // NotificationBlocker::Observer overrides:
   void OnBlockingStateChanged(NotificationBlocker* blocker) override;
 
   // message_center::NotifierSettingsObserver overrides:
-  void UpdateIconImage(const NotifierId& notifier_id,
-                       const gfx::Image& icon) override;
-  void NotifierGroupChanged() override;
   void NotifierEnabledChanged(const NotifierId& notifier_id,
                               bool enabled) override;
 
@@ -107,9 +103,9 @@ class MessageCenterImpl : public MessageCenter,
 
  protected:
   void DisableTimersForTest() override;
-  void EnableChangeQueueForTest(bool enable) override;
 
  private:
+  friend internal::ScopedNotificationsIterationLock;
   struct NotificationCache {
     NotificationCache();
     ~NotificationCache();
@@ -119,7 +115,10 @@ class MessageCenterImpl : public MessageCenter,
     NotificationList::Notifications visible_notifications;
     size_t unread_count;
   };
+  class ScopedNotificationsLock;
 
+  Notification* GetLatestNotificationIncludingQueued(
+      const std::string& id) const;
   void RemoveNotificationsForNotifierId(const NotifierId& notifier_id);
 
   THREAD_CHECKER(thread_checker_);
@@ -129,15 +128,16 @@ class MessageCenterImpl : public MessageCenter,
   base::ObserverList<MessageCenterObserver> observer_list_;
   std::unique_ptr<PopupTimersController> popup_timers_controller_;
   std::unique_ptr<base::OneShotTimer> quiet_mode_timer_;
-  NotifierSettingsProvider* settings_provider_;
+  // Null on !ChromeOS.
+  std::unique_ptr<NotifierSettingsProvider> settings_provider_;
   std::vector<NotificationBlocker*> blockers_;
+  std::unique_ptr<ChangeQueue> notification_change_queue_;
 
   bool locked_ = false;
   bool visible_ = false;
 
-  // Queue for the notifications to delay the addition/updates when the message
-  // center is visible.
-  std::unique_ptr<internal::ChangeQueue> notification_queue_;
+  // modified by ScopedNotificationsIterationLock.
+  bool iterating_ = false;
 
   base::string16 product_os_name_;
 

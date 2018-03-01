@@ -25,7 +25,7 @@ class QuicFramesTest : public QuicTest {};
 
 TEST_F(QuicFramesTest, AckFrameToString) {
   QuicAckFrame frame;
-  frame.largest_observed = 2;
+  frame.largest_observed = 5;
   frame.ack_delay_time = QuicTime::Delta::FromMicroseconds(3);
   frame.packets.Add(4);
   frame.packets.Add(5);
@@ -34,8 +34,23 @@ TEST_F(QuicFramesTest, AckFrameToString) {
   std::ostringstream stream;
   stream << frame;
   EXPECT_EQ(
-      "{ largest_observed: 2, ack_delay_time: 3, "
+      "{ largest_observed: 5, ack_delay_time: 3, "
       "packets: [ 4 5  ], received_packets: [ 6 at 7  ] }\n",
+      stream.str());
+}
+
+TEST_F(QuicFramesTest, BigAckFrameToString) {
+  QuicAckFrame frame;
+  frame.largest_observed = 500;
+  frame.ack_delay_time = QuicTime::Delta::FromMicroseconds(3);
+  frame.packets.AddRange(4, 501);
+  frame.received_packet_times = {
+      {500, QuicTime::Zero() + QuicTime::Delta::FromMicroseconds(7)}};
+  std::ostringstream stream;
+  stream << frame;
+  EXPECT_EQ(
+      "{ largest_observed: 500, ack_delay_time: 3, "
+      "packets: [ 4...500  ], received_packets: [ 500 at 7  ] }\n",
       stream.str());
 }
 

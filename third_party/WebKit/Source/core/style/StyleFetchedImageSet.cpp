@@ -93,8 +93,9 @@ LayoutSize StyleFetchedImageSet::ImageSize(
   // border-image, etc.)
   //
   // https://drafts.csswg.org/css-images-3/#the-image-orientation
-  LayoutSize scaled_image_size =
-      best_fit_image_->ImageSize(kDoNotRespectImageOrientation, multiplier);
+  LayoutSize natural_size(
+      best_fit_image_->IntrinsicSize(kDoNotRespectImageOrientation));
+  LayoutSize scaled_image_size(ApplyZoom(natural_size, multiplier));
   scaled_image_size.Scale(1 / image_scale_factor_);
   return scaled_image_size;
 }
@@ -115,11 +116,12 @@ void StyleFetchedImageSet::RemoveClient(ImageResourceObserver* observer) {
   best_fit_image_->RemoveObserver(observer);
 }
 
-RefPtr<Image> StyleFetchedImageSet::GetImage(
+scoped_refptr<Image> StyleFetchedImageSet::GetImage(
     const ImageResourceObserver&,
     const Document&,
     const ComputedStyle& style,
-    const IntSize& container_size) const {
+    const IntSize& container_size,
+    const LayoutSize* logical_size) const {
   if (!best_fit_image_->GetImage()->IsSVGImage())
     return best_fit_image_->GetImage();
 
@@ -134,7 +136,7 @@ bool StyleFetchedImageSet::KnownToBeOpaque(const Document&,
       Image::kPreCacheMetadata);
 }
 
-DEFINE_TRACE(StyleFetchedImageSet) {
+void StyleFetchedImageSet::Trace(blink::Visitor* visitor) {
   visitor->Trace(best_fit_image_);
   visitor->Trace(image_set_value_);
   StyleImage::Trace(visitor);

@@ -30,7 +30,7 @@
 #include "core/frame/Settings.h"
 #include "core/layout/TextAutosizer.h"
 #include "core/style/ComputedStyle.h"
-#include "platform/FontFamilyNames.h"
+#include "platform/font_family_names.h"
 #include "platform/fonts/FontDescription.h"
 
 namespace blink {
@@ -101,7 +101,6 @@ AtomicString FontBuilder::GenericFontFamilyName(
 
 float FontBuilder::FontSizeForKeyword(unsigned keyword,
                                       bool is_monospace) const {
-  DCHECK(document_);
   return FontSize::FontSizeForKeyword(document_, keyword, is_monospace);
 }
 
@@ -138,7 +137,7 @@ void FontBuilder::SetSizeAdjust(float aspect_value) {
   font_description_.SetSizeAdjust(aspect_value);
 }
 
-void FontBuilder::SetLocale(RefPtr<const LayoutLocale> locale) {
+void FontBuilder::SetLocale(scoped_refptr<const LayoutLocale> locale) {
   Set(PropertySetFlag::kLocale);
 
   font_description_.SetLocale(std::move(locale));
@@ -148,6 +147,12 @@ void FontBuilder::SetVariantCaps(FontDescription::FontVariantCaps caps) {
   Set(PropertySetFlag::kVariantCaps);
 
   font_description_.SetVariantCaps(caps);
+}
+
+void FontBuilder::SetVariantEastAsian(const FontVariantEastAsian east_asian) {
+  Set(PropertySetFlag::kVariantEastAsian);
+
+  font_description_.SetVariantEastAsian(east_asian);
 }
 
 void FontBuilder::SetVariantLigatures(
@@ -181,12 +186,14 @@ void FontBuilder::SetFontSmoothing(FontSmoothingMode foont_smoothing_mode) {
   font_description_.SetFontSmoothing(foont_smoothing_mode);
 }
 
-void FontBuilder::SetFeatureSettings(RefPtr<FontFeatureSettings> settings) {
+void FontBuilder::SetFeatureSettings(
+    scoped_refptr<FontFeatureSettings> settings) {
   Set(PropertySetFlag::kFeatureSettings);
   font_description_.SetFeatureSettings(std::move(settings));
 }
 
-void FontBuilder::SetVariationSettings(RefPtr<FontVariationSettings> settings) {
+void FontBuilder::SetVariationSettings(
+    scoped_refptr<FontVariationSettings> settings) {
   Set(PropertySetFlag::kVariationSettings);
   font_description_.SetVariationSettings(std::move(settings));
 }
@@ -375,6 +382,8 @@ void FontBuilder::UpdateFontDescription(FontDescription& description,
     description.SetStyle(font_description_.Style());
   if (IsSet(PropertySetFlag::kVariantCaps))
     description.SetVariantCaps(font_description_.VariantCaps());
+  if (IsSet(PropertySetFlag::kVariantEastAsian))
+    description.SetVariantEastAsian(font_description_.VariantEastAsian());
   if (IsSet(PropertySetFlag::kVariantLigatures))
     description.SetVariantLigatures(font_description_.GetVariantLigatures());
   if (IsSet(PropertySetFlag::kVariantNumeric))

@@ -33,7 +33,7 @@ class WebServiceWorkerResponsePrivate
 };
 
 WebServiceWorkerResponse::WebServiceWorkerResponse()
-    : private_(AdoptRef(new WebServiceWorkerResponsePrivate)) {}
+    : private_(WTF::AdoptRef(new WebServiceWorkerResponsePrivate)) {}
 
 void WebServiceWorkerResponse::Reset() {
   private_.Reset();
@@ -118,8 +118,8 @@ void WebServiceWorkerResponse::SetBlob(
     mojo::ScopedMessagePipeHandle blob_pipe) {
   private_->blob_data_handle = BlobDataHandle::Create(
       uuid, String(), size,
-      storage::mojom::blink::BlobPtrInfo(
-          std::move(blob_pipe), storage::mojom::blink::Blob::Version_));
+      mojom::blink::BlobPtrInfo(std::move(blob_pipe),
+                                mojom::blink::Blob::Version_));
 }
 
 WebString WebServiceWorkerResponse::BlobUUID() const {
@@ -182,11 +182,11 @@ const HTTPHeaderMap& WebServiceWorkerResponse::Headers() const {
 }
 
 void WebServiceWorkerResponse::SetBlobDataHandle(
-    PassRefPtr<BlobDataHandle> blob_data_handle) {
+    RefPtr<BlobDataHandle> blob_data_handle) {
   private_->blob_data_handle = std::move(blob_data_handle);
 }
 
-PassRefPtr<BlobDataHandle> WebServiceWorkerResponse::GetBlobDataHandle() const {
+RefPtr<BlobDataHandle> WebServiceWorkerResponse::GetBlobDataHandle() const {
   return private_->blob_data_handle;
 }
 

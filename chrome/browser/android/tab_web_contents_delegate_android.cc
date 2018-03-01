@@ -12,6 +12,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/optional.h"
 #include "chrome/browser/android/banners/app_banner_manager_android.h"
+#include "chrome/browser/android/chrome_feature_list.h"
 #include "chrome/browser/android/feature_utilities.h"
 #include "chrome/browser/android/hung_renderer_infobar_delegate.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -24,9 +25,13 @@
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/android/bluetooth_chooser_android.h"
+#include "chrome/browser/ui/android/infobars/framebust_block_infobar.h"
 #include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
+#include "chrome/browser/ui/blocked_content/popup_tracker.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
+#include "chrome/browser/ui/interventions/framebust_block_message_delegate.h"
+#include "chrome/browser/ui/javascript_dialogs/javascript_dialog_tab_helper.h"
 #include "chrome/browser/ui/tab_helpers.h"
 #include "chrome/browser/vr/vr_tab_helper.h"
 #include "chrome/common/chrome_switches.h"
@@ -37,6 +42,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -104,14 +110,6 @@ TabWebContentsDelegateAndroid::TabWebContentsDelegateAndroid(JNIEnv* env,
 
 TabWebContentsDelegateAndroid::~TabWebContentsDelegateAndroid() {
   notification_registrar_.RemoveAll();
-}
-
-void TabWebContentsDelegateAndroid::LoadingStateChanged(
-    WebContents* source, bool to_different_document) {
-  bool has_stopped = source == nullptr || !source->IsLoading();
-  WebContentsDelegateAndroid::LoadingStateChanged(
-      source, to_different_document);
-  LoadProgressChanged(source, has_stopped ? 1 : 0);
 }
 
 void TabWebContentsDelegateAndroid::RunFileChooser(
@@ -266,6 +264,9 @@ TabWebContentsDelegateAndroid::GetJavaScriptDialogManager(
     vr::VrTabHelper::UISuppressed(vr::UiSuppressedElement::kJavascriptDialog);
     return nullptr;
   }
+  if (base::FeatureList::IsEnabled(chrome::android::kTabModalJsDialog)) {
+    return JavaScriptDialogTabHelper::FromWebContents(source);
+  }
   return app_modal::JavaScriptDialogManager::GetInstance();
 }
 
@@ -383,6 +384,11 @@ void TabWebContentsDelegateAndroid::AddNewContents(
   // Can't create a new contents for the current tab - invalid case.
   DCHECK_NE(disposition, WindowOpenDisposition::CURRENT_TAB);
 
+  // At this point the |new_contents| is beyond the popup blocker, but we use
+  // the same logic for determining if the popup tracker needs to be attached.
+  if (source && PopupBlockerTabHelper::ConsiderForPopupBlocking(disposition))
+    PopupTracker::CreateForWebContents(new_contents, source);
+
   TabHelpers::AttachTabHelpers(new_contents);
 
   JNIEnv* env = AttachCurrentThread();
@@ -415,6 +421,14 @@ void TabWebContentsDelegateAndroid::RequestAppBannerFromDevTools(
   manager->RequestAppBanner(web_contents->GetLastCommittedURL(), true);
 }
 
+void TabWebContentsDelegateAndroid::OnDidBlockFramebust(
+    content::WebContents* web_contents,
+    const GURL& url) {
+  FramebustBlockInfoBar::Show(web_contents,
+                              base::MakeUnique<FramebustBlockMessageDelegate>(
+                                  web_contents, url, base::OnceClosure()));
+}
+
 }  // namespace android
 
 void OnRendererUnresponsive(JNIEnv* env,
@@ -430,8 +444,8 @@ void OnRendererUnresponsive(JNIEnv* env,
   InfoBarService* infobar_service =
       InfoBarService::FromWebContents(web_contents);
   DCHECK(!FindHungRendererInfoBar(infobar_service));
-  HungRendererInfoBarDelegate::Create(infobar_service,
-                                      web_contents->GetRenderProcessHost());
+  HungRendererInfoBarDelegate::Create(
+      infobar_service, web_contents->GetMainFrame()->GetProcess());
 }
 
 void OnRendererResponsive(JNIEnv* env,

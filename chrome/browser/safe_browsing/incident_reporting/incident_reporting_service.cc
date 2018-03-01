@@ -37,8 +37,8 @@
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
+#include "components/safe_browsing/db/database_manager.h"
 #include "components/safe_browsing/proto/csd.pb.h"
-#include "components/safe_browsing_db/database_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -46,7 +46,7 @@
 
 namespace safe_browsing {
 
-extern const base::Feature kIncidentReportingEnableUpload {
+const base::Feature kIncidentReportingEnableUpload {
   "IncidentReportingEnableUpload",
 #if defined(GOOGLE_CHROME_BUILD)
       base::FEATURE_ENABLED_BY_DEFAULT

@@ -21,7 +21,6 @@
 #include "chrome/browser/chromeos/policy/device_cloud_policy_store_chromeos.h"
 #include "chrome/browser/chromeos/policy/dm_token_storage.h"
 #include "chrome/browser/chromeos/policy/enrollment_status_chromeos.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/policy/server_backed_state_keys_broker.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/device_oauth2_token_service.h"
@@ -33,6 +32,7 @@
 #include "chromeos/dbus/cryptohome/rpc.pb.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/upstart_client.h"
+#include "components/policy/proto/chrome_device_policy.pb.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/http/http_status_code.h"
@@ -166,8 +166,11 @@ void EnrollmentHandlerChromeOS::HandleAvailableLicensesResult(
     bool success,
     const CloudPolicyClient::LicenseMap& license_map) {
   if (!success) {
-    ReportResult(
-        EnrollmentStatus::ForStatus(EnrollmentStatus::LICENSE_REQUEST_FAILED));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&EnrollmentHandlerChromeOS::ReportResult,
+            weak_ptr_factory_.GetWeakPtr(),
+            EnrollmentStatus::ForStatus(
+                EnrollmentStatus::LICENSE_REQUEST_FAILED)));
     return;
   }
   if (available_licenses_callback_)
@@ -474,20 +477,18 @@ void EnrollmentHandlerChromeOS::SetFirmwareManagementParametersData() {
 
   install_attributes_->SetBlockDevmodeInTpm(
       GetBlockdevmodeFromPolicy(policy_.get()),
-      base::Bind(
+      base::BindOnce(
           &EnrollmentHandlerChromeOS::OnFirmwareManagementParametersDataSet,
           weak_ptr_factory_.GetWeakPtr()));
 }
 
 void EnrollmentHandlerChromeOS::OnFirmwareManagementParametersDataSet(
-    chromeos::DBusMethodCallStatus call_status,
-    bool result,
-    const cryptohome::BaseReply& reply) {
+    base::Optional<cryptohome::BaseReply> reply) {
   DCHECK_EQ(STEP_SET_FWMP_DATA, enrollment_step_);
-  if (!result) {
+  if (!reply.has_value()) {
     LOG(ERROR)
         << "Failed to update firmware management parameters in TPM, error: "
-        << reply.error();
+        << reply->error();
   }
 
   SetStep(STEP_LOCK_DEVICE);

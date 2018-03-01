@@ -4,28 +4,16 @@
 
 module viz.mojom;
 
-import "cc/ipc/local_surface_id.mojom";
 import "gpu/ipc/common/surface_handle.mojom";
 import "mojo/common/time.mojom";
+import "services/viz/privileged/interfaces/compositing/display_private.mojom";
+import "services/viz/privileged/interfaces/compositing/renderer_settings.mojom";
 import "services/viz/public/interfaces/compositing/compositor_frame_sink.mojom";
 import "services/viz/public/interfaces/compositing/frame_sink_id.mojom";
+import "services/viz/public/interfaces/compositing/local_surface_id.mojom";
 import "services/viz/public/interfaces/compositing/surface_id.mojom";
 import "services/viz/public/interfaces/compositing/surface_info.mojom";
 import "ui/gfx/geometry/mojo/geometry.mojom";
-import "ui/gfx/mojo/color_space.mojom";
-import "services/viz/privileged/interfaces/compositing/renderer_settings.mojom";
-
-// See ui/compositor/compositor.h: ContextFactoryPrivate.
-// The DisplayPrivate is used by privileged clients to talk to Display.
-// DisplayPrivate would eventually replace or be used by ContextFactoryPrivate.
-interface DisplayPrivate {
-  SetDisplayVisible(bool visible);
-  ResizeDisplay(gfx.mojom.Size size_in_pixel);
-  SetDisplayColorSpace(gfx.mojom.ColorSpace color_space);
-  SetOutputIsSecure(bool secure);
-  SetLocalSurfaceId(cc.mojom.LocalSurfaceId local_surface_id,
-                    float scale_factor);
-};
 
 // The FrameSinkManager interface is a privileged interface that allows the
 // frame sink manager host (browser or window server) to create
@@ -40,8 +28,10 @@ interface DisplayPrivate {
 // frame sink manager host which will forward the request to the frame sink
 // manager.
 interface FrameSinkManager {
-  // Registers |frame_sink_id| will be used. This must be called before
-  // Create(Root)CompositorFrameSink() is called.
+  // Starts the scope of temporary references tied to this |frame_sink_id|.
+  // Temporary references tied to this |frame_sink_id| will be dropped on
+  // InvalidateFrameSinkId.This must be called before Create(Root)
+  // CompositorFrameSink() is called.
   RegisterFrameSinkId(FrameSinkId frame_sink_id);
 
   // Invalidates |frame_sink_id| which cleans up any unsatisified surface
@@ -49,6 +39,10 @@ interface FrameSinkManager {
   // CompositorFrameSink for |frame_sink_id| then it will be destroyed and the
   // message pipe to the client will be closed.
   InvalidateFrameSinkId(FrameSinkId frame_sink_id);
+
+  // |debug_label| is used when printing out the surface hierarchy so we know
+  // which clients are contributing which surfaces.
+  SetFrameSinkDebugLabel(FrameSinkId frame_sink_id, string debug_label);
 
   // Create a CompositorFrameSink for a privileged client (e.g. WindowServer).
   // This is only used by privileged clients. The client can call methods that

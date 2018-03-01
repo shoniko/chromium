@@ -30,7 +30,6 @@
 #include "core/loader/resource/ImageResourceContent.h"
 #include "core/loader/resource/ImageResourceInfo.h"
 #include "platform/Histogram.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/SharedBuffer.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
 #include "platform/loader/fetch/MemoryCache.h"
@@ -40,6 +39,7 @@
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
 #include "platform/loader/fetch/ResourceLoadingLog.h"
 #include "platform/network/HTTPParsers.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityViolationReportingPolicy.h"
 #include "platform/wtf/CurrentTime.h"
@@ -75,7 +75,7 @@ class ImageResource::ImageResourceInfoImpl final
   ImageResourceInfoImpl(ImageResource* resource) : resource_(resource) {
     DCHECK(resource_);
   }
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(resource_);
     ImageResourceInfo::Trace(visitor);
   }
@@ -240,7 +240,7 @@ ImageResource::~ImageResource() {
   RESOURCE_LOADING_DVLOG(1) << "~ImageResource " << this;
 }
 
-DEFINE_TRACE(ImageResource) {
+void ImageResource::Trace(blink::Visitor* visitor) {
   visitor->Trace(multipart_parser_);
   visitor->Trace(content_);
   Resource::Trace(visitor);
@@ -312,7 +312,7 @@ void ImageResource::AllClientsAndObserversRemoved() {
   Resource::AllClientsAndObserversRemoved();
 }
 
-RefPtr<const SharedBuffer> ImageResource::ResourceBuffer() const {
+scoped_refptr<const SharedBuffer> ImageResource::ResourceBuffer() const {
   if (Data())
     return Data();
   return GetContent()->ResourceBuffer();
@@ -394,7 +394,8 @@ void ImageResource::NotifyStartLoad() {
   GetContent()->NotifyStartLoad();
 }
 
-void ImageResource::Finish(double load_finish_time) {
+void ImageResource::Finish(double load_finish_time,
+                           WebTaskRunner* task_runner) {
   if (multipart_parser_) {
     multipart_parser_->Finish();
     if (Data())
@@ -408,17 +409,18 @@ void ImageResource::Finish(double load_finish_time) {
     // https://docs.google.com/document/d/1v0yTAZ6wkqX2U_M6BNIGUJpM1s0TIw1VsqpxoL7aciY/edit?usp=sharing
     ClearData();
   }
-  Resource::Finish(load_finish_time);
+  Resource::Finish(load_finish_time, task_runner);
 }
 
-void ImageResource::FinishAsError(const ResourceError& error) {
+void ImageResource::FinishAsError(const ResourceError& error,
+                                  WebTaskRunner* task_runner) {
   if (multipart_parser_)
     multipart_parser_->Cancel();
   // TODO(hiroshige): Move setEncodedSize() call to Resource::error() if it
   // is really needed, or remove it otherwise.
   SetEncodedSize(0);
   is_during_finish_as_error_ = true;
-  Resource::FinishAsError(error);
+  Resource::FinishAsError(error, task_runner);
   is_during_finish_as_error_ = false;
   UpdateImage(nullptr, ImageResourceContent::kClearImageAndNotifyObservers,
               true);
@@ -458,16 +460,14 @@ void ImageResource::ResponseReceived(
   // the cached response.
   Resource::ResponseReceived(response, std::move(handle));
 
-  if (RuntimeEnabledFeatures::ClientHintsEnabled()) {
-    device_pixel_ratio_header_value_ =
-        GetResponse()
-            .HttpHeaderField(HTTPNames::Content_DPR)
-            .ToFloat(&has_device_pixel_ratio_header_value_);
-    if (!has_device_pixel_ratio_header_value_ ||
-        device_pixel_ratio_header_value_ <= 0.0) {
-      device_pixel_ratio_header_value_ = 1.0;
-      has_device_pixel_ratio_header_value_ = false;
-    }
+  device_pixel_ratio_header_value_ =
+      GetResponse()
+          .HttpHeaderField(HTTPNames::Content_DPR)
+          .ToFloat(&has_device_pixel_ratio_header_value_);
+  if (!has_device_pixel_ratio_header_value_ ||
+      device_pixel_ratio_header_value_ <= 0.0) {
+    device_pixel_ratio_header_value_ = 1.0;
+    has_device_pixel_ratio_header_value_ = false;
   }
 
   if (placeholder_option_ ==
@@ -683,7 +683,7 @@ ResourcePriority ImageResource::PriorityFromObservers() {
 }
 
 void ImageResource::UpdateImage(
-    RefPtr<SharedBuffer> shared_buffer,
+    scoped_refptr<SharedBuffer> shared_buffer,
     ImageResourceContent::UpdateImageOption update_image_option,
     bool all_data_received) {
   bool is_multipart = !!multipart_parser_;

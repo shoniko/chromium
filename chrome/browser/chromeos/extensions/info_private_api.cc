@@ -266,8 +266,15 @@ std::unique_ptr<base::Value> ChromeosInfoPrivateGetFunction::GetValue(
         NetworkHandler::Get()->network_state_handler()->GetDeviceStateByType(
             chromeos::NetworkTypePattern::Cellular());
     std::string home_provider_id;
-    if (cellular_device)
-      home_provider_id = cellular_device->home_provider_id();
+    if (cellular_device) {
+      if (!cellular_device->country_code().empty()) {
+        home_provider_id = base::StringPrintf(
+            "%s (%s)", cellular_device->operator_name().c_str(),
+            cellular_device->country_code().c_str());
+      } else {
+        home_provider_id = cellular_device->operator_name();
+      }
+    }
     return base::MakeUnique<base::Value>(home_provider_id);
   }
 
@@ -331,11 +338,10 @@ std::unique_ptr<base::Value> ChromeosInfoPrivateGetFunction::GetValue(
 
   if (property_name == kPropertyTimezone) {
     if (chromeos::system::PerUserTimezoneEnabled()) {
-      return base::WrapUnique<base::Value>(
-          Profile::FromBrowserContext(context_)
-              ->GetPrefs()
-              ->GetUserPrefValue(prefs::kUserTimezone)
-              ->DeepCopy());
+      const PrefService::Preference* timezone =
+          Profile::FromBrowserContext(context_)->GetPrefs()->FindPreference(
+              prefs::kUserTimezone);
+      return base::MakeUnique<base::Value>(timezone->GetValue()->Clone());
     }
     // TODO(crbug.com/697817): Convert CrosSettings::Get to take a unique_ptr.
     return base::WrapUnique<base::Value>(

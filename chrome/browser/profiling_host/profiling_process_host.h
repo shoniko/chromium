@@ -12,9 +12,9 @@
 #include "build/build_config.h"
 #include "chrome/browser/profiling_host/background_profiling_triggers.h"
 #include "chrome/common/chrome_features.h"
-#include "chrome/common/profiling/memlog.mojom.h"
-#include "chrome/common/profiling/memlog_client.h"
-#include "chrome/common/profiling/memlog_client.mojom.h"
+#include "chrome/common/profiling/profiling_client.h"
+#include "chrome/common/profiling/profiling_client.mojom.h"
+#include "chrome/common/profiling/profiling_service.mojom.h"
 #include "content/public/browser/browser_child_process_observer.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/notification_observer.h"
@@ -48,15 +48,18 @@ class ProfilingProcessHost : public content::BrowserChildProcessObserver,
                              content::NotificationObserver,
                              base::trace_event::MemoryDumpProvider {
  public:
+  // These values are persisted to logs. Entries should not be renumbered and
+  // numeric values should never be reused.
   enum class Mode {
     // No profiling enabled.
-    kNone,
+    kNone = 0,
 
-    // Only profile the browser process.
-    kBrowser,
+    // Only profile the browser and GPU processes.
+    kMinimal = 1,
 
     // Profile all processes.
-    kAll,
+    kAll = 2,
+    kCount
   };
 
   // Returns the mode.
@@ -80,11 +83,18 @@ class ProfilingProcessHost : public content::BrowserChildProcessObserver,
 
   // Sends a message to the profiling process that it dump the given process'
   // memory data to the given file.
-  void RequestProcessDump(base::ProcessId pid, const base::FilePath& dest);
+  void RequestProcessDump(base::ProcessId pid,
+                          base::FilePath dest,
+                          base::OnceClosure done);
 
   // Sends a message to the profiling process that it report the given process'
   // memory data to the crash server (slow-report).
-  void RequestProcessReport(base::ProcessId pid);
+  void RequestProcessReport(base::ProcessId pid, std::string trigger_name);
+
+  // For testing. Only one can be set at a time. Will be called after the
+  // profiling proecss dumps heaps into the trace log. No guarantees are made
+  // about the task queue on which the callback will be Run.
+  void SetDumpProcessForTracingCallback(base::OnceClosure callback);
 
  protected:
   friend struct base::DefaultSingletonTraits<ProfilingProcessHost>;
@@ -117,38 +127,45 @@ class ProfilingProcessHost : public content::BrowserChildProcessObserver,
   bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
                     base::trace_event::ProcessMemoryDump* pmd) override;
 
-  void OnDumpProcessForTracingCallback(mojo::ScopedSharedBufferHandle buffer,
-                                       uint32_t size);
+  void OnDumpProcessesForTracingCallback(
+      uint64_t guid,
+      std::vector<profiling::mojom::SharedBufferWithSizePtr> buffers);
 
   // Starts the profiling process.
   void LaunchAsService();
 
-  // Sends the receiving end of the data pipe to the profiling service.
-  void SendPipeToProfilingService(
-      profiling::mojom::MemlogClientPtr memlog_client,
-      base::ProcessId pid);
-  // Sends the sending end of the data pipe to the client process.
-  void SendPipeToClientProcess(profiling::mojom::MemlogClientPtr memlog_client,
-                               mojo::ScopedHandle handle);
+  // Sends the end of the data pipe to the profiling service.
+  void AddClientToProfilingService(profiling::mojom::ProfilingClientPtr client,
+                                   base::ProcessId pid,
+                                   profiling::mojom::ProcessType process_type);
 
   void GetOutputFileOnBlockingThread(base::ProcessId pid,
-                                     const base::FilePath& dest,
-                                     bool upload);
+                                     base::FilePath dest,
+                                     std::string trigger_name,
+                                     bool upload,
+                                     base::OnceClosure done);
   void HandleDumpProcessOnIOThread(base::ProcessId pid,
                                    base::FilePath file_path,
                                    base::File file,
-                                   bool upload);
+                                   std::string trigger_name,
+                                   bool upload,
+                                   base::OnceClosure done);
   void OnProcessDumpComplete(base::FilePath file_path,
+                             std::string trigger_name,
                              bool upload,
+                             base::OnceClosure done,
                              bool success);
 
   // Returns the metadata for the trace. This is the minimum amount of metadata
   // needed to symbolize the trace.
   std::unique_ptr<base::DictionaryValue> GetMetadataJSONForTrace();
 
+  // Reports the profiling mode.
+  void ReportMetrics();
+
   content::NotificationRegistrar registrar_;
   std::unique_ptr<service_manager::Connector> connector_;
-  mojom::MemlogPtr memlog_;
+  mojom::ProfilingServicePtr profiling_service_;
 
   // Whether or not the host is registered to the |registrar_|.
   bool is_registered_;
@@ -157,11 +174,17 @@ class ProfilingProcessHost : public content::BrowserChildProcessObserver,
   // |RequestProcessReport| on this instance.
   BackgroundProfilingTriggers background_triggers_;
 
+  // Every 24-hours, reports the profiling mode.
+  base::RepeatingTimer metrics_timer_;
+
   // The mode determines which processes should be profiled.
   Mode mode_;
 
   // Whether or not the profiling host is started.
   static bool has_started_;
+
+  // For tests.
+  base::OnceClosure dump_process_for_tracing_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfilingProcessHost);
 };

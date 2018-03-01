@@ -52,11 +52,11 @@ struct SchedulingParams {
 
   enum class Priority {
     // The lowest priority.  Requires that the device is idle or Chrome is
-    // running.
+    // running. Gets paused or postponed during on-going navigation.
     LOW = 0,
 
     // The normal priority.  Requires that the device is idle or Chrome is
-    // running.
+    // running. Gets paused or postponed during on-going navigation.
     NORMAL = 1,
 
     // The highest background priority.  Does not require the device to be idle.
@@ -94,7 +94,7 @@ struct SchedulingParams {
 struct RequestParams {
  public:
   RequestParams();
-  RequestParams(const RequestParams& other) = default;
+  RequestParams(const RequestParams& other);
   ~RequestParams() = default;
 
   GURL url;
@@ -102,6 +102,10 @@ struct RequestParams {
   // The request method ("GET" is the default value).
   std::string method;
   net::HttpRequestHeaders request_headers;
+
+  // If the request will fetch HTTP error response body and treat them as
+  // a successful download.
+  bool fetch_error_body;
 };
 
 // The parameters that describe a download request made to the DownloadService.

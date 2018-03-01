@@ -9,6 +9,11 @@ namespace features {
 
 // All features in alphabetical order.
 
+// Enables the allowActivationDelegation attribute on iframes.
+// https://www.chromestatus.com/features/6025124331388928
+const base::Feature kAllowActivationDelegationAttr{
+    "AllowActivationDelegationAttr", base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Enables content-initiated, main frame navigations to data URLs.
 // TODO(meacer): Remove when the deprecation is complete.
 //               https://www.chromestatus.com/feature/5669602927312896
@@ -30,6 +35,11 @@ const base::Feature kAsyncWheelEvents{"AsyncWheelEvents",
 const base::Feature kBlockCredentialedSubresources{
     "BlockCredentialedSubresources", base::FEATURE_ENABLED_BY_DEFAULT};
 
+// Puts save-data header in the holdback mode. This disables sending of
+// save-data header to origins, and to the renderer processes within Chrome.
+const base::Feature kDataSaverHoldback{"DataSaverHoldback",
+                                       base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Enables brotli "Accept-Encoding" advertising and "Content-Encoding" support.
 // Brotli format specification: http://www.ietf.org/id/draft-alakuijala-brotli
 const base::Feature kBrotliEncoding{"brotli-encoding",
@@ -37,7 +47,7 @@ const base::Feature kBrotliEncoding{"brotli-encoding",
 
 // Enables browser side navigation (aka PlzNavigate). http://crbug.com/368813
 const base::Feature kBrowserSideNavigation{"browser-side-navigation",
-                                           base::FEATURE_DISABLED_BY_DEFAULT};
+                                           base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Toggles whether the buggy RSA parser is used.
 //
@@ -71,6 +81,9 @@ const base::Feature kCompositeOpaqueFixedPosition{
 // background with the foreground, such that LCD text will still be enabled.
 const base::Feature kCompositeOpaqueScrollers{"CompositeOpaqueScrollers",
                                               base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kCompositorImageAnimation{
+    "CompositorImageAnimation", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Enables handling touch events in compositor using impl side touch action
 // knowledge.
@@ -110,7 +123,7 @@ const base::Feature kGamepadExtensions{"GamepadExtensions",
 // Causes the implementations of guests (inner WebContents) to use
 // out-of-process iframes.
 const base::Feature kGuestViewCrossProcessFrames{
-    "GuestViewCrossProcessFrames", base::FEATURE_DISABLED_BY_DEFAULT};
+    "GuestViewCrossProcessFrames", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Enables BlinkGC heap compaction.
 const base::Feature kHeapCompaction{"HeapCompaction",
@@ -125,12 +138,14 @@ const base::Feature kLazyParseCSS{"LazyParseCSS",
                                   base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Use Mojo IPC for resource loading.
-const base::Feature kLoadingWithMojo{"LoadingWithMojo",
-                                     base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Enables the old algorithm for processing audio constraints in getUserMedia().
-const base::Feature kMediaStreamOldAudioConstraints{
-    "MediaStreamOldAudioConstraints", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kLoadingWithMojo {
+  "LoadingWithMojo",
+#if defined(OS_ANDROID)
+      base::FEATURE_DISABLED_BY_DEFAULT
+#else
+      base::FEATURE_ENABLED_BY_DEFAULT
+#endif
+};
 
 // Enables the memory coordinator.
 // WARNING:
@@ -160,15 +175,8 @@ const base::Feature kMojoInputMessages{"MojoInputMessages",
                                        base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Enables/disables hardware video encode acceleration using Mojo (falls back).
-// TODO(mcasas): remove after https://crbug.com/736517 is closed.
-const base::Feature kMojoVideoEncodeAccelerator {
-  "MojoVideoEncodeAccelerator",
-#if defined(OS_MACOSX)
-      base::FEATURE_ENABLED_BY_DEFAULT
-#else
-      base::FEATURE_DISABLED_BY_DEFAULT
-#endif
-};
+const base::Feature kMojoVideoEncodeAccelerator{
+    "MojoVideoEncodeAccelerator", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // ES6 Modules.
 const base::Feature kModuleScripts{"ModuleScripts",
@@ -176,11 +184,19 @@ const base::Feature kModuleScripts{"ModuleScripts",
 
 // ES6 Modules dynamic imports.
 const base::Feature kModuleScriptsDynamicImport{
-    "ModuleScriptsDynamicImport", base::FEATURE_DISABLED_BY_DEFAULT};
+    "ModuleScriptsDynamicImport", base::FEATURE_ENABLED_BY_DEFAULT};
+
+// ES6 Modules import.meta.url.
+const base::Feature kModuleScriptsImportMetaUrl{
+    "ModuleScriptsImportMetaUrl", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Resource fetch optimizations for workers. See crbug.com/443374
 const base::Feature kOffMainThreadFetch{"OffMainThreadFetch",
                                         base::FEATURE_ENABLED_BY_DEFAULT};
+
+// Origin Manifest. See crbug.com/751996
+const base::Feature kOriginManifest{"OriginManifest",
+                                    base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Origin Trials for controlling access to feature/API experiments.
 const base::Feature kOriginTrials{"OriginTrials",
@@ -221,10 +237,6 @@ const base::Feature kPurgeAndSuspend {
 const base::Feature kRafAlignedMouseInputEvents{
     "RafAlignedMouseInput", base::FEATURE_ENABLED_BY_DEFAULT};
 
-// RAF aligned touch input events support.
-const base::Feature kRafAlignedTouchInputEvents{
-    "RafAlignedTouchInput", base::FEATURE_ENABLED_BY_DEFAULT};
-
 // If Pepper 3D Image Chromium is allowed, this feature controls whether it is
 // enabled.
 const base::Feature kPepper3DImageChromium {
@@ -257,13 +269,14 @@ const base::Feature kSendBeaconThrowForBlobWithNonSimpleType{
     "SendBeaconThrowForBlobWithNonSimpleType",
     base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Service worker based payment apps as defined by w3c here:
+// https://w3c.github.io/webpayments-payment-apps-api/
+const base::Feature kServiceWorkerPaymentApps{
+    "ServiceWorkerPaymentApps", base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Streaming installed scripts on starting service workers.
 const base::Feature kServiceWorkerScriptStreaming{
-    "ServiceWorkerScriptStreaming", base::FEATURE_DISABLED_BY_DEFAULT};
-
-// http://tc39.github.io/ecmascript_sharedmem/shmem.html
-const base::Feature kSharedArrayBuffer{"SharedArrayBuffer",
-                                       base::FEATURE_ENABLED_BY_DEFAULT};
+    "ServiceWorkerScriptStreaming", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // An experiment to require process isolation for the sign-in origin,
 // https://accounts.google.com.  Launch bug: https://crbug.com/739418.
@@ -275,10 +288,6 @@ const base::Feature kSignInProcessIsolation{"sign-in-process-isolation",
 const base::Feature kSitePerProcess{"site-per-process",
                                     base::FEATURE_DISABLED_BY_DEFAULT};
 
-// An experiment for skipping compositing small scrollers.
-const base::Feature kSkipCompositingSmallScrollers{
-    "SkipCompositingSmallScrollers", base::FEATURE_DISABLED_BY_DEFAULT};
-
 // Paint invalidation based on slimming paint. See https://goo.gl/eQczQW
 const base::Feature kSlimmingPaintInvalidation{
     "SlimmingPaintInvalidation", base::FEATURE_ENABLED_BY_DEFAULT};
@@ -286,6 +295,12 @@ const base::Feature kSlimmingPaintInvalidation{
 // Throttle Blink timers in out-of-view cross origin frames.
 const base::Feature kTimerThrottlingForHiddenFrames{
     "TimerThrottlingForHiddenFrames", base::FEATURE_ENABLED_BY_DEFAULT};
+
+// An experimental simple user-activation model where the user gesture state is
+// tracked through a frame-based state instead of the gesture tokens we use
+// today.
+const base::Feature kUserActivationV2{"UserActivationV2",
+                                      base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Groups all out-of-process iframes to a different process from the process of
 // the top document. This is a performance isolation mode.  Launch bug:
@@ -305,7 +320,7 @@ const base::Feature kTurnOff2DAndOpacityCompositorAnimations{
 // Use Feature Policy to gate the use of permission features like midi,
 // geolocation, camera, microphone, etc.
 const base::Feature kUseFeaturePolicyForPermissions{
-    "UseFeaturePolicyForPermissions", base::FEATURE_DISABLED_BY_DEFAULT};
+    "UseFeaturePolicyForPermissions", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Use MojoAudioOutputIPC and RenderFrameAudioOutputStreamFactory rather than
 // AudioMessageFilter and AudioRendererHost.
@@ -397,11 +412,15 @@ const base::Feature kImageCaptureAPI{"ImageCaptureAPI",
                                      base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kKeepAliveRendererForKeepaliveRequests{
-    "KeepAliveRendererForKeepaliveRequests", base::FEATURE_DISABLED_BY_DEFAULT};
+    "KeepAliveRendererForKeepaliveRequests", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Enables WebVR experimental rendering optimizations.
 const base::Feature kWebVRExperimentalRendering{
     "WebVRExperimentalRendering", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Enabled "work stealing" in the script runner.
+const base::Feature kWorkStealingInScriptRunner{
+    "WorkStealingInScriptRunner", base::FEATURE_DISABLED_BY_DEFAULT};
 
 #if defined(OS_ANDROID)
 // Autofill Accessibility in Android.
@@ -413,12 +432,6 @@ const base::Feature kAndroidAutofillAccessibility{
 const base::Feature kHideIncorrectlySizedFullscreenFrames{
     "HideIncorrectlySizedFullscreenFrames", base::FEATURE_ENABLED_BY_DEFAULT};
 
-// Service worker based payment apps as defined by w3c here:
-// https://w3c.github.io/webpayments-payment-apps-api/
-const base::Feature kServiceWorkerPaymentApps{
-    "ServiceWorkerPaymentApps",
-    base::FEATURE_DISABLED_BY_DEFAULT};
-
 // Controls whether the WebNFC API is enabled:
 // https://w3c.github.io/web-nfc/
 const base::Feature kWebNfc{"WebNFC", base::FEATURE_DISABLED_BY_DEFAULT};
@@ -427,18 +440,6 @@ const base::Feature kWebNfc{"WebNFC", base::FEATURE_DISABLED_BY_DEFAULT};
 const base::Feature kWebVrVsyncAlign{"WebVrVsyncAlign",
                                      base::FEATURE_ENABLED_BY_DEFAULT};
 #endif  // defined(OS_ANDROID)
-
-#if defined(OS_WIN)
-// Emergency "off switch" for new Windows sandbox security mitigation,
-// sandbox::MITIGATION_EXTENSION_POINT_DISABLE.
-const base::Feature kWinSboxDisableExtensionPoints{
-    "WinSboxDisableExtensionPoint", base::FEATURE_ENABLED_BY_DEFAULT};
-
-// Emergency "off switch" for new Windows sandbox security mitigation,
-// sandbox::MITIGATION_FORCE_MS_SIGNED_BINS.
-const base::Feature kWinSboxForceMsSigned{"WinSboxForceMsSigned",
-                                          base::FEATURE_ENABLED_BY_DEFAULT};
-#endif  // defined(OS_WIN)
 
 #if defined(OS_MACOSX)
 // Enables caching of media devices for the purpose of enumerating them.
@@ -450,6 +451,14 @@ const base::Feature kDeviceMonitorMac{"DeviceMonitorMac",
 const base::Feature kMacV2Sandbox{"MacV2Sandbox",
                                   base::FEATURE_DISABLED_BY_DEFAULT};
 #endif  // defined(OS_MACOSX)
+
+// Enables to use a snapshot file in creating V8 contexts.
+const base::Feature kV8ContextSnapshot{"V8ContextSnapshot",
+                                       base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Enables future V8 VM features
+const base::Feature kV8VmFuture{"V8VmFuture",
+                                base::FEATURE_DISABLED_BY_DEFAULT};
 
 bool IsMojoBlobsEnabled() {
   return base::FeatureList::IsEnabled(features::kMojoBlobs) ||

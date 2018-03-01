@@ -22,8 +22,6 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "cc/trees/layer_tree_host.h"
-#include "content/child/request_extra_data.h"
-#include "content/child/service_worker/service_worker_network_provider.h"
 #include "content/common/content_switches_internal.h"
 #include "content/common/frame_messages.h"
 #include "content/common/frame_owner_properties.h"
@@ -53,10 +51,12 @@
 #include "content/renderer/gpu/render_widget_compositor.h"
 #include "content/renderer/history_entry.h"
 #include "content/renderer/history_serialization.h"
+#include "content/renderer/loader/request_extra_data.h"
 #include "content/renderer/navigation_state_impl.h"
 #include "content/renderer/render_frame_proxy.h"
 #include "content/renderer/render_process.h"
 #include "content/renderer/render_view_impl.h"
+#include "content/renderer/service_worker/service_worker_network_provider.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/test/mock_keyboard.h"
@@ -194,7 +194,7 @@ FrameReplicationState ReconstructReplicationStateForTesting(
   // blink API...
   result.name = frame->AssignedName().Utf8();
   result.unique_name = test_render_frame->unique_name();
-  result.sandbox_flags = frame->EffectiveSandboxFlags();
+  result.frame_policy.sandbox_flags = frame->EffectiveSandboxFlags();
   // result.should_enforce_strict_mixed_content_checking is calculated in the
   // browser...
   result.origin = frame->GetSecurityOrigin();
@@ -419,8 +419,7 @@ class DevToolsAgentTest : public RenderViewImplTest {
   void Attach() {
     notifications_ = std::vector<std::string>();
     expecting_pause_ = false;
-    std::string host_id = "host_id";
-    agent()->OnAttach(host_id, 17);
+    agent()->OnAttach(17);
     agent()->send_protocol_message_callback_for_test_ = base::Bind(
        &DevToolsAgentTest::OnDevToolsMessage, base::Unretained(this));
   }
@@ -464,10 +463,9 @@ class DevToolsAgentTest : public RenderViewImplTest {
         expecting_pause_ = false;
         base::ThreadTaskRunnerHandle::Get()->PostTask(
             FROM_HERE,
-            base::Bind(&DevToolsAgentTest::DispatchDevToolsMessage,
-                       base::Unretained(this),
-                       "Debugger.resume",
-                       "{\"id\":100,\"method\":\"Debugger.resume\"}"));
+            base::BindOnce(&DevToolsAgentTest::DispatchDevToolsMessage,
+                           base::Unretained(this), "Debugger.resume",
+                           "{\"id\":100,\"method\":\"Debugger.resume\"}"));
       }
     }
   }
@@ -618,20 +616,14 @@ TEST_F(RenderViewImplTest, OnNavigationHttpPost) {
   frame()->Navigate(common_params, start_params, request_params);
   base::RunLoop().RunUntilIdle();
 
-  const IPC::Message* frame_navigate_msg =
-      render_thread_->sink().GetUniqueMessageMatching(
-          FrameHostMsg_DidCommitProvisionalLoad::ID);
-  EXPECT_TRUE(frame_navigate_msg);
-
-  FrameHostMsg_DidCommitProvisionalLoad::Param host_nav_params;
-  FrameHostMsg_DidCommitProvisionalLoad::Read(frame_navigate_msg,
-                                              &host_nav_params);
-  EXPECT_EQ("POST", std::get<0>(host_nav_params).method);
+  auto last_commit_params = frame()->TakeLastCommitParams();
+  ASSERT_TRUE(last_commit_params);
+  EXPECT_EQ("POST", last_commit_params->method);
 
   // Check post data sent to browser matches
-  EXPECT_TRUE(std::get<0>(host_nav_params).page_state.IsValid());
+  EXPECT_TRUE(last_commit_params->page_state.IsValid());
   std::unique_ptr<HistoryEntry> entry =
-      PageStateToHistoryEntry(std::get<0>(host_nav_params).page_state);
+      PageStateToHistoryEntry(last_commit_params->page_state);
   blink::WebHTTPBody body = entry->root().HttpBody();
   blink::WebHTTPBody::Element element;
   bool successful = body.ElementAt(0, element);
@@ -834,7 +826,7 @@ TEST_F(RenderViewImplTest, OriginReplicationForSwapOut) {
   // WebRemoteFrame.
   content::FrameReplicationState replication_state =
       ReconstructReplicationStateForTesting(child_frame);
-  replication_state.origin = url::Origin(GURL("http://foo.com"));
+  replication_state.origin = url::Origin::Create(GURL("http://foo.com"));
   child_frame->SwapOut(kProxyRoutingId, true, replication_state);
 
   // The child frame should now be a WebRemoteFrame.
@@ -856,6 +848,56 @@ TEST_F(RenderViewImplTest, OriginReplicationForSwapOut) {
   EXPECT_TRUE(web_frame->FirstChild()->NextSibling()->IsWebRemoteFrame());
   EXPECT_TRUE(
       web_frame->FirstChild()->NextSibling()->GetSecurityOrigin().IsUnique());
+}
+
+// When we enable --use-zoom-for-dsf, visiting the first web page after opening
+// a new tab looks fine, but visiting the second web page renders smaller DOM
+// elements. We can solve this by updating DSF after swapping in the main frame.
+// See crbug.com/737777#c37.
+TEST_F(RenderViewImplScaleFactorTest, UpdateDSFAfterSwapIn) {
+  DoSetUp();
+  // The bug reproduces if zoom is used for devices scale factor.
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kEnableUseZoomForDSF);
+  const float device_scale = 3.0f;
+  SetDeviceScaleFactor(device_scale);
+  EXPECT_EQ(device_scale, view()->GetDeviceScaleFactor());
+
+  LoadHTML("Hello world!");
+
+  // Swap the main frame out after which it should become a WebRemoteFrame.
+  content::FrameReplicationState replication_state =
+      ReconstructReplicationStateForTesting(frame());
+  // replication_state.origin = url::Origin(GURL("http://foo.com"));
+  frame()->SwapOut(kProxyRoutingId, true, replication_state);
+  EXPECT_TRUE(view()->webview()->MainFrame()->IsWebRemoteFrame());
+
+  // Do the remote-to-local transition for the proxy, which is to create a
+  // provisional local frame.
+  int routing_id = kProxyRoutingId + 1;
+  mojom::CreateFrameWidgetParams widget_params;
+  widget_params.routing_id = view()->GetRoutingID();
+  widget_params.hidden = false;
+  RenderFrameImpl::CreateFrame(
+      routing_id, kProxyRoutingId, MSG_ROUTING_NONE, MSG_ROUTING_NONE,
+      MSG_ROUTING_NONE, base::UnguessableToken::Create(), replication_state,
+      nullptr, widget_params, FrameOwnerProperties());
+  TestRenderFrame* provisional_frame =
+      static_cast<TestRenderFrame*>(RenderFrameImpl::FromRoutingID(routing_id));
+  EXPECT_TRUE(provisional_frame);
+
+  // Navigate to other page, which triggers the swap in.
+  CommonNavigationParams common_params;
+  StartNavigationParams start_params;
+  RequestNavigationParams request_params;
+  common_params.url = GURL("data:text/html,<div>Page</div>");
+  common_params.navigation_type = FrameMsg_Navigate_Type::DIFFERENT_DOCUMENT;
+  common_params.transition = ui::PAGE_TRANSITION_TYPED;
+
+  provisional_frame->Navigate(common_params, start_params, request_params);
+
+  EXPECT_EQ(device_scale, view()->GetDeviceScaleFactor());
+  EXPECT_EQ(device_scale, view()->webview()->ZoomFactorForDeviceScaleFactor());
 }
 
 // Test that when a parent detaches a remote child after the provisional
@@ -884,10 +926,10 @@ TEST_F(RenderViewImplTest, DetachingProxyAlsoDestroysProvisionalFrame) {
   mojom::CreateFrameWidgetParams widget_params;
   widget_params.routing_id = MSG_ROUTING_NONE;
   widget_params.hidden = false;
-  RenderFrameImpl::CreateFrame(routing_id, kProxyRoutingId, MSG_ROUTING_NONE,
-                               frame()->GetRoutingID(), MSG_ROUTING_NONE,
-                               replication_state, nullptr, widget_params,
-                               FrameOwnerProperties());
+  RenderFrameImpl::CreateFrame(
+      routing_id, kProxyRoutingId, MSG_ROUTING_NONE, frame()->GetRoutingID(),
+      MSG_ROUTING_NONE, base::UnguessableToken::Create(), replication_state,
+      nullptr, widget_params, FrameOwnerProperties());
   {
     TestRenderFrame* provisional_frame = static_cast<TestRenderFrame*>(
         RenderFrameImpl::FromRoutingID(routing_id));
@@ -2565,8 +2607,8 @@ TEST_F(DevToolsAgentTest, DevToolsResumeOnClose) {
   // Executing javascript will pause the thread and create nested run loop.
   // Posting task simulates message coming from browser.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::Bind(&DevToolsAgentTest::CloseWhilePaused, base::Unretained(this)));
+      FROM_HERE, base::BindOnce(&DevToolsAgentTest::CloseWhilePaused,
+                                base::Unretained(this)));
   ExecuteJavaScriptForTests("debugger;");
 
   // CloseWhilePaused should resume execution and continue here.

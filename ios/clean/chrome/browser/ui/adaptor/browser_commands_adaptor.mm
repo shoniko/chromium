@@ -130,6 +130,10 @@
   [self showAlert:@"showQRScanner"];
 }
 
+- (void)launchExternalSearch {
+  [self showAlert:@"launchExternalSearch"];
+}
+
 - (void)showTabHistoryPopupForBackwardHistory {
   [self showAlert:@"showTabHistoryPopupForBackwardHistory"];
 }
@@ -140,6 +144,18 @@
 
 - (void)navigateToHistoryItem:(const web::NavigationItem*)item {
   [self showAlert:@"navigateToHistoryItem:"];
+}
+
+- (void)requestDesktopSite {
+  [self showAlert:@"requestDesktopSite"];
+}
+
+- (void)requestMobileSite {
+  [self showAlert:@"requestMobileSite"];
+}
+
+- (void)showSnackbarMessage:(MDCSnackbarMessage*)message {
+  [self showAlert:@"showSnackbarMessage:"];
 }
 
 #pragma mark - Private

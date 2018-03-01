@@ -8,6 +8,8 @@
 #include "content/common/content_export.h"
 #include "content/public/common/resource_type.h"
 
+class GURL;
+
 namespace net {
 struct RedirectInfo;
 }
@@ -15,14 +17,25 @@ struct RedirectInfo;
 namespace content {
 
 struct ResourceRequest;
+struct ResourceResponseHead;
 
 // A URLLoaderThrottle gets notified at various points during the process of
 // loading a resource. At each stage, it has the opportunity to defer the
 // resource load.
+//
+// Note that while a single throttle deferring a load at any given step will
+// block the load from progressing further until a subsequent Delegate::Resume()
+// call is made, it does NOT prevent subsequent throttles from processing the
+// same step of the request if multiple throttles are affecting the load.
 class CONTENT_EXPORT URLLoaderThrottle {
  public:
   // An interface for the throttle implementation to resume (when deferred) or
-  // cancel the resource load.
+  // cancel the resource load. Please note that these methods could be called
+  // in-band (i.e., inside URLLoaderThrottle notification methods such as
+  // WillStartRequest), or out-of-band.
+  //
+  // It is guaranteed that throttles calling these methods won't be destroyed
+  // synchronously.
   class CONTENT_EXPORT Delegate {
    public:
     // Cancels the resource load with the specified error code.
@@ -31,6 +44,11 @@ class CONTENT_EXPORT URLLoaderThrottle {
     // Resumes the deferred resource load. It is a no-op if the resource load is
     // not deferred or has already been canceled.
     virtual void Resume() = 0;
+
+    // Pauses/resumes reading response body if the resource is fetched from
+    // network.
+    virtual void PauseReadingBodyFromNet();
+    virtual void ResumeReadingBodyFromNet();
 
    protected:
     virtual ~Delegate();
@@ -54,7 +72,10 @@ class CONTENT_EXPORT URLLoaderThrottle {
                                    bool* defer);
 
   // Called when the response headers and meta data are available.
-  virtual void WillProcessResponse(bool* defer);
+  // TODO(776312): Migrate this URL to ResourceResponseHead.
+  virtual void WillProcessResponse(const GURL& response_url,
+                                   const ResourceResponseHead& response_head,
+                                   bool* defer);
 
   void set_delegate(Delegate* delegate) { delegate_ = delegate; }
 

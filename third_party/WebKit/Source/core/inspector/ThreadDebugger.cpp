@@ -25,7 +25,7 @@
 #include "core/inspector/InspectorTraceEvents.h"
 #include "core/inspector/V8InspectorString.h"
 #include "core/probe/CoreProbes.h"
-#include "platform/ScriptForbiddenScope.h"
+#include "platform/bindings/ScriptForbiddenScope.h"
 #include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/PtrUtil.h"
 
@@ -135,7 +135,7 @@ void ThreadDebugger::beginUserGesture() {
   ExecutionContext* ec = CurrentExecutionContext(isolate_);
   Document* document = ec && ec->IsDocument() ? ToDocument(ec) : nullptr;
   user_gesture_indicator_ =
-      LocalFrame::CreateUserGesture(document ? document->GetFrame() : nullptr);
+      Frame::NotifyUserActivation(document ? document->GetFrame() : nullptr);
 }
 
 void ThreadDebugger::endUserGesture() {
@@ -333,7 +333,7 @@ static EventTarget* FirstArgumentAsEventTarget(
   if (info.Length() < 1)
     return nullptr;
   if (EventTarget* target =
-          V8EventTarget::toImplWithTypeCheck(info.GetIsolate(), info[0]))
+          V8EventTarget::ToImplWithTypeCheck(info.GetIsolate(), info[0]))
     return target;
   return ToDOMWindow(info.GetIsolate(), info[0]);
 }
@@ -473,9 +473,9 @@ void ThreadDebugger::cancelTimer(void* data) {
   for (size_t index = 0; index < timer_data_.size(); ++index) {
     if (timer_data_[index] == data) {
       timers_[index]->Stop();
-      timer_callbacks_.erase(index);
-      timers_.erase(index);
-      timer_data_.erase(index);
+      timer_callbacks_.EraseAt(index);
+      timers_.EraseAt(index);
+      timer_data_.EraseAt(index);
       return;
     }
   }

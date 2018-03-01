@@ -38,7 +38,6 @@
 #include "platform/scheduler/child/web_scheduler.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Assertions.h"
-#include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/Vector.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCompositorSupport.h"
@@ -112,9 +111,8 @@ class TestingPlatformSupport : public Platform {
   WebFileUtilities* GetFileUtilities() override;
   WebIDBFactory* IdbFactory() override;
   WebURLLoaderMockFactory* GetURLLoaderMockFactory() override;
-  std::unique_ptr<blink::WebURLLoader> CreateURLLoader(
-      const WebURLRequest&,
-      base::SingleThreadTaskRunner*) override;
+  std::unique_ptr<blink::WebURLLoaderFactory> CreateDefaultURLLoaderFactory()
+      override;
   WebData GetDataResource(const char* name) override;
   InterfaceProvider* GetInterfaceProvider() override;
 
@@ -204,7 +202,8 @@ class ScopedTestingPlatformSupport final {
 
  public:
   explicit ScopedTestingPlatformSupport(Args&&... args) {
-    testing_platform_support_ = WTF::MakeUnique<T>(std::forward<Args>(args)...);
+    testing_platform_support_ =
+        std::make_unique<T>(std::forward<Args>(args)...);
     original_platform_ = Platform::Current();
     DCHECK(original_platform_);
     Platform::SetCurrentPlatformForTesting(testing_platform_support_.get());

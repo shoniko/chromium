@@ -74,7 +74,7 @@ class CORE_EXPORT FileReaderLoader final : public ThreadableLoaderClient {
 
   ~FileReaderLoader() override;
 
-  void Start(ExecutionContext*, RefPtr<BlobDataHandle>);
+  void Start(ExecutionContext*, scoped_refptr<BlobDataHandle>);
   void Cancel();
 
   // ThreadableLoaderClient
@@ -107,6 +107,8 @@ class CORE_EXPORT FileReaderLoader final : public ThreadableLoaderClient {
 
   void SetEncoding(const String&);
   void SetDataType(const String& data_type) { data_type_ = data_type; }
+
+  bool HasFinishedLoading() const { return finished_loading_; }
 
  private:
   FileReaderLoader(ReadType, FileReaderLoaderClient*);

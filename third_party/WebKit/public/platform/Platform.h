@@ -47,7 +47,6 @@
 #include "WebGamepadListener.h"
 #include "WebGestureDevice.h"
 #include "WebLocalizedString.h"
-#include "WebMessagePortChannel.h"
 #include "WebPlatformEventType.h"
 #include "WebSize.h"
 #include "WebSpeechSynthesizer.h"
@@ -56,6 +55,7 @@
 #include "WebString.h"
 #include "WebURLError.h"
 #include "WebURLLoader.h"
+#include "WebURLLoaderFactory.h"
 #include "WebVector.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/time/time.h"
@@ -63,10 +63,7 @@
 #include "components/viz/common/surfaces/frame_sink_id.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/message_pipe.h"
-
-namespace base {
-class SingleThreadTaskRunner;
-}
+#include "public/platform/scheduler/single_thread_task_runner.h"
 
 namespace device {
 class Gamepads;
@@ -89,6 +86,7 @@ class Local;
 namespace blink {
 
 class InterfaceProvider;
+class TrialPolicy;
 class WebAudioBus;
 class WebAudioLatencyHint;
 class WebBlobRegistry;
@@ -329,24 +327,13 @@ class BLINK_PLATFORM_EXPORT Platform {
   // Returns a unique FrameSinkID for the current renderer process
   virtual viz::FrameSinkId GenerateFrameSinkId() { return viz::FrameSinkId(); }
 
-  // Message Ports -------------------------------------------------------
-
-  // Creates a Message Port Channel pair. This can be called on any thread.
-  // The returned objects should only be used on the thread they were created
-  // on.
-  virtual void CreateMessageChannel(
-      std::unique_ptr<WebMessagePortChannel>* channel1,
-      std::unique_ptr<WebMessagePortChannel>* channel2) {
-    *channel1 = nullptr;
-    *channel2 = nullptr;
-  }
-
   // Network -------------------------------------------------------------
 
-  // Returns a new WebURLLoader instance.
-  virtual std::unique_ptr<WebURLLoader> CreateURLLoader(
-      const WebURLRequest&,
-      base::SingleThreadTaskRunner*) {
+  // Returns the platform's default URLLoaderFactory. It is expected that the
+  // returned value is stored and to be used for all the CreateURLLoader
+  // requests for the same loading context.
+  // TODO(kinuko): See if we can deprecate this too.
+  virtual std::unique_ptr<WebURLLoaderFactory> CreateDefaultURLLoaderFactory() {
     return nullptr;
   }
 
@@ -444,12 +431,21 @@ class BLINK_PLATFORM_EXPORT Platform {
   // Must return non-null.
   virtual WebScrollbarBehavior* ScrollbarBehavior() { return nullptr; }
 
-  // Sudden Termination --------------------------------------------------
+  // Process lifetime management -----------------------------------------
 
   // Disable/Enable sudden termination on a process level. When possible, it
   // is preferable to disable sudden termination on a per-frame level via
   // WebFrameClient::SuddenTerminationDisablerChanged.
+  // This method should only be called on the main thread.
   virtual void SuddenTerminationChanged(bool enabled) {}
+
+  // Increase/decrease the process refcount. The process won't shut itself
+  // down until this refcount reaches 0. The browser might still shut down the
+  // renderer through fast shutdown. See SuddenTerminationChanged to disable
+  // that.
+  // These methods should only be called on the main thread.
+  virtual void AddRefProcess() {}
+  virtual void ReleaseRefProcess() {}
 
   // System --------------------------------------------------------------
 
@@ -466,12 +462,13 @@ class BLINK_PLATFORM_EXPORT Platform {
 
   // Returns an interface to the file task runner.
   WebTaskRunner* FileTaskRunner() const;
-  base::TaskRunner* BaseFileTaskRunner() const;
+  SingleThreadTaskRunnerRefPtr BaseFileTaskRunner() const;
 
   // Testing -------------------------------------------------------------
 
   // Gets a pointer to URLLoaderMockFactory for testing. Will not be available
   // in production builds.
+  // TODO(kinuko,toyoshim): Deprecate this one. (crbug.com/751425)
   virtual WebURLLoaderMockFactory* GetURLLoaderMockFactory() { return nullptr; }
 
   // Record to a RAPPOR privacy-preserving metric, see:
@@ -697,7 +694,8 @@ class BLINK_PLATFORM_EXPORT Platform {
 
   // Experimental Framework ----------------------------------------------
 
-  virtual WebTrialTokenValidator* TrialTokenValidator() { return nullptr; }
+  virtual std::unique_ptr<WebTrialTokenValidator> TrialTokenValidator();
+  virtual std::unique_ptr<TrialPolicy> OriginTrialPolicy();
 
   // Media Capabilities --------------------------------------------------
 

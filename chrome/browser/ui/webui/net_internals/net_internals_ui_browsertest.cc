@@ -299,7 +299,7 @@ void NetInternalsTest::MessageHandler::CloseIncognitoBrowser(
 
 void NetInternalsTest::MessageHandler::GetNetLogFileContents(
     const base::ListValue* list_value) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
 
   std::unique_ptr<WriteNetLogState> state =
       base::MakeUnique<WriteNetLogState>();
@@ -343,7 +343,7 @@ void NetInternalsTest::MessageHandler::EnableDataReductionProxy(
 
 void NetInternalsTest::MessageHandler::OnFinishedWritingNetLog(
     std::unique_ptr<WriteNetLogState> state) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
 
   std::string log_contents;
   ASSERT_TRUE(base::ReadFileToString(state->log_path, &log_contents));
@@ -379,11 +379,6 @@ void NetInternalsTest::SetUpOnMainThread() {
   prerender::PrerenderManager* prerender_manager =
       prerender::PrerenderManagerFactory::GetForBrowserContext(profile);
   prerender_manager->mutable_config().max_bytes = 1000 * 1024 * 1024;
-
-  // Sample domain for SDCH-view test. Dictionaries for localhost/127.0.0.1
-  // are forbidden.
-  host_resolver()->AddRule("testdomain.com", "127.0.0.1");
-  host_resolver()->AddRule("sub.testdomain.com", "127.0.0.1");
 }
 
 content::WebUIMessageHandler* NetInternalsTest::GetMockMessageHandler() {

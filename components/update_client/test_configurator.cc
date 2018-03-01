@@ -9,6 +9,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/version.h"
 #include "components/prefs/pref_service.h"
+#include "components/update_client/activity_data_service.h"
 #include "components/update_client/out_of_process_patcher.h"
 #include "net/url_request/url_request_test_util.h"
 #include "url/gurl.h"
@@ -107,7 +108,7 @@ net::URLRequestContextGetter* TestConfigurator::RequestContext() const {
 
 scoped_refptr<OutOfProcessPatcher> TestConfigurator::CreateOutOfProcessPatcher()
     const {
-  return NULL;
+  return nullptr;
 }
 
 bool TestConfigurator::EnabledDeltas() const {
@@ -161,6 +162,10 @@ void TestConfigurator::SetPingUrl(const GURL& url) {
 }
 
 PrefService* TestConfigurator::GetPrefService() const {
+  return nullptr;
+}
+
+ActivityDataService* TestConfigurator::GetActivityDataService() const {
   return nullptr;
 }
 

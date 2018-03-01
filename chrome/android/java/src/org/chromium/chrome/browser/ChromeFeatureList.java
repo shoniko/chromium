@@ -65,7 +65,7 @@ public abstract class ChromeFeatureList {
         if (sTestFeatures != null) {
             Boolean enabled = sTestFeatures.get(featureName);
             if (enabled == null) throw new IllegalArgumentException(featureName);
-            return enabled.booleanValue();
+            return enabled;
         }
 
         assert isInitialized();
@@ -147,30 +147,34 @@ public abstract class ChromeFeatureList {
     }
 
     // Alphabetical:
+    public static final String ALLOW_READER_FOR_ACCESSIBILITY = "AllowReaderForAccessibility";
     public static final String ANDROID_PAY_INTEGRATION_V1 = "AndroidPayIntegrationV1";
     public static final String ANDROID_PAY_INTEGRATION_V2 = "AndroidPayIntegrationV2";
     public static final String ANDROID_PAYMENT_APPS = "AndroidPaymentApps";
     public static final String ANDROID_SIGNIN_PROMOS = "AndroidSigninPromos";
     public static final String AUTOFILL_SCAN_CARDHOLDER_NAME = "AutofillScanCardholderName";
+    public static final String CAPTIVE_PORTAL_CERTIFICATE_LIST = "CaptivePortalCertificateList";
     public static final String CCT_BACKGROUND_TAB = "CCTBackgroundTab";
     public static final String CCT_EXTERNAL_LINK_HANDLING = "CCTExternalLinkHandling";
     public static final String CCT_POST_MESSAGE_API = "CCTPostMessageAPI";
     public static final String CCT_REDIRECT_PRECONNECT = "CCTRedirectPreconnect";
     public static final String CHROME_HOME = "ChromeHome";
-    public static final String CHROME_HOME_DOODLE = "ChromeHomeDoodle";
-    public static final String CHROME_HOME_EXPAND_BUTTON = "ChromeHomeExpandButton";
-    public static final String CHROME_HOME_MODERN_LAYOUT = "ChromeHomeModernLayout";
+    public static final String CHROME_HOME_DESTROY_SUGGESTIONS = "ChromeHomeDestroySuggestions";
+    public static final String CHROME_HOME_BOTTOM_NAV_LABELS = "ChromeHomeBottomNavLabels";
+    public static final String CHROME_HOME_OPT_OUT_SNACKBAR = "ChromeHomeOptOutSnackbar";
+    public static final String CHROME_HOME_PERSONALIZED_OMNIBOX_SUGGESTIONS =
+            "ChromeHomePersonalizedOmniboxSuggestions";
+    public static final String CHROME_HOME_PROMO = "ChromeHomePromo";
+    public static final String CHROME_MEMEX = "ChromeMemex";
     public static final String CONTENT_SUGGESTIONS_FAVICONS_FROM_NEW_SERVER =
             "ContentSuggestionsFaviconsFromNewServer";
     public static final String CONTENT_SUGGESTIONS_NOTIFICATIONS =
             "ContentSuggestionsNotifications";
-    public static final String CONTENT_SUGGESTIONS_LARGE_THUMBNAIL =
-            "ContentSuggestionsLargeThumbnail";
     public static final String CONTENT_SUGGESTIONS_SCROLL_TO_LOAD =
             "ContentSuggestionsScrollToLoad";
     public static final String CONTENT_SUGGESTIONS_SETTINGS = "ContentSuggestionsSettings";
-    public static final String CONTENT_SUGGESTIONS_SHOW_SUMMARY = "ContentSuggestionsShowSummary";
-    public static final String CONTENT_SUGGESTIONS_VIDEO_OVERLAY = "ContentSuggestionsVideoOverlay";
+    public static final String CONTENT_SUGGESTIONS_THUMBNAIL_DOMINANT_COLOR =
+            "ContentSuggestionsThumbnailDominantColor";
     public static final String CONTEXTUAL_SEARCH_SINGLE_ACTIONS = "ContextualSearchSingleActions";
     public static final String CONTEXTUAL_SEARCH_URL_ACTIONS = "ContextualSearchUrlActions";
     public static final String CONTEXTUAL_SUGGESTIONS_CAROUSEL = "ContextualSuggestionsCarousel";
@@ -183,6 +187,7 @@ public abstract class ChromeFeatureList {
     public static final String DATA_REDUCTION_SITE_BREAKDOWN = "DataReductionProxySiteBreakdown";
     public static final String DONT_PREFETCH_LIBRARIES = "DontPrefetchLibraries";
     public static final String DOWNLOAD_HOME_SHOW_STORAGE_INFO = "DownloadHomeShowStorageInfo";
+    public static final String DOWNLOADS_FOREGROUND = "DownloadsForeground";
     // When enabled, fullscreen WebContents will be moved to a new Activity. Coming soon...
     public static final String FULLSCREEN_ACTIVITY = "FullscreenActivity";
     // Whether we show an important sites dialog in the "Clear Browsing Data" flow.
@@ -206,11 +211,13 @@ public abstract class ChromeFeatureList {
             "NTPTilesLowerResolutionFavicons";
     public static final String OMNIBOX_SPARE_RENDERER = "OmniboxSpareRenderer";
     public static final String PAY_WITH_GOOGLE_V1 = "PayWithGoogleV1";
+    public static final String PROGRESS_BAR_THROTTLE = "ProgressBarThrottle";
     public static final String PWA_PERSISTENT_NOTIFICATION = "PwaPersistentNotification";
     public static final String READER_MODE_IN_CCT = "ReaderModeInCCT";
     public static final String SERVICE_WORKER_PAYMENT_APPS = "ServiceWorkerPaymentApps";
     public static final String SITE_EXPLORATION_UI = "SiteExplorationUi";
     public static final String SITE_NOTIFICATION_CHANNELS = "SiteNotificationChannels";
+    public static final String SOUND_CONTENT_SETTING = "SoundContentSetting";
     public static final String SPANNABLE_INLINE_AUTOCOMPLETE = "SpannableInlineAutocomplete";
     public static final String TAB_REPARENTING = "TabReparenting";
     public static final String VIDEO_PERSISTENCE = "VideoPersistence";
@@ -224,7 +231,6 @@ public abstract class ChromeFeatureList {
     public static final String WEB_PAYMENTS_SINGLE_APP_UI_SKIP = "WebPaymentsSingleAppUiSkip";
     public static final String WEBVR_AUTOPRESENT = "WebVrAutopresent";
     public static final String WEBVR_CARDBOARD_SUPPORT = "WebVRCardboardSupport";
-    public static final String XGEO_VISIBLE_NETWORKS = "XGEOVisibleNetworks";
 
     private static native boolean nativeIsInitialized();
     private static native boolean nativeIsEnabled(String featureName);

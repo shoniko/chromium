@@ -48,7 +48,6 @@ class DownloadRequestLimiterTest : public ChromeRenderViewHostTestHarness {
         PermissionRequestManager::FromWebContents(web_contents());
     mock_permission_prompt_factory_.reset(
         new MockPermissionPromptFactory(manager));
-    manager->DisplayPendingRequests();
 
     UpdateExpectations(ACCEPT);
     cancel_count_ = continue_count_ = 0;
@@ -461,7 +460,7 @@ TEST_F(DownloadRequestLimiterTest, ResetOnReload) {
   ASSERT_EQ(DownloadRequestLimiter::PROMPT_BEFORE_DOWNLOAD,
             download_request_limiter_->GetDownloadStatus(web_contents()));
 
-  Reload();
+  content::NavigationSimulator::Reload(web_contents());
   LoadCompleted();
   base::RunLoop().RunUntilIdle();
   ExpectAndResetCounts(0, 1, 0, __LINE__);
@@ -479,7 +478,7 @@ TEST_F(DownloadRequestLimiterTest, ResetOnReload) {
             download_request_limiter_->GetDownloadStatus(web_contents()));
   ExpectAndResetCounts(0, 1, 1, __LINE__);
 
-  Reload();
+  content::NavigationSimulator::Reload(web_contents());
   LoadCompleted();
   base::RunLoop().RunUntilIdle();
   ASSERT_EQ(DownloadRequestLimiter::DOWNLOADS_NOT_ALLOWED,

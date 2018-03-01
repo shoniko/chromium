@@ -10,9 +10,11 @@
 #include "platform/loader/fetch/FetchContext.h"
 #include "platform/loader/fetch/FetchParameters.h"
 #include "platform/loader/fetch/ResourceTimingInfo.h"
+#include "platform/scheduler/test/fake_web_frame_scheduler.h"
 #include "platform/scheduler/test/fake_web_task_runner.h"
 #include "platform/wtf/PtrUtil.h"
 #include "public/platform/Platform.h"
+#include "public/platform/WebURLLoaderFactory.h"
 
 #include <memory>
 
@@ -40,7 +42,7 @@ class MockFetchContext : public FetchContext {
   long long GetTransferSize() const { return transfer_size_; }
 
   SecurityOrigin* GetSecurityOrigin() const override {
-    return security_origin_.Get();
+    return security_origin_.get();
   }
 
   void SetSecurityOrigin(RefPtr<SecurityOrigin> security_origin) {
@@ -79,31 +81,31 @@ class MockFetchContext : public FetchContext {
   }
 
   std::unique_ptr<WebURLLoader> CreateURLLoader(
-      const ResourceRequest& request) override {
+      const ResourceRequest& request,
+      RefPtr<WebTaskRunner> task_runner) override {
+    if (!url_loader_factory_) {
+      url_loader_factory_ =
+          Platform::Current()->CreateDefaultURLLoaderFactory();
+    }
     WrappedResourceRequest wrapped(request);
-    return Platform::Current()->CreateURLLoader(
-        wrapped, runner_->ToSingleThreadTaskRunner());
+    return url_loader_factory_->CreateURLLoader(
+        wrapped, task_runner->ToSingleThreadTaskRunner());
   }
 
   WebFrameScheduler* GetFrameScheduler() override {
     return frame_scheduler_.get();
   }
 
+  RefPtr<WebTaskRunner> GetLoadingTaskRunner() override {
+    return frame_scheduler_->GetTaskRunner(TaskType::kUnspecedLoading);
+  }
+
  private:
-  class MockFrameScheduler final : public WebFrameScheduler {
+  class MockFrameScheduler final : public scheduler::FakeWebFrameScheduler {
    public:
     MockFrameScheduler(RefPtr<WebTaskRunner> runner)
         : runner_(std::move(runner)) {}
-    void AddThrottlingObserver(ObserverType, Observer*) override {}
-    void RemoveThrottlingObserver(ObserverType, Observer*) override {}
-    RefPtr<WebTaskRunner> LoadingTaskRunner() override { return runner_; }
-    RefPtr<WebTaskRunner> LoadingControlTaskRunner() override {
-      return runner_;
-    }
-    RefPtr<WebTaskRunner> ThrottleableTaskRunner() override { return runner_; }
-    RefPtr<WebTaskRunner> DeferrableTaskRunner() override { return runner_; }
-    RefPtr<WebTaskRunner> PausableTaskRunner() override { return runner_; }
-    RefPtr<WebTaskRunner> UnpausableTaskRunner() override { return runner_; }
+    RefPtr<WebTaskRunner> GetTaskRunner(TaskType) override { return runner_; }
 
    private:
     RefPtr<WebTaskRunner> runner_;
@@ -111,7 +113,7 @@ class MockFetchContext : public FetchContext {
 
   MockFetchContext(LoadPolicy load_policy)
       : load_policy_(load_policy),
-        runner_(AdoptRef(new scheduler::FakeWebTaskRunner)),
+        runner_(WTF::AdoptRef(new scheduler::FakeWebTaskRunner)),
         security_origin_(SecurityOrigin::CreateUnique()),
         frame_scheduler_(new MockFrameScheduler(runner_)),
         complete_(false),
@@ -121,6 +123,7 @@ class MockFetchContext : public FetchContext {
   RefPtr<WebTaskRunner> runner_;
   RefPtr<SecurityOrigin> security_origin_;
   std::unique_ptr<WebFrameScheduler> frame_scheduler_;
+  std::unique_ptr<WebURLLoaderFactory> url_loader_factory_;
   bool complete_;
   long long transfer_size_;
 };

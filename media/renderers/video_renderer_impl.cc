@@ -216,6 +216,7 @@ void VideoRendererImpl::StartPlayingFrom(base::TimeDelta timestamp) {
   start_timestamp_ = timestamp;
   painted_first_frame_ = false;
   has_playback_met_watch_time_duration_requirement_ = false;
+  video_frame_stream_->DropFramesBefore(start_timestamp_);
   AttemptRead_Locked();
 }
 
@@ -281,6 +282,7 @@ scoped_refptr<VideoFrame> VideoRendererImpl::Render(
     base::TimeTicks deadline_min,
     base::TimeTicks deadline_max,
     bool background_rendering) {
+  TRACE_EVENT0("media", "VideoRendererImpl::Render");
   base::AutoLock auto_lock(lock_);
   DCHECK_EQ(state_, kPlaying);
 
@@ -739,6 +741,9 @@ void VideoRendererImpl::UpdateStats_Locked() {
   DCHECK_GE(frames_dropped_, 0);
 
   if (frames_decoded_ || frames_dropped_) {
+    if (frames_dropped_)
+      TRACE_EVENT_INSTANT1("media", "VideoFramesDropped",
+                           TRACE_EVENT_SCOPE_THREAD, "count", frames_dropped_);
     PipelineStatistics statistics;
     statistics.video_frames_decoded = frames_decoded_;
     statistics.video_frames_dropped = frames_dropped_;

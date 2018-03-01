@@ -25,10 +25,10 @@
 
 #include "core/layout/LayoutTableCell.h"
 
-#include "core/HTMLNames.h"
 #include "core/css/StylePropertySet.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/html/HTMLTableCellElement.h"
+#include "core/html_names.h"
 #include "core/layout/CollapsedBorderValue.h"
 #include "core/layout/LayoutAnalyzer.h"
 #include "core/layout/LayoutTableCol.h"
@@ -63,6 +63,7 @@ LayoutTableCell::LayoutTableCell(Element* element)
       is_spanning_collapsed_row_(false),
       is_spanning_collapsed_column_(false),
       collapsed_border_values_valid_(false),
+      collapsed_borders_need_paint_invalidation_(false),
       intrinsic_padding_before_(0),
       intrinsic_padding_after_(0) {
   // We only update the flags when notified of DOM changes in
@@ -129,8 +130,11 @@ void LayoutTableCell::ColSpanOrRowSpanChanged() {
 
   SetNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(
       LayoutInvalidationReason::kAttributeChanged);
-  if (Parent() && Section())
+  if (Parent() && Section()) {
     Section()->SetNeedsCellRecalc();
+    if (Table() && Table()->ShouldCollapseBorders())
+      collapsed_borders_need_paint_invalidation_ = true;
+  }
 }
 
 Length LayoutTableCell::LogicalWidthFromColumns(
@@ -214,15 +218,18 @@ void LayoutTableCell::AddLayerHitTestRects(
     LayerHitTestRects& layer_rects,
     const PaintLayer* current_layer,
     const LayoutPoint& layer_offset,
-    const LayoutRect& container_rect) const {
+    TouchAction supported_fast_actions,
+    const LayoutRect& container_rect,
+    TouchAction container_whitelisted_touch_action) const {
   LayoutPoint adjusted_layer_offset = layer_offset;
   // LayoutTableCell's location includes the offset of it's containing
   // LayoutTableRow, so we need to subtract that again here (as for
   // LayoutTableCell::offsetFromContainer.
   if (Parent())
     adjusted_layer_offset -= ParentBox()->LocationOffset();
-  LayoutBox::AddLayerHitTestRects(layer_rects, current_layer,
-                                  adjusted_layer_offset, container_rect);
+  LayoutBox::AddLayerHitTestRects(
+      layer_rects, current_layer, adjusted_layer_offset, supported_fast_actions,
+      container_rect, container_whitelisted_touch_action);
 }
 
 void LayoutTableCell::ComputeIntrinsicPadding(int collapsed_height,
@@ -507,8 +514,8 @@ bool LayoutTableCell::IsInEndColumn() const {
 
 CSSPropertyID LayoutTableCell::ResolveBorderProperty(
     CSSPropertyID property) const {
-  return CSSProperty::ResolveDirectionAwareProperty(
-      property, TableStyle().Direction(), TableStyle().GetWritingMode());
+  return CSSPropertyAPI::Get(property).ResolveDirectionAwareProperty(
+      TableStyle().Direction(), TableStyle().GetWritingMode());
 }
 
 CollapsedBorderValue LayoutTableCell::ComputeCollapsedStartBorder() const {
@@ -526,9 +533,9 @@ CollapsedBorderValue LayoutTableCell::ComputeCollapsedStartBorder() const {
 
   // For the start border, we need to check, in order of precedence:
   // (1) Our start border.
-  int start_color_property =
+  CSSPropertyID start_color_property =
       ResolveBorderProperty(CSSPropertyWebkitBorderStartColor);
-  int end_color_property =
+  CSSPropertyID end_color_property =
       ResolveBorderProperty(CSSPropertyWebkitBorderEndColor);
   CollapsedBorderValue result(BorderStartInTableDirection(),
                               ResolveColor(start_color_property),
@@ -659,9 +666,9 @@ CollapsedBorderValue LayoutTableCell::ComputeCollapsedEndBorder() const {
 
   // For end border, we need to check, in order of precedence:
   // (1) Our end border.
-  int start_color_property =
+  CSSPropertyID start_color_property =
       ResolveBorderProperty(CSSPropertyWebkitBorderStartColor);
-  int end_color_property =
+  CSSPropertyID end_color_property =
       ResolveBorderProperty(CSSPropertyWebkitBorderEndColor);
   CollapsedBorderValue result = CollapsedBorderValue(
       BorderEndInTableDirection(), ResolveColor(end_color_property),
@@ -784,9 +791,9 @@ CollapsedBorderValue LayoutTableCell::ComputeCollapsedBeforeBorder() const {
 
   // For before border, we need to check, in order of precedence:
   // (1) Our before border.
-  int before_color_property =
+  CSSPropertyID before_color_property =
       ResolveBorderProperty(CSSPropertyWebkitBorderBeforeColor);
-  int after_color_property =
+  CSSPropertyID after_color_property =
       ResolveBorderProperty(CSSPropertyWebkitBorderAfterColor);
   CollapsedBorderValue result = CollapsedBorderValue(
       Style()->BorderBeforeStyle(), Style()->BorderBeforeWidth(),
@@ -915,9 +922,9 @@ CollapsedBorderValue LayoutTableCell::ComputeCollapsedAfterBorder() const {
 
   // For after border, we need to check, in order of precedence:
   // (1) Our after border.
-  int before_color_property =
+  CSSPropertyID before_color_property =
       ResolveBorderProperty(CSSPropertyWebkitBorderBeforeColor);
-  int after_color_property =
+  CSSPropertyID after_color_property =
       ResolveBorderProperty(CSSPropertyWebkitBorderAfterColor);
   CollapsedBorderValue result = CollapsedBorderValue(
       Style()->BorderAfterStyle(), Style()->BorderAfterWidth(),
@@ -1094,9 +1101,16 @@ void LayoutTableCell::UpdateCollapsedBorderValues() const {
     }
   }
 
-  // Invalidate the row which will paint the collapsed borders.
-  if (changed)
-    Row()->SetShouldDoFullPaintInvalidation(PaintInvalidationReason::kStyle);
+  if (!changed && !collapsed_borders_need_paint_invalidation_)
+    return;
+
+  // Invalidate the rows which will paint the collapsed borders.
+  auto row_span = RowSpan();
+  for (auto r = RowIndex(); r < RowIndex() + row_span; ++r) {
+    if (auto* row = Section()->RowLayoutObjectAt(r))
+      row->SetShouldDoFullPaintInvalidation(PaintInvalidationReason::kStyle);
+  }
+  collapsed_borders_need_paint_invalidation_ = false;
 }
 
 void LayoutTableCell::PaintBoxDecorationBackground(
@@ -1158,7 +1172,7 @@ LayoutTableCell* LayoutTableCell::CreateAnonymousWithParent(
     const LayoutObject* parent) {
   LayoutTableCell* new_cell =
       LayoutTableCell::CreateAnonymous(&parent->GetDocument());
-  RefPtr<ComputedStyle> new_style =
+  scoped_refptr<ComputedStyle> new_style =
       ComputedStyle::CreateAnonymousStyleWithDisplay(parent->StyleRef(),
                                                      EDisplay::kTableCell);
   new_cell->SetStyle(std::move(new_style));

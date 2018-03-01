@@ -16,7 +16,6 @@ dglazkov@chromium.org
 dtapuska@chromium.org
 dgozman@chromium.org
 dominicc@chromium.org
-dpranke@chromium.org
 # drott reviews font specific changes.
 drott@chromium.org
 dsinclair@chromium.org
@@ -44,7 +43,6 @@ kojii@chromium.org
 kouhei@chromium.org
 meade@chromium.org
 mkwst@chromium.org
-mstensho@opera.com
 ojan@chromium.org
 # pdr reviews many svg and text autosizing patches.
 pdr@chromium.org
@@ -54,13 +52,12 @@ rego@igalia.com
 rbyers@chromium.org
 rob.buis@samsung.com
 robhogan@gmail.com
-# rune reviews core/css and parts of core/rendering
-rune@opera.com
 schenney@chromium.org
 senorblanco@chromium.org
 sashab@chromium.org
 skobes@chromium.org
 svillar@igalia.com
+szager@chromium.org
 thakis@chromium.org
 timloh@chromium.org
 tkent@chromium.org

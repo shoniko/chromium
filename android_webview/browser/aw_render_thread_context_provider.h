@@ -46,8 +46,9 @@ class AwRenderThreadContextProvider : public viz::ContextProvider {
   ~AwRenderThreadContextProvider() override;
 
   // viz::ContextProvider:
-  bool BindToCurrentThread() override;
-  gpu::Capabilities ContextCapabilities() override;
+  gpu::ContextResult BindToCurrentThread() override;
+  const gpu::Capabilities& ContextCapabilities() const override;
+  const gpu::GpuFeatureInfo& GetGpuFeatureInfo() const override;
   gpu::gles2::GLES2Interface* ContextGL() override;
   gpu::ContextSupport* ContextSupport() override;
   class GrContext* GrContext() override;

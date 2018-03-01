@@ -1,9 +1,12 @@
 include_rules = [
+    "+base/memory/scoped_refptr.h",
     "+bindings/core",
     "-bindings/modules",
     "+build/mac",
     "+build/win",
+    "+common",
     "+core",
+    "+gpu/config/gpu_feature_info.h",
     "-inspector/v8",
     "+inspector/v8/public",
     "-modules",
@@ -11,7 +14,9 @@ include_rules = [
     "+platform",
     "+public/platform",
     "+public/web",
+    "+services/metrics/public",
     "+services/network/public/interfaces",
+    "+services/service_manager/public/interfaces/interface_provider.mojom-blink.h",
     "+third_party/skia/include",
     "+ui/gfx/geometry",
     "-web",
@@ -23,3 +28,11 @@ include_rules = [
     "!core/frame/WebLocalFrameImpl.h",
     "!core/frame/WebRemoteFrameImpl.h",
 ]
+
+specific_include_rules = {
+    # Allow tests to use Web(Local|Remote)FrameBase.h.
+    ".*Test\.cpp" : [
+        "+core/frame/WebLocalFrameImpl.h",
+        "+core/frame/WebRemoteFrameImpl.h",
+    ]
+}

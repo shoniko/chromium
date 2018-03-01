@@ -11,7 +11,6 @@
 #include "base/i18n/timezone.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -20,6 +19,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/grit/generated_resources.h"
@@ -43,20 +43,19 @@ constexpr char kActionSetWindowBounds[] = "setWindowBounds";
 constexpr char kActionCloseWindow[] = "closeWindow";
 
 // Action to show a page. The message should have "page" field, which is one of
-// IDs for section div elements.
+// IDs for section div elements. For the "active-directory-auth" page, the
+// "federationUrl" and "deviceManagementUrlPrefix" options are required.
 constexpr char kActionShowPage[] = "showPage";
 constexpr char kPage[] = "page";
+constexpr char kOptions[] = "options";
+constexpr char kFederationUrl[] = "federationUrl";
+constexpr char kDeviceManagementUrlPrefix[] = "deviceManagementUrlPrefix";
 
 // Action to show the error page. The message should have "errorMessage",
 // which is a localized error text, and "shouldShowSendFeedback" boolean value.
 constexpr char kActionShowErrorPage[] = "showErrorPage";
 constexpr char kErrorMessage[] = "errorMessage";
 constexpr char kShouldShowSendFeedback[] = "shouldShowSendFeedback";
-
-// Action to set the Active Directory Federation Services SAML redirect URL.
-constexpr char kActionActiveDirectoryAuthUrls[] = "setActiveDirectoryAuthUrls";
-constexpr char kFederationUrl[] = "federationUrl";
-constexpr char kDeviceManagementUrlPrefix[] = "deviceManagementUrlPrefix";
 
 // The preference update should have those two fields.
 constexpr char kEnabled[] = "enabled";
@@ -71,13 +70,10 @@ constexpr char kEvent[] = "event";
 // No data will be provided.
 constexpr char kEventOnWindowClosed[] = "onWindowClosed";
 
-// "onAuthSucceeded" is fired when LSO or Active Directory authentication
-// succeeds. For LSO, the auth token is passed via "code" field. For Active
-// Directory, "code" is empty.
+// "onAuthSucceeded" is fired when Active Directory authentication succeeds.
 constexpr char kEventOnAuthSucceeded[] = "onAuthSucceeded";
-constexpr char kCode[] = "code";
 
-// "onAuthFailed" is fired when LSO or Active Directory authentication failed.
+// "onAuthFailed" is fired when Active Directory authentication failed.
 constexpr char kEventOnAuthFailed[] = "onAuthFailed";
 constexpr char kAuthErrorMessage[] = "errorMessage";
 
@@ -98,6 +94,9 @@ constexpr char kEventOnRetryClicked[] = "onRetryClicked";
 // "onSendFeedbackClicked" is fired when a user clicks "Send Feedback" button.
 constexpr char kEventOnSendFeedbackClicked[] = "onSendFeedbackClicked";
 
+// "onOpenSettingsPageClicked" is fired when a user clicks settings link.
+constexpr char kEventOnOpenSettingsPageClicked[] = "onOpenSettingsPageClicked";
+
 void RequestOpenApp(Profile* profile) {
   const extensions::Extension* extension =
       extensions::ExtensionRegistry::Get(profile)->GetInstalledExtension(
@@ -115,8 +114,6 @@ std::ostream& operator<<(std::ostream& os, ArcSupportHost::UIPage ui_page) {
       return os << "NO_PAGE";
     case ArcSupportHost::UIPage::TERMS:
       return os << "TERMS";
-    case ArcSupportHost::UIPage::LSO:
-      return os << "LSO";
     case ArcSupportHost::UIPage::ARC_LOADING:
       return os << "ARC_LOADING";
     case ArcSupportHost::UIPage::ACTIVE_DIRECTORY_AUTH:
@@ -160,9 +157,6 @@ std::ostream& operator<<(std::ostream& os, ArcSupportHost::Error error) {
 }
 
 }  // namespace
-
-// static
-const char ArcSupportHost::kStorageId[] = "arc_support";
 
 ArcSupportHost::ArcSupportHost(Profile* profile)
     : profile_(profile),
@@ -225,10 +219,6 @@ void ArcSupportHost::ShowTermsOfService() {
   ShowPage(UIPage::TERMS);
 }
 
-void ArcSupportHost::ShowLso() {
-  ShowPage(UIPage::LSO);
-}
-
 void ArcSupportHost::ShowArcLoading() {
   ShowPage(UIPage::ARC_LOADING);
 }
@@ -239,7 +229,6 @@ void ArcSupportHost::ShowActiveDirectoryAuth(
   active_directory_auth_federation_url_ = federation_url;
   active_directory_auth_device_management_url_prefix_ =
       device_management_url_prefix;
-  SendActiveDirectoryAuthUrls();
   ShowPage(UIPage::ACTIVE_DIRECTORY_AUTH);
 }
 
@@ -262,17 +251,19 @@ void ArcSupportHost::ShowPage(UIPage ui_page) {
     case UIPage::TERMS:
       message.SetString(kPage, "terms");
       break;
-    case UIPage::LSO:
-      // TODO(hidehiko): Merge LSO and LSO_LOADING.
-      message.SetString(kPage, "lso-loading");
-      break;
     case UIPage::ARC_LOADING:
       message.SetString(kPage, "arc-loading");
       break;
     case UIPage::ACTIVE_DIRECTORY_AUTH:
-      // TODO(ljusten): Change this to a function similar to ShowError that
-      // sends the active_directory_auth* URLS along with the show message.
+      DCHECK(active_directory_auth_federation_url_.is_valid());
+      DCHECK(!active_directory_auth_device_management_url_prefix_.empty());
       message.SetString(kPage, "active-directory-auth");
+      message.SetPath(
+          {kOptions, kFederationUrl},
+          base::Value(active_directory_auth_federation_url_.spec()));
+      message.SetPath(
+          {kOptions, kDeviceManagementUrlPrefix},
+          base::Value(active_directory_auth_device_management_url_prefix_));
       break;
     default:
       NOTREACHED();
@@ -366,26 +357,6 @@ void ArcSupportHost::SendPreferenceCheckboxUpdate(
   message_host_->SendMessage(message);
 }
 
-void ArcSupportHost::SendActiveDirectoryAuthUrls() {
-  // Missing |message_host_| is normal on first run.
-  if (!message_host_)
-    return;
-
-  // URLs might be invalid when called from SetMessageHost.
-  if (!active_directory_auth_federation_url_.is_valid() ||
-      active_directory_auth_device_management_url_prefix_.empty()) {
-    return;
-  }
-
-  base::DictionaryValue message;
-  message.SetString(kAction, kActionActiveDirectoryAuthUrls);
-  message.SetString(kFederationUrl,
-                    active_directory_auth_federation_url_.spec());
-  message.SetString(kDeviceManagementUrlPrefix,
-                    active_directory_auth_device_management_url_prefix_);
-  message_host_->SendMessage(message);
-}
-
 void ArcSupportHost::SetMessageHost(arc::ArcSupportMessageHost* message_host) {
   if (message_host_ == message_host)
     return;
@@ -412,9 +383,6 @@ void ArcSupportHost::SetMessageHost(arc::ArcSupportMessageHost* message_host) {
                                backup_and_restore_checkbox_);
   SendPreferenceCheckboxUpdate(kActionLocationServiceMode,
                                location_services_checkbox_);
-
-  // Send URLs needed for Active Directory SAML authentication.
-  SendActiveDirectoryAuthUrls();
 
   if (ui_page_ == UIPage::NO_PAGE) {
     // Close() is called before opening the window.
@@ -461,14 +429,11 @@ void ArcSupportHost::SetRequestOpenAppCallbackForTesting(
 bool ArcSupportHost::Initialize() {
   DCHECK(message_host_);
 
-  auto loadtime_data = base::MakeUnique<base::DictionaryValue>();
+  auto loadtime_data = std::make_unique<base::DictionaryValue>();
   loadtime_data->SetString("appWindow", l10n_util::GetStringUTF16(
                                             IDS_ARC_PLAYSTORE_ICON_TITLE_BETA));
   loadtime_data->SetString(
       "greetingHeader", l10n_util::GetStringUTF16(IDS_ARC_OOBE_TERMS_HEADING));
-  loadtime_data->SetString(
-      "loadingDescription",
-      l10n_util::GetStringUTF16(IDS_ARC_OPT_IN_DIALOG_PROGRESS_LSO));
   loadtime_data->SetString(
       "greetingDescription",
       l10n_util::GetStringUTF16(IDS_ARC_OOBE_TERMS_DESCRIPTION));
@@ -488,8 +453,8 @@ bool ArcSupportHost::Initialize() {
       "buttonRetry",
       l10n_util::GetStringUTF16(IDS_ARC_OPT_IN_DIALOG_BUTTON_RETRY));
   loadtime_data->SetString(
-      "progressLsoLoading",
-      l10n_util::GetStringUTF16(IDS_ARC_OPT_IN_DIALOG_PROGRESS_LSO));
+      "progressTermsLoading",
+      l10n_util::GetStringUTF16(IDS_ARC_OPT_IN_DIALOG_PROGRESS_TERMS));
   loadtime_data->SetString(
       "progressAndroidLoading",
       l10n_util::GetStringUTF16(IDS_ARC_OPT_IN_DIALOG_PROGRESS_ANDROID));
@@ -598,12 +563,7 @@ void ArcSupportHost::OnMessage(const base::DictionaryValue& message) {
     }
   } else if (event == kEventOnAuthSucceeded) {
     DCHECK(auth_delegate_);
-    std::string code;
-    if (!message.GetString(kCode, &code)) {
-      NOTREACHED();
-      return;
-    }
-    auth_delegate_->OnAuthSucceeded(code);
+    auth_delegate_->OnAuthSucceeded();
   } else if (event == kEventOnAuthFailed) {
     DCHECK(auth_delegate_);
     std::string error_message;
@@ -611,6 +571,10 @@ void ArcSupportHost::OnMessage(const base::DictionaryValue& message) {
       NOTREACHED();
       return;
     }
+    // TODO(https://crbug.com/756144): Remove once reason for crash has been
+    // determined.
+    LOG_IF(ERROR, !auth_delegate_)
+        << "auth_delegate_ is NULL, error: " << error_message;
     auth_delegate_->OnAuthFailed(error_message);
   } else if (event == kEventOnAgreed) {
     DCHECK(tos_delegate_);
@@ -641,6 +605,8 @@ void ArcSupportHost::OnMessage(const base::DictionaryValue& message) {
   } else if (event == kEventOnSendFeedbackClicked) {
     DCHECK(error_delegate_);
     error_delegate_->OnSendFeedbackClicked();
+  } else if (event == kEventOnOpenSettingsPageClicked) {
+    chrome::ShowSettingsSubPageForProfile(profile_, std::string());
   } else {
     LOG(ERROR) << "Unknown message: " << event;
     NOTREACHED();

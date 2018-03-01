@@ -37,7 +37,10 @@
           "-v",
           "--upload-results",
           "--output-format=histograms",
-          "--browser=release"
+          "--output-format=json-test-results",
+          "--browser=release",
+          "--xvfb",
+          "--also-run-disabled-tests"
         ],
         "isolate_name": "telemetry_perf_tests",
         "name": "dummy_benchmark.histogram_benchmark_1",
@@ -50,6 +53,69 @@
           "hard_timeout": 10800,
           "ignore_task_failure": false,
           "io_timeout": 3600
+        }
+      },
+      {
+        "args": [
+          "dummy_benchmark.histogram_benchmark_1",
+          "-v",
+          "--upload-results",
+          "--output-format=histograms",
+          "--output-format=json-test-results",
+          "--browser=reference",
+          "--xvfb",
+          "--also-run-disabled-tests"
+        ],
+        "isolate_name": "telemetry_perf_tests",
+        "name": "dummy_benchmark.histogram_benchmark_1.reference",
+        "override_compile_targets": [
+          "telemetry_perf_tests"
+        ],
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "expiration": 36000,
+          "hard_timeout": 10800,
+          "ignore_task_failure": false,
+          "io_timeout": 3600
+        }
+      }
+    ]
+  },
+  "One Buildbot Step Test Builder": {
+    "isolated_scripts": [
+      {
+        "args": [
+          "--builder", "One Buildbot Step Test Builder",
+          "-v",
+          "--output-format=histograms",
+          "--output-format=json-test-results",
+          "--xvfb",
+          "--browser=release"
+        ],
+        "isolate_name": "telemetry_perf_tests_new",
+        "name": "benchmarks for bot 1",
+        "override_compile_targets": [
+          "telemetry_perf_tests_new"
+        ],
+        "swarming": {
+          "can_use_on_swarming_builders": true,
+          "dimension_sets": [
+            {
+              "pool": "Chrome-perf-fyi"
+            }
+          ],
+          "expiration": 36000,
+          "hard_timeout": 10800,
+          "ignore_task_failure": false,
+          "io_timeout": 3600
+        },
+        "trigger_script": {
+          "script": "//tools/perf/perf_device_trigger.py",
+          "args": [
+            "--bot-id", "swarm823-c4",
+            "--bot-id", "swarm846-c4",
+            "--bot-id", "swarm847-c4"
+          ]
         }
       }
     ]

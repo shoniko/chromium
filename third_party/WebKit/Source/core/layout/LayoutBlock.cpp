@@ -25,7 +25,6 @@
 #include "core/layout/LayoutBlock.h"
 
 #include <memory>
-#include "core/HTMLNames.h"
 #include "core/css/StyleEngine.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
@@ -36,6 +35,7 @@
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLMarqueeElement.h"
+#include "core/html_names.h"
 #include "core/layout/HitTestLocation.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutAnalyzer.h"
@@ -56,7 +56,7 @@
 #include "core/paint/ObjectPaintInvalidator.h"
 #include "core/paint/PaintLayer.h"
 #include "core/style/ComputedStyle.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/StdLibExtras.h"
 
@@ -553,7 +553,8 @@ void LayoutBlock::AddVisualOverflowFromTheme() {
     return;
 
   IntRect inflated_rect = PixelSnappedBorderBoxRect();
-  LayoutTheme::GetTheme().AddVisualOverflow(*this, inflated_rect);
+  LayoutTheme::GetTheme().AddVisualOverflow(GetNode(), StyleRef(),
+                                            inflated_rect);
   AddSelfVisualOverflow(LayoutRect(inflated_rect));
 }
 
@@ -1352,8 +1353,8 @@ void LayoutBlock::ComputeIntrinsicLogicalWidths(
 
   max_logical_width = std::max(min_logical_width, max_logical_width);
 
-  if (isHTMLMarqueeElement(GetNode()) &&
-      toHTMLMarqueeElement(GetNode())->IsHorizontal())
+  if (IsHTMLMarqueeElement(GetNode()) &&
+      ToHTMLMarqueeElement(GetNode())->IsHorizontal())
     min_logical_width = LayoutUnit();
 
   if (IsTableCell()) {
@@ -1455,7 +1456,7 @@ void LayoutBlock::ComputeBlockPreferredLogicalWidths(
       child->SetPreferredLogicalWidthsDirty();
     }
 
-    RefPtr<ComputedStyle> child_style = child->MutableStyle();
+    scoped_refptr<ComputedStyle> child_style = child->MutableStyle();
     if (child->IsFloating() ||
         (child->IsBox() && ToLayoutBox(child)->AvoidsFloats())) {
       LayoutUnit float_total_width = float_left_width + float_right_width;
@@ -1591,7 +1592,7 @@ bool LayoutBlock::HasLineIfEmpty() const {
     return true;
 
   if (GetNode()->IsShadowRoot() &&
-      isHTMLInputElement(ToShadowRoot(GetNode())->host()))
+      IsHTMLInputElement(ToShadowRoot(GetNode())->host()))
     return true;
 
   return false;
@@ -1636,8 +1637,10 @@ LayoutUnit LayoutBlock::BaselinePosition(
     //        baselines.
     // FIXME: Need to patch form controls to deal with vertical lines.
     if (Style()->HasAppearance() &&
-        !LayoutTheme::GetTheme().IsControlContainer(Style()->Appearance()))
-      return LayoutTheme::GetTheme().BaselinePosition(this);
+        !LayoutTheme::GetTheme().IsControlContainer(Style()->Appearance())) {
+      return Size().Height() + MarginTop() +
+             LayoutTheme::GetTheme().BaselinePositionAdjustment(StyleRef());
+    }
 
     LayoutUnit baseline_pos = (IsWritingModeRoot() && !IsRubyRun())
                                   ? LayoutUnit(-1)
@@ -1810,15 +1813,6 @@ LayoutBlockFlow* LayoutBlock::NearestInnerBlockWithFirstLine() {
   return nullptr;
 }
 
-void LayoutBlock::UpdateHitTestResult(HitTestResult& result,
-                                      const LayoutPoint& point) {
-  if (result.InnerNode())
-    return;
-
-  if (Node* n = NodeForHitTest())
-    result.SetNodeAndPosition(n, point);
-}
-
 // An inline-block uses its inlineBox as the inlineBoxWrapper,
 // so the firstChild() is nullptr if the only child is an empty inline-block.
 inline bool LayoutBlock::IsInlineBoxWrapperActuallyChild() const {
@@ -1834,9 +1828,10 @@ bool LayoutBlock::ShouldPaintDragCaret() const {
   return GetFrame()->GetPage()->GetDragCaret().ShouldPaintCaret(*this);
 }
 
-LayoutRect LayoutBlock::LocalCaretRect(InlineBox* inline_box,
-                                       int caret_offset,
-                                       LayoutUnit* extra_width_to_end_of_line) {
+LayoutRect LayoutBlock::LocalCaretRect(
+    const InlineBox* inline_box,
+    int caret_offset,
+    LayoutUnit* extra_width_to_end_of_line) const {
   // Do the normal calculation in most cases.
   if ((FirstChild() && !FirstChild()->IsPseudoElement()) ||
       IsInlineBoxWrapperActuallyChild())
@@ -1980,7 +1975,7 @@ LayoutBlock* LayoutBlock::CreateAnonymousWithParentAndDisplay(
     new_display = EDisplay::kBlock;
   }
 
-  RefPtr<ComputedStyle> new_style =
+  scoped_refptr<ComputedStyle> new_style =
       ComputedStyle::CreateAnonymousStyleWithDisplay(parent->StyleRef(),
                                                      new_display);
   parent->UpdateAnonymousChildStyle(*new_box, *new_style);

@@ -7,9 +7,9 @@
 
 #include <stdint.h>
 
-#include <map>
 #include <set>
 
+#include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
@@ -76,10 +76,10 @@ class WatcherDispatcher : public Dispatcher {
   bool closed_ = false;
 
   // A mapping from context to Watch.
-  std::map<uintptr_t, scoped_refptr<Watch>> watches_;
+  base::flat_map<uintptr_t, scoped_refptr<Watch>> watches_;
 
   // A mapping from watched dispatcher to Watch.
-  std::map<Dispatcher*, scoped_refptr<Watch>> watched_handles_;
+  base::flat_map<Dispatcher*, scoped_refptr<Watch>> watched_handles_;
 
   // The set of all Watch instances which are currently ready to signal. This is
   // used for efficient arming behavior, as it allows for O(1) discovery of
@@ -94,9 +94,6 @@ class WatcherDispatcher : public Dispatcher {
   // NOTE: This pointer is only used to index |ready_watches_| and may point to
   // an invalid object. It must therefore never be dereferenced.
   const Watch* last_watch_to_block_arming_ = nullptr;
-
-  // TODO(crbug.com/740044): Remove this.
-  uint32_t sentinel_value_for_debugging_ = 0x12345678;
 
   DISALLOW_COPY_AND_ASSIGN(WatcherDispatcher);
 };

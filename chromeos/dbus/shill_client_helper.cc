@@ -96,26 +96,7 @@ void OnStringMethodWithErrorCallback(
 void OnVoidMethod(ShillClientHelper::RefHolder* ref_holder,
                   VoidDBusMethodCallback callback,
                   dbus::Response* response) {
-  std::move(callback).Run(response ? DBUS_METHOD_CALL_SUCCESS
-                                   : DBUS_METHOD_CALL_FAILURE);
-}
-
-// Handles responses for methods with ObjectPath results.
-void OnObjectPathMethod(
-    ShillClientHelper::RefHolder* ref_holder,
-    const ObjectPathDBusMethodCallback& callback,
-    dbus::Response* response) {
-  if (!response) {
-    callback.Run(DBUS_METHOD_CALL_FAILURE, dbus::ObjectPath());
-    return;
-  }
-  dbus::MessageReader reader(response);
-  dbus::ObjectPath result;
-  if (!reader.PopObjectPath(&result)) {
-    callback.Run(DBUS_METHOD_CALL_FAILURE, dbus::ObjectPath());
-    return;
-  }
-  callback.Run(DBUS_METHOD_CALL_SUCCESS, result);
+  std::move(callback).Run(response != nullptr);
 }
 
 // Handles responses for methods with ObjectPath results and no status.
@@ -284,17 +265,6 @@ void ShillClientHelper::CallVoidMethod(dbus::MethodCall* method_call,
       base::BindOnce(&OnVoidMethod,
                      base::Owned(new RefHolder(weak_ptr_factory_.GetWeakPtr())),
                      std::move(callback)));
-}
-
-void ShillClientHelper::CallObjectPathMethod(
-    dbus::MethodCall* method_call,
-    const ObjectPathDBusMethodCallback& callback) {
-  DCHECK(!callback.is_null());
-  proxy_->CallMethod(
-      method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
-      base::BindOnce(&OnObjectPathMethod,
-                     base::Owned(new RefHolder(weak_ptr_factory_.GetWeakPtr())),
-                     callback));
 }
 
 void ShillClientHelper::CallObjectPathMethodWithErrorCallback(

@@ -34,14 +34,18 @@ class CastMediaSinkService
       public DnsSdRegistry::DnsSdObserver,
       public base::RefCountedThreadSafe<CastMediaSinkService> {
  public:
-  CastMediaSinkService(const OnSinksDiscoveredCallback& callback,
-                       content::BrowserContext* browser_context);
+  CastMediaSinkService(
+      const OnSinksDiscoveredCallback& callback,
+      content::BrowserContext* browser_context,
+      const scoped_refptr<base::SequencedTaskRunner>& task_runner);
 
   // Used by unit tests.
-  CastMediaSinkService(const OnSinksDiscoveredCallback& callback,
-                       std::unique_ptr<CastMediaSinkServiceImpl,
-                                       content::BrowserThread::DeleteOnIOThread>
-                           cast_media_sink_service_impl);
+  CastMediaSinkService(
+      const OnSinksDiscoveredCallback& callback,
+      const scoped_refptr<base::SequencedTaskRunner>& task_runner,
+      std::unique_ptr<CastMediaSinkServiceImpl,
+                      content::BrowserThread::DeleteOnIOThread>
+          cast_media_sink_service_impl);
 
   // mDNS service types.
   static const char kCastServiceType[];
@@ -49,12 +53,10 @@ class CastMediaSinkService
   // MediaSinkService implementation
   void Start() override;
   void Stop() override;
+  void ForceSinkDiscoveryCallback() override;
+  void OnUserGesture() override;
 
   void SetDnsSdRegistryForTest(DnsSdRegistry* registry);
-
-  // Forces a mDNS discovery if the service has been started; No-op otherwise.
-  // It is invoked by OnUserGesture().
-  void ForceDiscovery();
 
  protected:
   ~CastMediaSinkService() override;
@@ -83,10 +85,18 @@ class CastMediaSinkService
   // and lives as long as the browser process.
   DnsSdRegistry* dns_sd_registry_ = nullptr;
 
+  // Task runner for the IO thread.
+  scoped_refptr<base::SequencedTaskRunner> task_runner_;
+
   // Created on the UI thread and destroyed on the IO thread.
   std::unique_ptr<CastMediaSinkServiceImpl,
                   content::BrowserThread::DeleteOnIOThread>
       cast_media_sink_service_impl_;
+
+  // List of cast sinks found in current round of mDNS discovery.
+  std::vector<MediaSinkInternal> cast_sinks_;
+
+  content::BrowserContext* browser_context_;
 
   DISALLOW_COPY_AND_ASSIGN(CastMediaSinkService);
 };

@@ -32,13 +32,15 @@
 #define WebURLRequest_h
 
 #include <memory>
-#include "WebAddressSpace.h"
-#include "WebCachePolicy.h"
 #include "WebCommon.h"
 #include "WebHTTPBody.h"
 #include "WebReferrerPolicy.h"
 
 namespace blink {
+
+namespace mojom {
+enum class FetchCacheMode : int32_t;
+}  // namespace mojom
 
 class ResourceRequest;
 class WebHTTPBody;
@@ -106,6 +108,8 @@ class WebURLRequest {
     kFrameTypeTopLevel
   };
 
+  // Corresponds to Fetch request's "mode" and "use-CORS-preflight flag":
+  // https://fetch.spec.whatwg.org/#concept-request-mode
   enum FetchRequestMode : uint8_t {
     kFetchRequestModeSameOrigin,
     kFetchRequestModeNoCORS,
@@ -114,22 +118,22 @@ class WebURLRequest {
     kFetchRequestModeNavigate
   };
 
+  // Corresponds to Fetch request's "credentials mode":
+  // https://fetch.spec.whatwg.org/#concept-request-credentials-mode
   enum FetchCredentialsMode : uint8_t {
     kFetchCredentialsModeOmit,
     kFetchCredentialsModeSameOrigin,
     kFetchCredentialsModeInclude,
+
+    // "password" mode is not defined in the Fetch spec, but can be seen in
+    // an example code for the Credential Management Level 1.
+    // https://w3c.github.io/webappsec-credential-management/#passwords
+    // TODO(battre): Remove kFetchCredentialsModePassword.
     kFetchCredentialsModePassword
   };
 
-  enum FetchRequestCacheMode : uint8_t {
-    kFetchRequestCacheModeDefault,
-    kFetchRequestCacheModeNoStore,
-    kFetchRequestCacheModeReload,
-    kFetchRequestCacheModeNoCache,
-    kFetchRequestCacheModeForceCache,
-    kFetchRequestCacheModeOnlyIfCached
-  };
-
+  // Corresponds to Fetch request's "redirect mode":
+  // https://fetch.spec.whatwg.org/#concept-request-redirect-mode
   enum FetchRedirectMode : uint8_t {
     kFetchRedirectModeFollow,
     kFetchRedirectModeError,
@@ -166,6 +170,7 @@ class WebURLRequest {
     kPreviewsOff = 1 << 5,  // Request a normal (non-Preview) version of
                             // the resource. Server transformations may
                             // still happen if the page is heavy.
+    kNoScriptOn = 1 << 6,   // Request that script be disabled for page load.
     kPreviewsStateLast = kPreviewsOff
   };
 
@@ -217,8 +222,8 @@ class WebURLRequest {
   BLINK_PLATFORM_EXPORT bool AllowStoredCredentials() const;
   BLINK_PLATFORM_EXPORT void SetAllowStoredCredentials(bool);
 
-  BLINK_PLATFORM_EXPORT WebCachePolicy GetCachePolicy() const;
-  BLINK_PLATFORM_EXPORT void SetCachePolicy(WebCachePolicy);
+  BLINK_PLATFORM_EXPORT mojom::FetchCacheMode GetCacheMode() const;
+  BLINK_PLATFORM_EXPORT void SetCacheMode(mojom::FetchCacheMode);
 
   BLINK_PLATFORM_EXPORT WebString HttpMethod() const;
   BLINK_PLATFORM_EXPORT void SetHTTPMethod(const WebString&);

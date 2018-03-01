@@ -45,7 +45,7 @@
 namespace {
 
 #if !defined(OS_ANDROID)
-// This list should be kept in sync with chrome/common/url_constants.h.
+// This list should be kept in sync with chrome/common/webui_url_constants.h.
 // Only include useful sub-pages, confirmation alerts are not useful.
 const char* const kChromeSettingsSubPages[] = {
     chrome::kAutofillSubPage,        chrome::kClearBrowserDataSubPage,
@@ -318,7 +318,7 @@ void ChromeAutocompleteProviderClient::StartServiceWorker(
     return;
 
   context->StartServiceWorkerForNavigationHint(destination_url,
-                                               base::Bind(&NoopCallback));
+                                               base::BindOnce(&NoopCallback));
 }
 
 void ChromeAutocompleteProviderClient::OnAutocompleteControllerResultReady(

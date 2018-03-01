@@ -6,7 +6,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -305,7 +304,7 @@ void URLRequestFtpJob::GetAuthChallengeInfo(
 
   scoped_refptr<AuthChallengeInfo> auth_info(new AuthChallengeInfo);
   auth_info->is_proxy = false;
-  auth_info->challenger = url::Origin(request_->url());
+  auth_info->challenger = url::Origin::Create(request_->url());
   // scheme and realm are kept empty.
   DCHECK(auth_info->scheme.empty());
   DCHECK(auth_info->realm.empty());

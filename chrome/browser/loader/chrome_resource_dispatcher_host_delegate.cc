@@ -19,6 +19,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/client_hints/client_hints.h"
 #include "chrome/browser/component_updater/component_updater_resource_throttle.h"
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/download/download_resource_throttle.h"
@@ -42,6 +43,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/features.h"
 #include "chrome/common/url_constants.h"
+#include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_data.h"
@@ -49,12 +51,11 @@
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_util.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/nacl/common/features.h"
 #include "components/offline_pages/features/features.h"
 #include "components/policy/core/common/cloud/policy_header_io_helper.h"
 #include "components/previews/core/previews_experiments.h"
 #include "components/previews/core/previews_io_data.h"
-#include "components/rappor/public/rappor_utils.h"
-#include "components/rappor/rappor_service_impl.h"
 #include "components/variations/net/variations_http_headers.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_data.h"
@@ -83,12 +84,11 @@
 #include "net/url_request/url_request.h"
 #include "third_party/protobuf/src/google/protobuf/repeated_field.h"
 
-#if !defined(DISABLE_NACL)
+#if BUILDFLAG(ENABLE_NACL)
 #include "chrome/browser/component_updater/pnacl_component_installer.h"
 #endif
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-#include "chrome/browser/apps/app_url_redirector.h"
 #include "chrome/browser/extensions/api/streams_private/streams_private_api.h"
 #include "chrome/browser/extensions/user_script_listener.h"
 #include "chrome/browser/renderer_host/chrome_navigation_ui_data.h"
@@ -257,7 +257,7 @@ void LaunchURL(
   }
 }
 
-#if !defined(DISABLE_NACL)
+#if BUILDFLAG(ENABLE_NACL)
 void AppendComponentUpdaterThrottles(
     net::URLRequest* request,
     const ResourceRequestInfo& info,
@@ -292,7 +292,7 @@ void AppendComponentUpdaterThrottles(
         component_updater::GetOnDemandResourceThrottle(cus, crx_id)));
   }
 }
-#endif  // !defined(DISABLE_NACL)
+#endif  // BUILDFLAG(ENABLE_NACL)
 
 #if BUILDFLAG(ENABLE_OFFLINE_PAGES)
 // Translate content::ResourceType to a type to use for Offliners.
@@ -454,6 +454,8 @@ void ChromeResourceDispatcherHostDelegate::RequestBeginning(
     std::vector<std::unique_ptr<content::ResourceThrottle>>* throttles) {
   if (safe_browsing_.get())
     safe_browsing_->OnResourceRequest(request);
+  ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
+  client_hints::RequestBeginning(request, io_data->GetCookieSettings());
 
   const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
 
@@ -466,9 +468,6 @@ void ChromeResourceDispatcherHostDelegate::RequestBeginning(
                                          info->GetWebContentsGetterForRequest(),
                                          info->GetResourceType()));
 #endif  // BUILDFLAG(ENABLE_OFFLINE_PAGES)
-
-  ProfileIOData* io_data = ProfileIOData::FromResourceContext(
-      resource_context);
 
 #if defined(OS_ANDROID)
   if (resource_type != content::RESOURCE_TYPE_MAIN_FRAME)
@@ -517,10 +516,10 @@ void ChromeResourceDispatcherHostDelegate::RequestBeginning(
                                   resource_context,
                                   resource_type,
                                   throttles);
-#if !defined(DISABLE_NACL)
+#if BUILDFLAG(ENABLE_NACL)
   AppendComponentUpdaterThrottles(request, *info, resource_context,
                                   resource_type, throttles);
-#endif  // !defined(DISABLE_NACL)
+#endif  // BUILDFLAG(ENABLE_NACL)
 
   if (io_data->loading_predictor_observer()) {
     io_data->loading_predictor_observer()->OnRequestStarted(
@@ -910,8 +909,6 @@ content::PreviewsState ChromeResourceDispatcherHostDelegate::GetPreviewsState(
     // previews. If the user is not transitioned fully to the blacklist, respect
     // the old prefs rules.
     if (data_reduction_proxy_io_data->IsEnabled() &&
-        (!data_reduction_proxy_io_data->config()->lofi_off() ||
-         data_reduction_proxy::params::IsBlackListEnabledForServerPreviews()) &&
         previews::params::IsClientLoFiEnabled() &&
         previews_io_data->ShouldAllowPreviewAtECT(
             url_request, previews::PreviewsType::LOFI,
@@ -974,24 +971,4 @@ ChromeResourceDispatcherHostDelegate::CreateClientCertStore(
     content::ResourceContext* resource_context) {
   return ProfileIOData::FromResourceContext(resource_context)->
       CreateClientCertStore();
-}
-
-// Record RAPPOR for aborted main frame loads. Separate into a fast and
-// slow bucket because a shocking number of aborts happen under 100ms.
-void ChromeResourceDispatcherHostDelegate::OnAbortedFrameLoad(
-    const GURL& url,
-    base::TimeDelta request_loading_time) {
-  if (!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI)) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        base::BindOnce(
-            &ChromeResourceDispatcherHostDelegate::OnAbortedFrameLoad,
-            base::Unretained(this), url, request_loading_time));
-    return;
-  }
-
-  std::string metric_name = (request_loading_time.InMilliseconds() < 100 ?
-      "Net.ErrAborted.Fast" : "Net.ErrAborted.Slow");
-  rappor::SampleDomainAndRegistryFromGURL(
-      g_browser_process->rappor_service(), metric_name, url);
 }

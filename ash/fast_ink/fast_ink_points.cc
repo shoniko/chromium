@@ -9,6 +9,7 @@
 #include <limits>
 
 #include "base/containers/adapters.h"
+#include "base/containers/circular_deque.h"
 #include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 
@@ -25,6 +26,13 @@ void FastInkPoints::AddPoint(const gfx::PointF& point,
   new_point.location = point;
   new_point.time = time;
   points_.push_back(new_point);
+}
+
+void FastInkPoints::AddGap() {
+  // Not doing anything special regarding prediction, as in real usage there
+  // will be a gap in timestamps, and the prediction algorithm will reject the
+  // points that are too old.
+  points_.back().gap_after = true;
 }
 
 void FastInkPoints::MoveForwardToTime(const base::TimeTicks& latest_time) {
@@ -80,7 +88,8 @@ int FastInkPoints::GetNumberOfPoints() const {
   return points_.size();
 }
 
-const std::deque<FastInkPoints::FastInkPoint>& FastInkPoints::points() const {
+const base::circular_deque<FastInkPoints::FastInkPoint>& FastInkPoints::points()
+    const {
   return points_;
 }
 

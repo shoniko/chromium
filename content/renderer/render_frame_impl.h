@@ -8,7 +8,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <deque>
 #include <map>
 #include <memory>
 #include <set>
@@ -16,6 +15,7 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/containers/circular_deque.h"
 #include "base/containers/id_map.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
@@ -63,7 +63,6 @@
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/interfaces/connector.mojom.h"
 #include "services/service_manager/public/interfaces/interface_provider.mojom.h"
-#include "third_party/WebKit/public/platform/WebCachePolicy.h"
 #include "third_party/WebKit/public/platform/WebEffectiveConnectionType.h"
 #include "third_party/WebKit/public/platform/WebFeaturePolicy.h"
 #include "third_party/WebKit/public/platform/WebFocusType.h"
@@ -109,6 +108,7 @@ struct WebCursorInfo;
 struct WebFindOptions;
 class WebLayerTreeView;
 class WebRelatedAppsFetcher;
+struct WebRemoteScrollProperties;
 }  // namespace blink
 
 namespace gfx {
@@ -161,6 +161,7 @@ struct CustomContextMenuContext;
 struct FileChooserFileInfo;
 struct FileChooserParams;
 struct FrameOwnerProperties;
+struct FramePolicy;
 struct FrameReplicationState;
 struct NavigationParams;
 struct RequestNavigationParams;
@@ -193,6 +194,7 @@ class CONTENT_EXPORT RenderFrameImpl
       const ScreenInfo& screen_info,
       CompositorDependencies* compositor_deps,
       blink::WebFrame* opener,
+      const base::UnguessableToken& devtools_frame_token,
       const FrameReplicationState& replicated_state);
 
   // Creates a new RenderFrame with |routing_id|.  If |proxy_routing_id| is
@@ -201,17 +203,25 @@ class CONTENT_EXPORT RenderFrameImpl
   // |previous_sibling_routing_id|, or as the first child if
   // |previous_sibling_routing_id| is MSG_ROUTING_NONE. Otherwise, the frame is
   // semi-orphaned until it commits, at which point it replaces the proxy
-  // identified by |proxy_routing_id|.  The frame's opener is set to the frame
-  // identified by |opener_routing_id|.  The frame is created as a child of the
-  // RenderFrame identified by |parent_routing_id| or as the top-level frame if
-  // the latter is MSG_ROUTING_NONE.  Note: This is called only when
-  // RenderFrame is being created in response to IPC message from the browser
-  // process. All other frame creation is driven through Blink and Create.
+  // identified by |proxy_routing_id|.
+  // The frame's opener is set to the frame identified by |opener_routing_id|.
+  // The frame is created as a child of the RenderFrame identified by
+  // |parent_routing_id| or as the top-level frame if
+  // the latter is MSG_ROUTING_NONE.
+  // |devtools_frame_token| is passed from the browser and corresponds to the
+  // owner FrameTreeNode.  It can only be used for tagging requests and calls
+  // for context frame attribution. It should never be passed back to the
+  // browser as a frame identifier in the control flows calls.
+  //
+  // Note: This is called only when RenderFrame is being created in response
+  // to IPC message from the browser process. All other frame creation is driven
+  // through Blink and Create.
   static void CreateFrame(int routing_id,
                           int proxy_routing_id,
                           int opener_routing_id,
                           int parent_routing_id,
                           int previous_sibling_routing_id,
+                          const base::UnguessableToken& devtools_frame_token,
                           const FrameReplicationState& replicated_state,
                           CompositorDependencies* compositor_deps,
                           const mojom::CreateFrameWidgetParams& params,
@@ -226,12 +236,17 @@ class CONTENT_EXPORT RenderFrameImpl
   // Used by content_layouttest_support to hook into the creation of
   // RenderFrameImpls.
   struct CreateParams {
-    CreateParams(RenderViewImpl* render_view, int32_t routing_id)
-        : render_view(render_view), routing_id(routing_id) {}
+    CreateParams(RenderViewImpl* render_view,
+                 int32_t routing_id,
+                 const base::UnguessableToken& devtools_frame_token)
+        : render_view(render_view),
+          routing_id(routing_id),
+          devtools_frame_token(devtools_frame_token) {}
     ~CreateParams() {}
 
     RenderViewImpl* render_view;
     int32_t routing_id;
+    base::UnguessableToken devtools_frame_token;
   };
 
   using CreateRenderFrameImplFunction =
@@ -302,6 +317,14 @@ class CONTENT_EXPORT RenderFrameImpl
   RenderAccessibilityImpl* render_accessibility() {
     return render_accessibility_;
   }
+
+  // Whether or not the frame is currently swapped into the frame tree.  If
+  // this is false, this is a provisional frame which has not committed yet,
+  // and which will swap with a proxy when it commits.
+  //
+  // TODO(https://crbug.com/578349): Remove this once provisional frames are
+  // gone, and clean up code that depends on it.
+  bool in_frame_tree() { return in_frame_tree_; }
 
   void HandleWebAccessibilityEvent(const blink::WebAXObject& obj,
                                    blink::WebAXEvent event);
@@ -465,9 +488,8 @@ class CONTENT_EXPORT RenderFrameImpl
   bool IsPasting() const override;
   blink::WebPageVisibilityState GetVisibilityState() const override;
   bool IsBrowserSideNavigationPending() override;
-  base::SingleThreadTaskRunner* GetTimerTaskRunner() override;
-  base::SingleThreadTaskRunner* GetLoadingTaskRunner() override;
-  base::SingleThreadTaskRunner* GetUnthrottledTaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner(
+      blink::TaskType task_type) override;
   int GetEnabledBindings() const override;
   // Returns non-null.
   // It is invalid to call this in an incomplete env where
@@ -548,7 +570,6 @@ class CONTENT_EXPORT RenderFrameImpl
       const blink::WebVector<blink::WebString>& stopped_matching_selectors)
       override;
   void SetHasReceivedUserGesture() override;
-  void SetDevToolsFrameId(const blink::WebString& devtools_frame_id) override;
   bool ShouldReportDetailedMessageForSource(
       const blink::WebString& source) override;
   void DidAddMessageToConsole(const blink::WebConsoleMessage& message,
@@ -593,9 +614,12 @@ class CONTENT_EXPORT RenderFrameImpl
   void DidChangeThemeColor() override;
   void DispatchLoad() override;
   blink::WebEffectiveConnectionType GetEffectiveConnectionType() override;
+  void SetEffectiveConnectionTypeForTesting(
+      blink::WebEffectiveConnectionType) override;
   bool IsClientLoFiActiveForFrame() override;
   bool ShouldUseClientLoFiForRequest(const blink::WebURLRequest&) override;
   void DidBlockFramebust(const blink::WebURL& url) override;
+  blink::WebString GetInstrumentationToken() override;
   void AbortClientNavigation() override;
   void DidChangeSelection(bool is_empty_selection) override;
   bool HandleCurrentKeyboardEvent() override;
@@ -626,6 +650,10 @@ class CONTENT_EXPORT RenderFrameImpl
   void DidDisplayContentWithCertificateErrors(
       const blink::WebURL& url) override;
   void DidRunContentWithCertificateErrors(const blink::WebURL& url) override;
+  bool OverrideLegacySymantecCertConsoleMessage(
+      const blink::WebURL& url,
+      base::Time cert_validity_start,
+      blink::WebString* console_message) override;
   void DidChangePerformanceTiming() override;
   void DidObserveLoadingBehavior(
       blink::WebLoadingBehaviorFlag behavior) override;
@@ -654,7 +682,7 @@ class CONTENT_EXPORT RenderFrameImpl
   blink::WebEncryptedMediaClient* EncryptedMediaClient() override;
   blink::WebString UserAgentOverride() override;
   blink::WebString DoNotTrackValue() override;
-  bool AllowWebGL(bool default_value) override;
+  bool ShouldBlockWebGL() override;
   bool AllowContentInitiatedDataUrlNavigations(
       const blink::WebURL& url) override;
   blink::WebScreenOrientationClient* GetWebScreenOrientationClient() override;
@@ -682,10 +710,14 @@ class CONTENT_EXPORT RenderFrameImpl
       const blink::WebSecurityOrigin& security_origin,
       blink::WebSetSinkIdCallbacks* web_callbacks) override;
   blink::WebPageVisibilityState VisibilityState() const override;
-  std::unique_ptr<blink::WebURLLoader> CreateURLLoader(
-      const blink::WebURLRequest& request,
-      base::SingleThreadTaskRunner* task_runner) override;
+  std::unique_ptr<blink::WebURLLoaderFactory> CreateURLLoaderFactory() override;
   void DraggableRegionsChanged() override;
+  // |rect_to_scroll| is with respect to this frame's origin. |rect_to_scroll|
+  // will later be converted to this frame's parent frame origin before being
+  // continuing recursive scrolling in the parent frame's process.
+  void ScrollRectToVisibleInParentFrame(
+      const blink::WebRect& rect_to_scroll,
+      const blink::WebRemoteScrollProperties& properties) override;
 
   // WebFrameSerializerClient implementation:
   void DidSerializeDataForFrame(
@@ -705,8 +737,8 @@ class CONTENT_EXPORT RenderFrameImpl
                  mojom::FrameRequest request,
                  mojom::FrameHostInterfaceBrokerPtr frame_host);
 
-  // Virtual so the test render frame can flush the interface.
-  virtual mojom::FrameHostAssociatedPtr GetFrameHost();
+  // Virtual so that a TestRenderFrame can mock out the interface.
+  virtual mojom::FrameHost* GetFrameHost();
 
   void BindFrameBindingsControl(
       mojom::FrameBindingsControlAssociatedRequest request);
@@ -857,14 +889,18 @@ class CONTENT_EXPORT RenderFrameImpl
     T original_value_;
   };
 
+  class FrameURLLoaderFactory;
+
   typedef std::map<GURL, double> HostZoomLevels;
   typedef std::pair<url::Origin, blink::mojom::EngagementLevel>
       EngagementOriginAndLevel;
 
   // Creates a new RenderFrame. |render_view| is the RenderView object that this
   // frame belongs to.
-  static RenderFrameImpl* Create(RenderViewImpl* render_view,
-                                 int32_t routing_id);
+  static RenderFrameImpl* Create(
+      RenderViewImpl* render_view,
+      int32_t routing_id,
+      const base::UnguessableToken& devtools_frame_token);
 
   // Functions to add and remove observers for this object.
   void AddObserver(RenderFrameObserver* observer);
@@ -899,6 +935,7 @@ class CONTENT_EXPORT RenderFrameImpl
                  const FrameReplicationState& replicated_frame_state);
   void OnDeleteFrame();
   void OnStop();
+  void OnDroppedNavigation();
   void OnCollapse(bool collapse);
   void OnShowContextMenu(const gfx::Point& location);
   void OnContextMenuClosed(const CustomContextMenuContext& custom_context);
@@ -915,7 +952,9 @@ class CONTENT_EXPORT RenderFrameImpl
   void OnDelete();
   void OnSelectAll();
   void OnSelectRange(const gfx::Point& base, const gfx::Point& extent);
-  void OnAdjustSelectionByCharacterOffset(int start_adjust, int end_adjust);
+  void OnAdjustSelectionByCharacterOffset(int start_adjust,
+                                          int end_adjust,
+                                          bool show_selection_menu);
   void OnCollapseSelection();
   void OnMoveRangeSelectionExtent(const gfx::Point& point);
   void OnReplace(const base::string16& text);
@@ -952,9 +991,7 @@ class CONTENT_EXPORT RenderFrameImpl
   void OnSnapshotAccessibilityTree(int callback_id);
   void OnExtractSmartClipData(uint32_t callback_id, const gfx::Rect& rect);
   void OnUpdateOpener(int opener_routing_id);
-  void OnDidUpdateFramePolicy(
-      blink::WebSandboxFlags flags,
-      const ParsedFeaturePolicyHeader& container_policy);
+  void OnDidUpdateFramePolicy(const FramePolicy& frame_policy);
   void OnSetFrameOwnerProperties(
       const FrameOwnerProperties& frame_owner_properties);
   void OnAdvanceFocus(blink::WebFocusType type, int32_t source_routing_id);
@@ -1131,7 +1168,7 @@ class CONTENT_EXPORT RenderFrameImpl
   // Sets the NavigationState on the DocumentState based on
   // the value of |pending_navigation_params_|.
   void UpdateNavigationState(DocumentState* document_state,
-                             bool was_within_same_page,
+                             bool was_within_same_document,
                              bool content_initiated);
 
 #if BUILDFLAG(ENABLE_PLUGINS)
@@ -1178,6 +1215,10 @@ class CONTENT_EXPORT RenderFrameImpl
   void BindWidget(mojom::WidgetRequest request);
 
   void ShowDeferredContextMenu(const ContextMenuParams& params);
+
+  mojom::URLLoaderFactory* custom_url_loader_factory() {
+    return custom_url_loader_factory_.get();
+  }
 
   // Stores the WebLocalFrame we are associated with.  This is null from the
   // constructor until BindToFrame() is called, and it is null after
@@ -1386,7 +1427,8 @@ class CONTENT_EXPORT RenderFrameImpl
   // callback, and the remaining elements are the other file chooser completion
   // still waiting to be run (in order).
   struct PendingFileChooser;
-  std::deque<std::unique_ptr<PendingFileChooser>> file_chooser_completions_;
+  base::circular_deque<std::unique_ptr<PendingFileChooser>>
+      file_chooser_completions_;
 
 #if BUILDFLAG(USE_EXTERNAL_POPUP_MENU)
   // The external popup for the currently showing select popup.
@@ -1439,6 +1481,7 @@ class CONTENT_EXPORT RenderFrameImpl
   bool name_changed_before_first_commit_ = false;
 
   bool browser_side_navigation_pending_ = false;
+  GURL browser_side_navigation_pending_url_;
 
   // A bitwise OR of bindings types that have been enabled for this RenderFrame.
   // See BindingsPolicy for details.
@@ -1470,6 +1513,7 @@ class CONTENT_EXPORT RenderFrameImpl
 
   service_manager::BindSourceInfo browser_info_;
 
+  mojom::FrameHostAssociatedPtr frame_host_ptr_;
   mojo::BindingSet<service_manager::mojom::InterfaceProvider>
       interface_provider_bindings_;
 
@@ -1487,6 +1531,13 @@ class CONTENT_EXPORT RenderFrameImpl
   std::vector<media::RoutingTokenCallback> pending_routing_token_callbacks_;
 
   RenderThreadImpl::RendererMemoryMetrics peak_memory_metrics_;
+
+  // Used for devtools instrumentation and trace-ability. This token is
+  // used to tag calls and requests in order to attribute them to the context
+  // frame.
+  // |devtools_frame_token_| is only defined by the browser and is never
+  // sent back from the renderer in the control calls.
+  blink::WebString devtools_frame_token_;
 
   base::WeakPtrFactory<RenderFrameImpl> weak_factory_;
 

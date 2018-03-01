@@ -91,6 +91,9 @@ class AURA_EXPORT WindowManagerClient {
   // cleared when the mouse moves.
   virtual void SetCursorTouchVisible(bool enabled) = 0;
 
+  // Sends |event| to mus to be dispatched.
+  virtual void InjectEvent(const ui::Event& event, int64_t display_id) = 0;
+
   // Sets the list of keys which don't hide the cursor.
   virtual void SetKeyEventsThatDontHideCursor(
       std::vector<ui::mojom::EventMatcherPtr> cursor_key_list) = 0;
@@ -121,7 +124,8 @@ class AURA_EXPORT WindowManagerClient {
   virtual void SetDisplayConfiguration(
       const std::vector<display::Display>& displays,
       std::vector<ui::mojom::WmViewportMetricsPtr> viewport_metrics,
-      int64_t primary_display_id) = 0;
+      int64_t primary_display_id,
+      const std::vector<display::Display>& mirrors) = 0;
 
   // Adds |display| as a new display moving |window_tree_host| to the new
   // display. This results in closing the previous display |window_tree_host|

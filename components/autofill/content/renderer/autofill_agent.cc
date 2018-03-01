@@ -144,7 +144,7 @@ AutofillAgent::AutofillAgent(content::RenderFrame* render_frame,
                              PasswordGenerationAgent* password_generation_agent,
                              service_manager::BinderRegistry* registry)
     : content::RenderFrameObserver(render_frame),
-      form_cache_(*render_frame->GetWebFrame()),
+      form_cache_(render_frame->GetWebFrame()),
       password_autofill_agent_(password_autofill_agent),
       password_generation_agent_(password_generation_agent),
       autofill_query_id_(0),
@@ -483,8 +483,11 @@ void AutofillAgent::PreviewForm(int32_t id, const FormData& form) {
 
 void AutofillAgent::FieldTypePredictionsAvailable(
     const std::vector<FormDataPredictions>& forms) {
+  bool attach_predictions_to_dom =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kShowAutofillTypePredictions);
   for (const auto& form : forms) {
-    form_cache_.ShowPredictions(form);
+    form_cache_.ShowPredictions(form, attach_predictions_to_dom);
   }
 }
 
@@ -599,6 +602,7 @@ void AutofillAgent::OnSameDocumentNavigationCompleted() {
 
   last_interacted_form_.Reset();
   formless_elements_user_edited_.clear();
+  submitted_forms_.clear();
 }
 
 bool AutofillAgent::CollectFormlessElements(FormData* output) {
@@ -704,14 +708,10 @@ void AutofillAgent::QueryAutofillSuggestions(
                                      &field);
   }
 
-  // Check the form action attribute only if it is not empty, see
-  // crbug.com/757895.
   if (is_secure_context_required_ &&
-      !(element.GetDocument().IsSecureContext() &&
-        (form.action.is_empty() || content::IsOriginSecure(form.action)))) {
+      !(element.GetDocument().IsSecureContext())) {
     LOG(WARNING) << "Autofill suggestions are disabled because the document "
-                    "isn't a secure context or the form's action attribute "
-                    "isn't secure.";
+                    "isn't a secure context.";
     return;
   }
 
@@ -740,6 +740,7 @@ void AutofillAgent::DoFillFieldWithValue(const base::string16& value,
   base::AutoReset<bool> auto_reset(&ignore_text_changes_, true);
   node->SetEditingValue(
       blink::WebString::FromUTF16(value.substr(0, node->MaxLength())));
+  password_autofill_agent_->UpdateStateForTextChange(*node);
 }
 
 void AutofillAgent::DoPreviewFieldWithValue(const base::string16& value,

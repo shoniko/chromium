@@ -5,15 +5,14 @@
 #include "components/autofill/content/browser/content_autofill_driver.h"
 
 #include <utility>
+#include <vector>
 
-#include "base/command_line.h"
 #include "components/autofill/content/browser/content_autofill_driver_factory.h"
 #include "components/autofill/core/browser/autofill_client.h"
 #include "components/autofill/core/browser/autofill_external_delegate.h"
 #include "components/autofill/core/browser/autofill_handler_proxy.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/browser/form_structure.h"
-#include "components/autofill/core/common/autofill_switches.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_handle.h"
@@ -24,6 +23,7 @@
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/origin_util.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "ui/gfx/geometry/size_f.h"
 
@@ -83,7 +83,7 @@ net::URLRequestContextGetter* ContentAutofillDriver::GetURLRequestContext() {
 }
 
 bool ContentAutofillDriver::RendererIsAvailable() {
-  return render_frame_host_->GetRenderViewHost() != NULL;
+  return render_frame_host_->GetRenderViewHost() != nullptr;
 }
 
 void ContentAutofillDriver::SendFormDataToRenderer(
@@ -111,10 +111,6 @@ void ContentAutofillDriver::PropagateAutofillPredictions(
 
 void ContentAutofillDriver::SendAutofillTypePredictionsToRenderer(
     const std::vector<FormStructure*>& forms) {
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kShowAutofillTypePredictions))
-    return;
-
   if (!RendererIsAvailable())
     return;
 
@@ -177,12 +173,17 @@ gfx::RectF ContentAutofillDriver::TransformBoundingBoxToViewportCoordinates(
 }
 
 void ContentAutofillDriver::DidInteractWithCreditCardForm() {
-  // Notify the WebContents about credit card inputs on HTTP pages.
-  content::WebContents* contents =
-      content::WebContents::FromRenderFrameHost(render_frame_host_);
-  if (contents->GetVisibleURL().SchemeIsCryptographic())
+  // If there is an autofill manager, notify its client about credit card
+  // inputs on non-secure pages.
+  if (!autofill_manager_)
     return;
-  contents->OnCreditCardInputShownOnHttp();
+  if (content::IsOriginSecure(
+          content::WebContents::FromRenderFrameHost(render_frame_host_)
+              ->GetVisibleURL())) {
+    return;
+  }
+  autofill_manager_->client()->DidInteractWithNonsecureCreditCardInput(
+      render_frame_host_);
 }
 
 void ContentAutofillDriver::FormsSeen(const std::vector<FormData>& forms,

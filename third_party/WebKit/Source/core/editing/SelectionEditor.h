@@ -31,6 +31,7 @@
 #include "core/dom/events/EventDispatchResult.h"
 #include "core/editing/FrameSelection.h"
 #include "core/editing/SelectionTemplate.h"
+#include "core/editing/VisibleSelection.h"
 
 namespace blink {
 
@@ -49,10 +50,10 @@ class SelectionEditor final : public GarbageCollectedFinalized<SelectionEditor>,
   virtual ~SelectionEditor();
   void Dispose();
 
-  const SelectionInDOMTree& GetSelectionInDOMTree() const;
+  SelectionInDOMTree GetSelectionInDOMTree() const;
 
-  const VisibleSelection& ComputeVisibleSelectionInDOMTree() const;
-  const VisibleSelectionInFlatTree& ComputeVisibleSelectionInFlatTree() const;
+  VisibleSelection ComputeVisibleSelectionInDOMTree() const;
+  VisibleSelectionInFlatTree ComputeVisibleSelectionInFlatTree() const;
   void SetSelection(const SelectionInDOMTree&);
 
   void DocumentAttached(Document*);
@@ -62,7 +63,7 @@ class SelectionEditor final : public GarbageCollectedFinalized<SelectionEditor>,
   Range* DocumentCachedRange() const;
   void ClearDocumentCachedRange();
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   explicit SelectionEditor(LocalFrame&);

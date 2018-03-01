@@ -33,7 +33,7 @@ class HTMLMarqueeElement final : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   static HTMLMarqueeElement* Create(Document&);
 
@@ -42,11 +42,11 @@ class HTMLMarqueeElement final : public HTMLElement {
 
   bool IsHorizontal() const;
 
-  int scrollAmount() const;
-  void setScrollAmount(int, ExceptionState&);
+  unsigned scrollAmount() const;
+  void setScrollAmount(unsigned);
 
-  int scrollDelay() const;
-  void setScrollDelay(int, ExceptionState&);
+  unsigned scrollDelay() const;
+  void setScrollDelay(unsigned);
 
   int loop() const;
   void setLoop(int, ExceptionState&);

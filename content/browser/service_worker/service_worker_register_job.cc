@@ -16,6 +16,7 @@
 #include "content/browser/service_worker/service_worker_metrics.h"
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/browser/service_worker/service_worker_storage.h"
+#include "content/browser/service_worker/service_worker_type_converters.h"
 #include "content/browser/service_worker/service_worker_write_to_cache_job.h"
 #include "content/common/service_worker/service_worker_event_dispatcher.mojom.h"
 #include "content/common/service_worker/service_worker_messages.h"
@@ -24,6 +25,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
 #include "net/base/net_errors.h"
+#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_object.mojom.h"
 
 namespace content {
 
@@ -69,12 +71,13 @@ typedef ServiceWorkerRegisterJobBase::RegistrationJobType RegistrationJobType;
 ServiceWorkerRegisterJob::ServiceWorkerRegisterJob(
     base::WeakPtr<ServiceWorkerContextCore> context,
     const GURL& script_url,
-    const ServiceWorkerRegistrationOptions& options)
+    const blink::mojom::ServiceWorkerRegistrationOptions& options)
     : context_(context),
       job_type_(REGISTRATION_JOB),
       pattern_(options.scope),
       script_url_(script_url),
       phase_(INITIAL),
+      doom_installing_worker_(false),
       is_promise_resolved_(false),
       should_uninstall_on_failure_(false),
       force_bypass_cache_(false),
@@ -91,6 +94,7 @@ ServiceWorkerRegisterJob::ServiceWorkerRegisterJob(
       job_type_(UPDATE_JOB),
       pattern_(registration->pattern()),
       phase_(INITIAL),
+      doom_installing_worker_(false),
       is_promise_resolved_(false),
       should_uninstall_on_failure_(false),
       force_bypass_cache_(force_bypass_cache),
@@ -121,7 +125,6 @@ void ServiceWorkerRegisterJob::AddCallback(
 }
 
 void ServiceWorkerRegisterJob::Start() {
-  start_time_ = base::TimeTicks::Now();
   BrowserThread::PostAfterStartupTask(
       FROM_HERE, base::ThreadTaskRunnerHandle::Get(),
       base::BindOnce(&ServiceWorkerRegisterJob::StartImpl,
@@ -168,12 +171,14 @@ bool ServiceWorkerRegisterJob::Equals(ServiceWorkerRegisterJobBase* job) const {
          register_job->script_url_ == script_url_;
 }
 
-base::TimeTicks ServiceWorkerRegisterJob::StartTime() const {
-  return start_time_;
-}
-
 RegistrationJobType ServiceWorkerRegisterJob::GetType() const {
   return job_type_;
+}
+
+void ServiceWorkerRegisterJob::DoomInstallingWorker() {
+  doom_installing_worker_ = true;
+  if (phase_ == INSTALL)
+    Complete(SERVICE_WORKER_ERROR_INSTALL_WORKER_FAILED, std::string());
 }
 
 ServiceWorkerRegisterJob::Internal::Internal() {}
@@ -311,13 +316,14 @@ void ServiceWorkerRegisterJob::RegisterAndContinue() {
   SetPhase(REGISTER);
 
   int64_t registration_id = context_->storage()->NewRegistrationId();
-  if (registration_id == kInvalidServiceWorkerRegistrationId) {
+  if (registration_id == blink::mojom::kInvalidServiceWorkerRegistrationId) {
     Complete(SERVICE_WORKER_ERROR_ABORT);
     return;
   }
 
   set_registration(new ServiceWorkerRegistration(
-      ServiceWorkerRegistrationOptions(pattern_), registration_id, context_));
+      blink::mojom::ServiceWorkerRegistrationOptions(pattern_), registration_id,
+      context_));
   AddRegistrationToMatchingProviderHosts(registration());
   UpdateAndContinue();
 }
@@ -368,7 +374,7 @@ void ServiceWorkerRegisterJob::UpdateAndContinue() {
   context_->storage()->NotifyInstallingRegistration(registration());
 
   int64_t version_id = context_->storage()->NewVersionId();
-  if (version_id == kInvalidServiceWorkerVersionId) {
+  if (version_id == blink::mojom::kInvalidServiceWorkerVersionId) {
     Complete(SERVICE_WORKER_ERROR_ABORT);
     return;
   }
@@ -440,8 +446,14 @@ void ServiceWorkerRegisterJob::InstallAndContinue() {
       ServiceWorkerMetrics::EventType::INSTALL,
       base::BindOnce(&ServiceWorkerRegisterJob::DispatchInstallEvent,
                      weak_factory_.GetWeakPtr()),
-      base::Bind(&ServiceWorkerRegisterJob::OnInstallFailed,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&ServiceWorkerRegisterJob::OnInstallFailed,
+                     weak_factory_.GetWeakPtr()));
+
+  // A subsequent registration job may terminate our installing worker. It can
+  // only do so after we've started the worker and dispatched the install
+  // event, as those are atomic substeps in the [[Install]] algorithm.
+  if (doom_installing_worker_)
+    Complete(SERVICE_WORKER_ERROR_INSTALL_WORKER_FAILED);
 }
 
 void ServiceWorkerRegisterJob::DispatchInstallEvent() {
@@ -468,19 +480,20 @@ void ServiceWorkerRegisterJob::DispatchInstallEvent() {
 void ServiceWorkerRegisterJob::OnInstallFinished(
     int request_id,
     std::unique_ptr<InstallEventMethodsReceiver> install_methods_receiver,
-    ServiceWorkerStatusCode status,
+    blink::mojom::ServiceWorkerEventStatus event_status,
     bool has_fetch_handler,
     base::Time dispatch_event_time) {
   install_methods_receiver.reset();
-  new_version()->FinishRequest(request_id, status == SERVICE_WORKER_OK,
-                               dispatch_event_time);
+  bool succeeded =
+      event_status == blink::mojom::ServiceWorkerEventStatus::COMPLETED;
+  new_version()->FinishRequest(request_id, succeeded, dispatch_event_time);
 
-  if (status != SERVICE_WORKER_OK) {
-    OnInstallFailed(status);
+  if (!succeeded) {
+    OnInstallFailed(mojo::ConvertTo<ServiceWorkerStatusCode>(event_status));
     return;
   }
 
-  ServiceWorkerMetrics::RecordInstallEventStatus(status);
+  ServiceWorkerMetrics::RecordInstallEventStatus(SERVICE_WORKER_OK);
   ServiceWorkerMetrics::RecordForeignFetchRegistrationCount(
       new_version()->foreign_fetch_scopes().size(),
       new_version()->foreign_fetch_origins().size());
@@ -521,7 +534,7 @@ void ServiceWorkerRegisterJob::OnStoreRegistrationComplete(
     // 1. Set redundantWorker to registration’s waiting worker.
     // 2. Terminate redundantWorker.
     registration()->waiting_version()->StopWorker(
-        base::Bind(&ServiceWorkerUtils::NoOpStatusCallback));
+        base::BindOnce(&base::DoNothing));
     // TODO(falken): Move this further down. The spec says to set status to
     // 'redundant' after promoting the new version to .waiting attribute and
     // 'installed' status.

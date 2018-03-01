@@ -15,6 +15,7 @@
 #include "base/memory/aligned_memory.h"
 #include "base/optional.h"
 #include "cc/base/math_util.h"
+#include "cc/paint/image_provider.h"
 #include "cc/paint/paint_canvas.h"
 #include "cc/paint/paint_export.h"
 #include "cc/paint/paint_flags.h"
@@ -29,7 +30,6 @@
 
 namespace cc {
 class ImageDecodeCache;
-class ImageProvider;
 
 class CC_PAINT_EXPORT ThreadsafeMatrix : public SkMatrix {
  public:
@@ -137,6 +137,10 @@ class CC_PAINT_EXPORT PaintOp {
   // for the op.
   static bool GetBounds(const PaintOp* op, SkRect* rect);
 
+  // Returns true if executing this op will require decoding of any lazy
+  // generated images.
+  static bool OpHasDiscardableImages(const PaintOp* op);
+
   int CountSlowPaths() const { return 0; }
   int CountSlowPathsFromFlags() const { return 0; }
 
@@ -195,14 +199,7 @@ class CC_PAINT_EXPORT PaintOpWithFlags : public PaintOp {
 
   int CountSlowPathsFromFlags() const { return flags.getPathEffect() ? 1 : 0; }
   bool HasNonAAPaint() const { return !flags.isAntiAlias(); }
-  bool HasDiscardableImagesFromFlags() const {
-    if (!IsDrawOp())
-      return false;
-
-    SkShader* shader = flags.getSkShader();
-    SkImage* image = shader ? shader->isAImage(nullptr, nullptr) : nullptr;
-    return image && image->isLazyGenerated();
-  }
+  bool HasDiscardableImagesFromFlags() const;
 
   void RasterWithFlags(SkCanvas* canvas,
                        const PaintFlags* flags,
@@ -944,43 +941,11 @@ class CC_PAINT_EXPORT PaintOpBuffer : public SkRefCnt {
     base::Optional<Iterator> iter_;
   };
 
-  // Returns a stream of non-DrawRecord ops from a top level pob with indices.
-  // Upon encountering DrawRecord ops, it returns ops from inside them
-  // without returning the DrawRecord op itself.  It does this recursively.
-  class CC_PAINT_EXPORT FlatteningIterator {
-   public:
-    // Offsets and paint op buffer must come from the same DisplayItemList.
-    FlatteningIterator(const PaintOpBuffer* buffer,
-                       const std::vector<size_t>* offsets);
-    ~FlatteningIterator();
-
-    PaintOp* operator->() const {
-      return nested_iter_.empty() ? *top_level_iter_ : *nested_iter_.back();
-    }
-    PaintOp* operator*() const { return operator->(); }
-
-    FlatteningIterator& operator++() {
-      if (nested_iter_.empty())
-        ++top_level_iter_;
-      else
-        ++nested_iter_.back();
-      FlattenCurrentOpIfNeeded();
-      return *this;
-    }
-
-    operator bool() const { return top_level_iter_; }
-
-   private:
-    void FlattenCurrentOpIfNeeded();
-
-    PaintOpBuffer::OffsetIterator top_level_iter_;
-    std::vector<Iterator> nested_iter_;
-  };
-
  private:
   friend class DisplayItemList;
   friend class PaintOpBufferOffsetsTest;
   friend class SolidColorAnalyzer;
+  friend class ScopedImageFlags;
 
   // Replays the paint op buffer into the canvas. If |indices| is specified, it
   // contains indices in an increasing order and only the indices specified in

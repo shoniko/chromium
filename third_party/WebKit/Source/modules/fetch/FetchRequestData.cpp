@@ -11,10 +11,10 @@
 #include "modules/fetch/BodyStreamBuffer.h"
 #include "modules/fetch/BytesConsumer.h"
 #include "modules/fetch/FetchHeaderList.h"
-#include "platform/HTTPNames.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
 #include "platform/loader/fetch/ResourceRequest.h"
+#include "platform/network/http_names.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerRequest.h"
 
@@ -104,7 +104,7 @@ FetchRequestData::FetchRequestData()
       referrer_(Referrer(ClientReferrerString(), kReferrerPolicyDefault)),
       mode_(WebURLRequest::kFetchRequestModeNoCORS),
       credentials_(WebURLRequest::kFetchCredentialsModeOmit),
-      cache_mode_(WebURLRequest::kFetchRequestCacheModeDefault),
+      cache_mode_(mojom::FetchCacheMode::kDefault),
       redirect_(WebURLRequest::kFetchRedirectModeFollow),
       response_tainting_(kBasicTainting) {}
 
@@ -112,10 +112,10 @@ void FetchRequestData::SetCredentials(
     WebURLRequest::FetchCredentialsMode credentials) {
   credentials_ = credentials;
   if (credentials_ != WebURLRequest::kFetchCredentialsModePassword)
-    attached_credential_.Clear();
+    attached_credential_ = nullptr;
 }
 
-DEFINE_TRACE(FetchRequestData) {
+void FetchRequestData::Trace(blink::Visitor* visitor) {
   visitor->Trace(buffer_);
   visitor->Trace(header_list_);
 }

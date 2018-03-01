@@ -37,8 +37,8 @@
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/WebLocalFrameImpl.h"
-#include "core/html/HTMLOptionElement.h"
-#include "core/html/HTMLSelectElement.h"
+#include "core/html/forms/HTMLOptionElement.h"
+#include "core/html/forms/HTMLSelectElement.h"
 #include "core/layout/LayoutBox.h"
 #include "core/page/Page.h"
 #include "core/style/ComputedStyle.h"
@@ -70,11 +70,11 @@ ExternalPopupMenu::ExternalPopupMenu(LocalFrame& frame,
           TaskRunnerHelper::Get(TaskType::kUnspecedTimer, &frame),
           this,
           &ExternalPopupMenu::DispatchEvent),
-      web_external_popup_menu_(0) {}
+      web_external_popup_menu_(nullptr) {}
 
 ExternalPopupMenu::~ExternalPopupMenu() {}
 
-DEFINE_TRACE(ExternalPopupMenu) {
+void ExternalPopupMenu::Trace(blink::Visitor* visitor) {
   visitor->Trace(owner_element_);
   visitor->Trace(local_frame_);
   PopupMenu::Trace(visitor);
@@ -85,7 +85,7 @@ bool ExternalPopupMenu::ShowInternal() {
   // recreate the actual external popup everytime.
   if (web_external_popup_menu_) {
     web_external_popup_menu_->Close();
-    web_external_popup_menu_ = 0;
+    web_external_popup_menu_ = nullptr;
   }
 
   WebPopupMenuInfo info;
@@ -144,7 +144,7 @@ void ExternalPopupMenu::Hide() {
   if (!web_external_popup_menu_)
     return;
   web_external_popup_menu_->Close();
-  web_external_popup_menu_ = 0;
+  web_external_popup_menu_ = nullptr;
 }
 
 void ExternalPopupMenu::UpdateFromElement(UpdateReason reason) {
@@ -200,13 +200,13 @@ void ExternalPopupMenu::DidAcceptIndex(int index) {
     owner_element_->PopupDidHide();
     owner_element_->SelectOptionByPopup(popup_menu_item_index);
   }
-  web_external_popup_menu_ = 0;
+  web_external_popup_menu_ = nullptr;
 }
 
 // Android uses this function even for single SELECT.
 void ExternalPopupMenu::DidAcceptIndices(const WebVector<int>& indices) {
   if (!owner_element_) {
-    web_external_popup_menu_ = 0;
+    web_external_popup_menu_ = nullptr;
     return;
   }
 
@@ -226,13 +226,13 @@ void ExternalPopupMenu::DidAcceptIndices(const WebVector<int>& indices) {
     owner_element->SelectMultipleOptionsByPopup(list_indices);
   }
 
-  web_external_popup_menu_ = 0;
+  web_external_popup_menu_ = nullptr;
 }
 
 void ExternalPopupMenu::DidCancel() {
   if (owner_element_)
     owner_element_->PopupDidHide();
-  web_external_popup_menu_ = 0;
+  web_external_popup_menu_ = nullptr;
 }
 
 void ExternalPopupMenu::GetPopupMenuInfo(WebPopupMenuInfo& info,
@@ -251,13 +251,13 @@ void ExternalPopupMenu::GetPopupMenuInfo(WebPopupMenuInfo& info,
     popup_item.label = owner_element.ItemText(item_element);
     popup_item.tool_tip = item_element.title();
     popup_item.checked = false;
-    if (isHTMLHRElement(item_element)) {
+    if (IsHTMLHRElement(item_element)) {
       popup_item.type = WebMenuItemInfo::kSeparator;
-    } else if (isHTMLOptGroupElement(item_element)) {
+    } else if (IsHTMLOptGroupElement(item_element)) {
       popup_item.type = WebMenuItemInfo::kGroup;
     } else {
       popup_item.type = WebMenuItemInfo::kOption;
-      popup_item.checked = toHTMLOptionElement(item_element).Selected();
+      popup_item.checked = ToHTMLOptionElement(item_element).Selected();
     }
     popup_item.enabled = !item_element.IsDisabledFormControl();
     const ComputedStyle& style = *owner_element.ItemComputedStyle(item_element);

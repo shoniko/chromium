@@ -27,7 +27,6 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/add_event_listener_options_or_boolean.h"
-#include "core/HTMLNames.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/RawDataDocumentParser.h"
 #include "core/dom/UserGestureIndicator.h"
@@ -43,7 +42,8 @@
 #include "core/html/HTMLHtmlElement.h"
 #include "core/html/HTMLMetaElement.h"
 #include "core/html/HTMLSourceElement.h"
-#include "core/html/HTMLVideoElement.h"
+#include "core/html/media/HTMLVideoElement.h"
+#include "core/html_names.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/FrameLoader.h"
 #include "platform/KeyboardCodes.h"
@@ -89,7 +89,7 @@ class MediaLoadedEventListener final : public EventListener {
     HTMLVideoElement* media =
         static_cast<HTMLVideoElement*>(event->target()->ToNode());
     std::unique_ptr<UserGestureIndicator> gesture =
-        LocalFrame::CreateUserGesture(media->GetDocument().GetFrame());
+        Frame::NotifyUserActivation(media->GetDocument().GetFrame());
     // TODO(shaktisahu): Enable fullscreen after https://crbug/698353 is fixed.
     media->Play();
   }
@@ -134,13 +134,15 @@ void MediaDocumentParser::CreateDocumentStructure() {
     AddEventListenerOptions options;
     options.setOnce(true);
     AddEventListenerOptionsOrBoolean options_or_boolean;
-    options_or_boolean.setAddEventListenerOptions(options);
+    options_or_boolean.SetAddEventListenerOptions(options);
     media->addEventListener(EventTypeNames::loadedmetadata, listener,
                             options_or_boolean);
   }
 
   body->AppendChild(media);
   root_element->AppendChild(head);
+  if (IsDetached())
+    return;  // DOM insertion events can detach the frame.
   root_element->AppendChild(body);
 
   did_build_document_structure_ = true;

@@ -82,8 +82,7 @@ template <typename NodeType>
 class StaticNodeTypeList;
 using StaticNodeList = StaticNodeTypeList<Node>;
 
-class Internals final : public GarbageCollected<Internals>,
-                        public ScriptWrappable {
+class Internals final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -155,7 +154,6 @@ class Internals final : public GarbageCollected<Internals>,
 
   unsigned updateStyleAndReturnAffectedElementCount(ExceptionState&) const;
   unsigned needsLayoutCount(ExceptionState&) const;
-  unsigned forceLayoutCount(ExceptionState&) const;
   unsigned hitTestCount(Document*, ExceptionState&) const;
   unsigned hitTestCacheHits(Document*, ExceptionState&) const;
   Element* elementFromPoint(Document*,
@@ -270,6 +268,7 @@ class Internals final : public GarbageCollected<Internals>,
 
   int lastSpellCheckRequestSequence(Document*, ExceptionState&);
   int lastSpellCheckProcessedSequence(Document*, ExceptionState&);
+  void cancelCurrentSpellCheckRequest(Document*, ExceptionState&);
   String idleTimeSpellCheckerState(Document*, ExceptionState&);
   void runIdleTimeSpellChecker(Document*, ExceptionState&);
 
@@ -422,8 +421,8 @@ class Internals final : public GarbageCollected<Internals>,
   DOMRectList* draggableRegions(Document*, ExceptionState&);
   DOMRectList* nonDraggableRegions(Document*, ExceptionState&);
 
-  DOMArrayBuffer* serializeObject(RefPtr<SerializedScriptValue>) const;
-  RefPtr<SerializedScriptValue> deserializeBuffer(DOMArrayBuffer*) const;
+  DOMArrayBuffer* serializeObject(scoped_refptr<SerializedScriptValue>) const;
+  scoped_refptr<SerializedScriptValue> deserializeBuffer(DOMArrayBuffer*) const;
 
   DOMArrayBuffer* serializeWithInlineWasm(ScriptValue) const;
   ScriptValue deserializeBufferContainingWasm(ScriptState*,
@@ -482,7 +481,7 @@ class Internals final : public GarbageCollected<Internals>,
   ScriptPromise promiseCheckOverload(ScriptState*, Document*);
   ScriptPromise promiseCheckOverload(ScriptState*, Location*, long, long);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   void setValueForUser(HTMLInputElement*, const String&);
 
@@ -586,6 +585,10 @@ class Internals final : public GarbageCollected<Internals>,
   // "windows-1252", "Latin-1", "iso-8859-1", etc).
   // The order is not defined.
   Vector<String> supportedTextEncodingLabels() const;
+
+  void simulateRasterUnderInvalidations(bool enable);
+
+  void BypassLongCompileThresholdOnce(ExceptionState&);
 
  private:
   explicit Internals(ExecutionContext*);

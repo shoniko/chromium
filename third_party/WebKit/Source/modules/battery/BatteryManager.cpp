@@ -23,7 +23,7 @@ BatteryManager::~BatteryManager() {}
 
 BatteryManager::BatteryManager(ExecutionContext* context)
     : SuspendableObject(context),
-      PlatformEventController(ToDocument(context)->GetFrame()) {}
+      PlatformEventController(ToDocument(context)) {}
 
 ScriptPromise BatteryManager::StartRequest(ScriptState* script_state) {
   if (!battery_property_) {
@@ -118,7 +118,7 @@ bool BatteryManager::HasPendingActivity() const {
   return GetExecutionContext() && HasEventListeners();
 }
 
-DEFINE_TRACE(BatteryManager) {
+void BatteryManager::Trace(blink::Visitor* visitor) {
   visitor->Trace(battery_property_);
   PlatformEventController::Trace(visitor);
   EventTargetWithInlineData::Trace(visitor);

@@ -4,7 +4,9 @@
 
 #include "ash/wm/workspace/backdrop_controller.h"
 
-#include "ash/accessibility_delegate.h"
+#include <memory>
+
+#include "ash/accessibility/accessibility_delegate.h"
 #include "ash/public/cpp/app_types.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
@@ -12,7 +14,6 @@
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/backdrop_delegate.h"
 #include "base/auto_reset.h"
-#include "base/memory/ptr_util.h"
 #include "chromeos/audio/chromeos_sounds.h"
 #include "ui/app_list/app_list_features.h"
 #include "ui/aura/client/aura_constants.h"
@@ -95,7 +96,7 @@ void BackdropController::OnWindowStackingChanged(aura::Window* window) {
 
 void BackdropController::OnPostWindowStateTypeChange(
     wm::WindowState* window_state,
-    wm::WindowStateType old_type) {
+    mojom::WindowStateType old_type) {
   UpdateBackdrop();
 }
 
@@ -196,7 +197,7 @@ void BackdropController::UpdateAccessibilityMode() {
       Shell::Get()->accessibility_delegate()->IsSpokenFeedbackEnabled();
   if (enabled) {
     if (!backdrop_event_handler_) {
-      backdrop_event_handler_ = base::MakeUnique<BackdropEventHandler>();
+      backdrop_event_handler_ = std::make_unique<BackdropEventHandler>();
       original_event_handler_ =
           backdrop_window_->SetTargetHandler(backdrop_event_handler_.get());
     }

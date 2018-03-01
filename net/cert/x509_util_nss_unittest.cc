@@ -8,6 +8,7 @@
 #include "base/files/file_util.h"
 #include "net/cert/scoped_nss_types.h"
 #include "net/cert/x509_certificate.h"
+#include "net/cert/x509_util.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/test_certificate_data.h"
 #include "net/test/test_data_directory.h"
@@ -137,6 +138,50 @@ TEST(X509UtilNSSTest, CreateCERTCertificateListFromX509Certificate) {
   EXPECT_EQ(BytesForX509CertHandle(x509_cert->GetIntermediateCertificates()[2]),
             BytesForNSSCert(nss_certs[3].get()));
 }
+
+#if BUILDFLAG(USE_BYTE_CERTS)
+TEST(X509UtilTest, CreateCERTCertificateListFromX509CertificateErrors) {
+  scoped_refptr<X509Certificate> ok_cert(
+      ImportCertFromFile(GetTestCertsDirectory(), "ok_cert.pem"));
+  ASSERT_TRUE(ok_cert);
+
+  bssl::UniquePtr<CRYPTO_BUFFER> bad_cert =
+      x509_util::CreateCryptoBuffer(base::StringPiece("invalid"));
+  ASSERT_TRUE(bad_cert);
+
+  scoped_refptr<X509Certificate> ok_cert2(
+      ImportCertFromFile(GetTestCertsDirectory(), "root_ca_cert.pem"));
+  ASSERT_TRUE(ok_cert);
+
+  scoped_refptr<X509Certificate> cert_with_intermediates(
+      X509Certificate::CreateFromHandle(
+          ok_cert->os_cert_handle(),
+          {bad_cert.get(), ok_cert2->os_cert_handle()}));
+  ASSERT_TRUE(cert_with_intermediates);
+  EXPECT_EQ(2U, cert_with_intermediates->GetIntermediateCertificates().size());
+
+  // Normal CreateCERTCertificateListFromX509Certificate fails with invalid
+  // certs in chain.
+  ScopedCERTCertificateList nss_certs =
+      x509_util::CreateCERTCertificateListFromX509Certificate(
+          cert_with_intermediates.get());
+  EXPECT_TRUE(nss_certs.empty());
+
+  // With InvalidIntermediateBehavior::kIgnore, invalid intermediate certs
+  // should be silently dropped.
+  nss_certs = x509_util::CreateCERTCertificateListFromX509Certificate(
+      cert_with_intermediates.get(),
+      x509_util::InvalidIntermediateBehavior::kIgnore);
+  ASSERT_EQ(2U, nss_certs.size());
+  for (const auto& nss_cert : nss_certs)
+    ASSERT_TRUE(nss_cert.get());
+
+  EXPECT_EQ(BytesForX509Cert(ok_cert.get()),
+            BytesForNSSCert(nss_certs[0].get()));
+  EXPECT_EQ(BytesForX509Cert(ok_cert2.get()),
+            BytesForNSSCert(nss_certs[1].get()));
+}
+#endif
 
 TEST(X509UtilNSSTest, CreateCERTCertificateListFromBytes) {
   base::FilePath cert_path =
@@ -288,12 +333,12 @@ TEST(X509UtilNSSTest, GetDEREncoded) {
 TEST(X509UtilNSSTest, GetDefaultNickname) {
   base::FilePath certs_dir = GetTestCertsDirectory();
 
-  scoped_refptr<X509Certificate> test_cert(
-      ImportCertFromFile(certs_dir, "no_subject_common_name_cert.pem"));
+  ScopedCERTCertificate test_cert = ImportCERTCertificateFromFile(
+      certs_dir, "no_subject_common_name_cert.pem");
   ASSERT_TRUE(test_cert);
 
   std::string nickname = x509_util::GetDefaultUniqueNickname(
-      test_cert->os_cert_handle(), USER_CERT, nullptr /*slot*/);
+      test_cert.get(), USER_CERT, nullptr /*slot*/);
   EXPECT_EQ(
       "wtc@google.com's COMODO Client Authentication and "
       "Secure Email CA ID",
@@ -303,26 +348,30 @@ TEST(X509UtilNSSTest, GetDefaultNickname) {
 TEST(X509UtilNSSTest, GetCERTNameDisplayName_CN) {
   base::FilePath certs_dir = GetTestCertsDirectory();
 
-  scoped_refptr<X509Certificate> test_cert(
-      ImportCertFromFile(certs_dir, "ok_cert.pem"));
+  ScopedCERTCertificate test_cert =
+      ImportCERTCertificateFromFile(certs_dir, "ok_cert.pem");
   ASSERT_TRUE(test_cert);
+  scoped_refptr<X509Certificate> x509_test_cert =
+      ImportCertFromFile(certs_dir, "ok_cert.pem");
+  ASSERT_TRUE(x509_test_cert);
 
-  std::string name =
-      x509_util::GetCERTNameDisplayName(&test_cert->os_cert_handle()->subject);
+  std::string name = x509_util::GetCERTNameDisplayName(&test_cert->subject);
   EXPECT_EQ("127.0.0.1", name);
-  EXPECT_EQ(test_cert->subject().GetDisplayName(), name);
+  EXPECT_EQ(x509_test_cert->subject().GetDisplayName(), name);
 }
 
 TEST(X509UtilNSSTest, GetCERTNameDisplayName_O) {
   base::FilePath certs_dir =
       GetTestNetDataDirectory().AppendASCII("parse_certificate_unittest");
 
-  scoped_refptr<X509Certificate> test_cert(
-      ImportCertFromFile(certs_dir, "subject_t61string.pem"));
+  ScopedCERTCertificate test_cert =
+      ImportCERTCertificateFromFile(certs_dir, "subject_t61string.pem");
   ASSERT_TRUE(test_cert);
+  scoped_refptr<X509Certificate> x509_test_cert =
+      ImportCertFromFile(certs_dir, "subject_t61string.pem");
+  ASSERT_TRUE(x509_test_cert);
 
-  std::string name =
-      x509_util::GetCERTNameDisplayName(&test_cert->os_cert_handle()->subject);
+  std::string name = x509_util::GetCERTNameDisplayName(&test_cert->subject);
   EXPECT_EQ(
       " !\"#$%&'()*+,-./"
       "0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`"
@@ -330,7 +379,7 @@ TEST(X509UtilNSSTest, GetCERTNameDisplayName_O) {
       " ¡¢£¤¥¦§¨©ª«¬­®¯°±²³´µ¶·¸¹º»¼½¾¿ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ×ØÙÚÛÜÝÞßàáâãäåæç"
       "èéêëìíîïðñòóôõö÷øùúûüýþÿ",
       name);
-  EXPECT_EQ(test_cert->subject().GetDisplayName(), name);
+  EXPECT_EQ(x509_test_cert->subject().GetDisplayName(), name);
 }
 
 TEST(X509UtilNSSTest, ParseClientSubjectAltNames) {
@@ -338,18 +387,17 @@ TEST(X509UtilNSSTest, ParseClientSubjectAltNames) {
 
   // This cert contains one rfc822Name field, and one Microsoft UPN
   // otherName field.
-  scoped_refptr<X509Certificate> san_cert =
-      ImportCertFromFile(certs_dir, "client_3.pem");
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), san_cert.get());
+  ScopedCERTCertificate san_cert =
+      ImportCERTCertificateFromFile(certs_dir, "client_3.pem");
+  ASSERT_TRUE(san_cert);
 
   std::vector<std::string> rfc822_names;
-  x509_util::GetRFC822SubjectAltNames(san_cert->os_cert_handle(),
-                                      &rfc822_names);
+  x509_util::GetRFC822SubjectAltNames(san_cert.get(), &rfc822_names);
   ASSERT_EQ(1U, rfc822_names.size());
   EXPECT_EQ("santest@example.com", rfc822_names[0]);
 
   std::vector<std::string> upn_names;
-  x509_util::GetUPNSubjectAltNames(san_cert->os_cert_handle(), &upn_names);
+  x509_util::GetUPNSubjectAltNames(san_cert.get(), &upn_names);
   ASSERT_EQ(1U, upn_names.size());
   EXPECT_EQ("santest@ad.corp.example.com", upn_names[0]);
 }
@@ -366,6 +414,25 @@ TEST(X509UtilNSSTest, GetValidityTimes) {
   // Constants copied from x509_certificate_unittest.cc.
   EXPECT_EQ(1238192407,  // Mar 27 22:20:07 2009 GMT
             not_before.ToDoubleT());
+  EXPECT_EQ(1269728407,  // Mar 27 22:20:07 2010 GMT
+            not_after.ToDoubleT());
+}
+
+TEST(X509UtilNSSTest, GetValidityTimesOptionalArgs) {
+  ScopedCERTCertificate google_cert(x509_util::CreateCERTCertificateFromBytes(
+      google_der, arraysize(google_der)));
+  ASSERT_TRUE(google_cert);
+
+  base::Time not_before;
+  EXPECT_TRUE(
+      x509_util::GetValidityTimes(google_cert.get(), &not_before, nullptr));
+  // Constants copied from x509_certificate_unittest.cc.
+  EXPECT_EQ(1238192407,  // Mar 27 22:20:07 2009 GMT
+            not_before.ToDoubleT());
+
+  base::Time not_after;
+  EXPECT_TRUE(
+      x509_util::GetValidityTimes(google_cert.get(), nullptr, &not_after));
   EXPECT_EQ(1269728407,  // Mar 27 22:20:07 2010 GMT
             not_after.ToDoubleT());
 }

@@ -21,7 +21,6 @@
 #ifndef SVGRectElement_h
 #define SVGRectElement_h
 
-#include "core/SVGNames.h"
 #include "core/svg/SVGAnimatedLength.h"
 #include "core/svg/SVGGeometryElement.h"
 #include "platform/heap/Handle.h"
@@ -43,7 +42,7 @@ class SVGRectElement final : public SVGGeometryElement {
   SVGAnimatedLength* rx() const { return rx_.Get(); }
   SVGAnimatedLength* ry() const { return ry_.Get(); }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit SVGRectElement(Document&);

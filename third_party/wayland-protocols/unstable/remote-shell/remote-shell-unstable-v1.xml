@@ -176,7 +176,7 @@
       <description summary="initialize scale configuration">
 	Sends the default device scale factor.
       </description>
-      <arg name="scale" type="int" summary="DP to pixels ratio, in 16.16 fixed point format"/>
+      <arg name="scale" type="int" summary="DP to pixels ratio, in 8.24 fixed point format"/>
     </event>
   </interface>
 
@@ -291,7 +291,7 @@
 
     <request name="set_rectangular_shadow_background_opacity">
       <description summary="suggests the window's background opacity">
-	Suggests the window's background opacity when the shadow is requested.
+	[Deprecated] Suggests the window's background opacity when the shadow is requested.
       </description>
       <arg name="opacity" type="fixed"/>
     </request>

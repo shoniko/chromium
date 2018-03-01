@@ -24,6 +24,7 @@
 #include "core/layout/LayoutInline.h"
 
 #include "core/css/StyleEngine.h"
+#include "core/editing/PositionWithAffinity.h"
 #include "core/fullscreen/Fullscreen.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutBlock.h"
@@ -33,6 +34,7 @@
 #include "core/layout/LayoutView.h"
 #include "core/layout/api/LineLayoutBoxModel.h"
 #include "core/layout/line/InlineTextBox.h"
+#include "core/layout/ng/layout_ng_block_flow.h"
 #include "core/paint/BoxPainter.h"
 #include "core/paint/InlinePainter.h"
 #include "core/paint/ObjectPainter.h"
@@ -54,6 +56,12 @@ static_assert(sizeof(LayoutInline) == sizeof(SameSizeAsLayoutInline),
 
 LayoutInline::LayoutInline(Element* element) : LayoutBoxModelObject(element) {
   SetChildrenInline(true);
+}
+
+LayoutInline* LayoutInline::CreateAnonymous(Document* document) {
+  LayoutInline* layout_inline = new LayoutInline(nullptr);
+  layout_inline->SetDocumentForAnonymous(document);
+  return layout_inline;
 }
 
 void LayoutInline::WillBeDestroyed() {
@@ -148,7 +156,7 @@ static void UpdateInFlowPositionOfAnonymousBlockContinuations(
         InFlowPositionedInlineAncestor(block_flow->InlineElementContinuation()))
       continue;
 
-    RefPtr<ComputedStyle> new_block_style =
+    scoped_refptr<ComputedStyle> new_block_style =
         ComputedStyle::Clone(block->StyleRef());
     new_block_style->SetPosition(new_style.GetPosition());
     block->SetStyle(new_block_style);
@@ -230,7 +238,7 @@ void LayoutInline::UpdateAlwaysCreateLineBoxes(bool full_layout) {
 
   const ComputedStyle& parent_style = Parent()->StyleRef();
   LayoutInline* parent_layout_inline =
-      Parent()->IsLayoutInline() ? ToLayoutInline(Parent()) : 0;
+      Parent()->IsLayoutInline() ? ToLayoutInline(Parent()) : nullptr;
   bool check_fonts = GetDocument().InNoQuirksMode();
   bool always_create_line_boxes_new =
       (parent_layout_inline && parent_layout_inline->AlwaysCreateLineBoxes()) ||
@@ -262,9 +270,9 @@ void LayoutInline::UpdateAlwaysCreateLineBoxes(bool full_layout) {
 }
 
 LayoutRect LayoutInline::LocalCaretRect(
-    InlineBox* inline_box,
+    const InlineBox* inline_box,
     int,
-    LayoutUnit* extra_width_to_end_of_line) {
+    LayoutUnit* extra_width_to_end_of_line) const {
   if (FirstChild()) {
     // This condition is possible if the LayoutInline is at an editing boundary,
     // i.e. the VisiblePosition is:
@@ -348,7 +356,7 @@ void LayoutInline::AddChildIgnoringContinuation(LayoutObject* new_child,
     // block box to hold |newChild|. We then make that block box a continuation
     // of this inline. We take all of the children after |beforeChild| and put
     // them in a clone of this object.
-    RefPtr<ComputedStyle> new_style =
+    scoped_refptr<ComputedStyle> new_style =
         ComputedStyle::CreateAnonymousStyleWithDisplay(StyleRef(),
                                                        EDisplay::kBlock);
     // The anon block we create here doesn't exist in the CSS spec, so
@@ -780,7 +788,7 @@ class AbsoluteQuadsGeneratorContext {
                                 Vector<FloatQuad>& quads,
                                 MapCoordinatesFlags mode)
       : quads_(quads), geometry_map_(mode) {
-    geometry_map_.PushMappingsToAncestor(layout_object, 0);
+    geometry_map_.PushMappingsToAncestor(layout_object, nullptr);
   }
 
   void operator()(const FloatRect& rect) {
@@ -1149,12 +1157,15 @@ LayoutRect LayoutInline::AbsoluteVisualRect() const {
   return LayoutRect();
 }
 
-LayoutRect LayoutInline::LocalVisualRect() const {
+LayoutRect LayoutInline::LocalVisualRectIgnoringVisibility() const {
+  if (RuntimeEnabledFeatures::LayoutNGEnabled()) {
+    NGPhysicalOffsetRect visual_rect;
+    if (LayoutNGBlockFlow::LocalVisualRectFor(this, &visual_rect))
+      return visual_rect.ToLayoutRect();
+  }
+
   // If we don't create line boxes, we don't have any invalidations to do.
   if (!AlwaysCreateLineBoxes())
-    return LayoutRect();
-
-  if (Style()->Visibility() != EVisibility::kVisible)
     return LayoutRect();
 
   return VisualOverflowRect();

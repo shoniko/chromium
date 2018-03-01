@@ -49,6 +49,7 @@
 #import "ios/chrome/browser/ui/stack_view/stack_view_toolbar_controller.h"
 #import "ios/chrome/browser/ui/stack_view/title_label.h"
 #import "ios/chrome/browser/ui/toolbar/new_tab_button.h"
+#import "ios/chrome/browser/ui/toolbar/toolbar_controller_constants.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_owner.h"
 #import "ios/chrome/browser/ui/tools_menu/tools_menu_configuration.h"
 #import "ios/chrome/browser/ui/tools_menu/tools_menu_view_item.h"
@@ -499,6 +500,7 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
 }
 
 @synthesize activeCardSet = _activeCardSet;
+@synthesize animationDelegate = _animationDelegate;
 @synthesize delegate = _delegate;
 @synthesize dummyToolbarBackgroundView = _dummyToolbarBackgroundView;
 @synthesize inActiveDeckChangeAnimation = _inActiveDeckChangeAnimation;
@@ -758,6 +760,17 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   CGRect scrollViewFrame =
       UIEdgeInsetsInsetRect(self.view.bounds, contentInsets);
   _scrollView = [[UIScrollView alloc] initWithFrame:scrollViewFrame];
+
+  if (IsIPhoneX()) {
+    if (@available(iOS 11, *)) {
+      // The safe area adds a content inset which negatively impacts the stack
+      // view opening animation after a rotation.
+      // TODO(crbug.com/768868): Figure out what is going on, and whether
+      // changing the contentInsetAdjustmentBehavior is the right fix.
+      _scrollView.contentInsetAdjustmentBehavior =
+          UIScrollViewContentInsetAdjustmentNever;
+    }
+  }
   [self.view addSubview:_scrollView];
   [_scrollView setAutoresizingMask:(UIViewAutoresizingFlexibleHeight |
                                     UIViewAutoresizingFlexibleWidth)];
@@ -1569,6 +1582,7 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   DCHECK_NE(self.transitionStyle, STACK_TRANSITION_STYLE_NONE);
   if (self.transitionStyle == STACK_TRANSITION_STYLE_PRESENTING) {
     [_testDelegate stackViewControllerShowWithSelectedTabAnimationDidEnd];
+    [_animationDelegate tabSwitcherPresentationAnimationDidEnd:self];
     [_delegate tabSwitcherPresentationTransitionDidEnd:self];
   } else {
     [_delegate tabSwitcherDismissTransitionDidEnd:self];
@@ -2090,6 +2104,11 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
       UMA_HISTOGRAM_TIMES("Toolbar.TabSwitcher.NewTabPresentationDuration",
                           base::TimeDelta::FromSecondsD(duration));
     }
+
+    // The following must come after logging metrics, because
+    // |clearInternalState| resets _activeCardSet.
+    _isActive = NO;
+    [self clearInternalState];
   };
 
   CGPoint origin = _lastTapPoint;
@@ -3134,6 +3153,18 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
   DCHECK(!_isBeingDismissed);
   DCHECK(_isActive);
   DCHECK(scrollView == _scrollView);
+
+  // During rotation on iPhone X, UIScrollView's internal handling of the status
+  // bar triggers a |-scrollViewDidScroll:| callback before any rotation-
+  // related callbacks have been received.  When this occurs, the bounds of the
+  // UIScrollView have been updated to its new rotated value, but the content
+  // size has not yet been updated via |-updateScrollViewContentSize|.  When
+  // this occurs, early return before peforming subsequent scrolling
+  // calculations.  The layout logic will eventually be triggered when the
+  // UIScrollView's contentSize is reset.
+  if (_lastInterfaceOrientation != GetInterfaceOrientation())
+    return;
+
   // Whether this callback will trigger a scroll or not, have to ensure that
   // the display views' positions are updated after any change in the scroll
   // view's content offset.

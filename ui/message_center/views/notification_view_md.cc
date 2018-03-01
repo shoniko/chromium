@@ -5,9 +5,11 @@
 #include "ui/message_center/views/notification_view_md.h"
 
 #include <stddef.h>
+#include <memory>
 
 #include "base/i18n/case_conversion.h"
 #include "base/strings/string_util.h"
+#include "components/url_formatter/elide_url.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/canvas.h"
@@ -17,9 +19,9 @@
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/text_elider.h"
 #include "ui/message_center/message_center.h"
-#include "ui/message_center/message_center_style.h"
 #include "ui/message_center/notification.h"
 #include "ui/message_center/notification_types.h"
+#include "ui/message_center/public/cpp/message_center_constants.h"
 #include "ui/message_center/vector_icons.h"
 #include "ui/message_center/views/bounded_label.h"
 #include "ui/message_center/views/constants.h"
@@ -41,26 +43,27 @@
 #include "ui/views/native_cursor.h"
 #include "ui/views/view_targeter.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_delegate.h"
 
 namespace message_center {
 
 namespace {
 
 // Dimensions.
-constexpr gfx::Insets kContentRowPadding(2, 12, 12, 12);
+constexpr gfx::Insets kContentRowPadding(0, 12, 16, 12);
 constexpr gfx::Insets kActionsRowPadding(8, 8, 8, 8);
 constexpr int kActionsRowHorizontalSpacing = 8;
 constexpr gfx::Insets kActionButtonPadding(0, 12, 0, 12);
 constexpr gfx::Insets kStatusTextPadding(4, 0, 0, 0);
-constexpr gfx::Size kActionButtonMinSize(88, 32);
-// TODO(tetsui): Move |kIconViewSize| to message_center_style.h and merge with
-// contradicting |kNotificationIconSize|.
+constexpr gfx::Size kActionButtonMinSize(0, 32);
+// TODO(tetsui): Move |kIconViewSize| to public/cpp/message_center_constants.h
+// and merge with contradicting |kNotificationIconSize|.
 constexpr gfx::Size kIconViewSize(36, 36);
 constexpr gfx::Insets kLargeImageContainerPadding(0, 12, 12, 12);
 constexpr gfx::Size kLargeImageMinSize(328, 0);
 constexpr gfx::Size kLargeImageMaxSize(328, 218);
-constexpr gfx::Insets kLeftContentPadding(0, 4, 0, 4);
-constexpr gfx::Insets kLeftContentPaddingWithIcon(0, 4, 0, 12);
+constexpr gfx::Insets kLeftContentPadding(2, 4, 0, 4);
+constexpr gfx::Insets kLeftContentPaddingWithIcon(2, 4, 0, 12);
 
 // Background of inline actions area.
 const SkColor kActionsRowBackgroundColor = SkColorSetRGB(0xee, 0xee, 0xee);
@@ -109,20 +112,28 @@ gfx::FontList GetTextFontList() {
   return gfx::FontList(font);
 }
 
-// ItemView ////////////////////////////////////////////////////////////////////
-
-// ItemViews are responsible for drawing each list notification item's title and
-// message next to each other within a single column.
-class ItemView : public views::View {
+class ClickActivator : public ui::EventHandler {
  public:
-  explicit ItemView(const message_center::NotificationItem& item);
-  ~ItemView() override;
-
-  const char* GetClassName() const override;
+  explicit ClickActivator(NotificationViewMD* owner) : owner_(owner) {}
+  ~ClickActivator() override = default;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ItemView);
+  // ui::EventHandler
+  void OnEvent(ui::Event* event) override {
+    if (event->type() == ui::ET_MOUSE_PRESSED ||
+        event->type() == ui::ET_GESTURE_TAP) {
+      owner_->Activate();
+    }
+  }
+
+  NotificationViewMD* const owner_;
+
+  DISALLOW_COPY_AND_ASSIGN(ClickActivator);
 };
+
+}  // anonymous namespace
+
+// ItemView ////////////////////////////////////////////////////////////////////
 
 ItemView::ItemView(const message_center::NotificationItem& item) {
   SetLayoutManager(
@@ -155,30 +166,6 @@ const char* ItemView::GetClassName() const {
 }
 
 // CompactTitleMessageView /////////////////////////////////////////////////////
-
-// CompactTitleMessageView shows notification title and message in a single
-// line. This view is used for NOTIFICATION_TYPE_PROGRESS.
-class CompactTitleMessageView : public views::View {
- public:
-  explicit CompactTitleMessageView();
-  ~CompactTitleMessageView() override;
-
-  const char* GetClassName() const override;
-
-  void OnPaint(gfx::Canvas* canvas) override;
-
-  void set_title(const base::string16& title) { title_ = title; }
-  void set_message(const base::string16& message) { message_ = message; }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(CompactTitleMessageView);
-
-  base::string16 title_;
-  base::string16 message_;
-
-  views::Label* title_view_ = nullptr;
-  views::Label* message_view_ = nullptr;
-};
 
 CompactTitleMessageView::~CompactTitleMessageView() = default;
 
@@ -234,24 +221,6 @@ void CompactTitleMessageView::OnPaint(gfx::Canvas* canvas) {
 }
 
 // LargeImageView //////////////////////////////////////////////////////////////
-
-class LargeImageView : public views::View {
- public:
-  LargeImageView();
-  ~LargeImageView() override;
-
-  void SetImage(const gfx::ImageSkia& image);
-
-  void OnPaint(gfx::Canvas* canvas) override;
-  const char* GetClassName() const override;
-
- private:
-  gfx::Size GetResizedImageSize();
-
-  gfx::ImageSkia image_;
-
-  DISALLOW_COPY_AND_ASSIGN(LargeImageView);
-};
 
 LargeImageView::LargeImageView() {
   SetBackground(views::CreateSolidBackground(kLargeImageBackgroundColor));
@@ -311,22 +280,6 @@ gfx::Size LargeImageView::GetResizedImageSize() {
 
 // LargeImageContainerView /////////////////////////////////////////////////////
 
-// We have a container view outside LargeImageView, because we want to fill
-// area that is not coverted by the image by background color.
-class LargeImageContainerView : public views::View {
- public:
-  LargeImageContainerView();
-  ~LargeImageContainerView() override;
-
-  void SetImage(const gfx::ImageSkia& image);
-  const char* GetClassName() const override;
-
- private:
-  LargeImageView* const image_view_;
-
-  DISALLOW_COPY_AND_ASSIGN(LargeImageContainerView);
-};
-
 LargeImageContainerView::LargeImageContainerView()
     : image_view_(new LargeImageView()) {
   SetLayoutManager(new views::FillLayout());
@@ -345,8 +298,6 @@ void LargeImageContainerView::SetImage(const gfx::ImageSkia& image) {
 const char* LargeImageContainerView::GetClassName() const {
   return "LargeImageContainerView";
 }
-
-}  // anonymous namespace
 
 // NotificationButtonMD ////////////////////////////////////////////////////////
 
@@ -440,7 +391,7 @@ NotificationViewMD::NotificationViewMD(MessageCenterController* controller,
       new views::BoxLayout(views::BoxLayout::kVertical, gfx::Insets(), 0));
 
   control_buttons_view_ =
-      base::MakeUnique<NotificationControlButtonsView>(this);
+      std::make_unique<NotificationControlButtonsView>(this);
   control_buttons_view_->set_owned_by_client();
   control_buttons_view_->SetBackgroundColor(SK_ColorTRANSPARENT);
 
@@ -486,9 +437,19 @@ NotificationViewMD::NotificationViewMD(MessageCenterController* controller,
   SetEventTargeter(
       std::unique_ptr<views::ViewTargeter>(new views::ViewTargeter(this)));
   set_notify_enter_exit_on_child(true);
+
+  click_activator_ = std::make_unique<ClickActivator>(this);
+  // Reasons to use pretarget handler instead of OnMousePressed:
+  // - To make it look similar to ArcNotificationContentView::EventForwarder.
+  // - If we're going to support inline reply feature in native notification,
+  //   then NotificationViewMD::OnMousePresssed would not fire anymore on the
+  //   Textfield click.
+  AddPreTargetHandler(click_activator_.get());
 }
 
-NotificationViewMD::~NotificationViewMD() {}
+NotificationViewMD::~NotificationViewMD() {
+  RemovePreTargetHandler(click_activator_.get());
+}
 
 void NotificationViewMD::Layout() {
   MessageView::Layout();
@@ -511,10 +472,8 @@ void NotificationViewMD::ScrollRectToVisible(const gfx::Rect& rect) {
 }
 
 gfx::NativeCursor NotificationViewMD::GetCursor(const ui::MouseEvent& event) {
-  if (!clickable_ || !controller()->HasClickedListener(notification_id()))
-    return views::View::GetCursor(event);
-
-  return views::GetNativeHandCursor();
+  return clickable_ ? views::GetNativeHandCursor()
+                    : views::View::GetCursor(event);
 }
 
 void NotificationViewMD::OnMouseEntered(const ui::MouseEvent& event) {
@@ -600,7 +559,14 @@ void NotificationViewMD::CreateOrUpdateContextTitleView(
   }
 #endif
 
-  header_row_->SetAppName(notification.display_source());
+  if (notification.origin_url().is_valid() &&
+      notification.origin_url().SchemeIsHTTPOrHTTPS()) {
+    header_row_->SetAppName(url_formatter::FormatUrlForSecurityDisplay(
+        notification.origin_url(),
+        url_formatter::SchemeDisplay::OMIT_HTTP_AND_HTTPS));
+  } else {
+    header_row_->SetAppName(notification.display_source());
+  }
   header_row_->SetAccentColor(
       notification.accent_color() == SK_ColorTRANSPARENT
           ? message_center::kNotificationDefaultAccentColor
@@ -706,7 +672,10 @@ void NotificationViewMD::CreateOrUpdateProgressBarView(
   progress_bar_view_->SetValue(notification.progress() / 100.0);
   progress_bar_view_->SetVisible(notification.items().empty());
 
-  header_row_->SetProgress(notification.progress());
+  if (0 <= notification.progress() && notification.progress() <= 100)
+    header_row_->SetProgress(notification.progress());
+  else
+    header_row_->ClearProgress();
 }
 
 void NotificationViewMD::CreateOrUpdateProgressStatusView(
@@ -954,6 +923,11 @@ void NotificationViewMD::SetExpanded(bool expanded) {
   content_row_->InvalidateLayout();
   if (controller())
     controller()->UpdateNotificationSize(notification_id());
+}
+
+void NotificationViewMD::Activate() {
+  GetWidget()->widget_delegate()->set_can_activate(true);
+  GetWidget()->Activate();
 }
 
 }  // namespace message_center

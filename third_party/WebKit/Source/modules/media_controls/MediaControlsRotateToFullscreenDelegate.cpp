@@ -9,7 +9,7 @@
 #include "core/dom/events/Event.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/fullscreen/Fullscreen.h"
-#include "core/html/HTMLVideoElement.h"
+#include "core/html/media/HTMLVideoElement.h"
 #include "core/page/ChromeClient.h"
 #include "modules/device_orientation/DeviceOrientationData.h"
 #include "modules/device_orientation/DeviceOrientationEvent.h"
@@ -150,10 +150,18 @@ void MediaControlsRotateToFullscreenDelegate::OnDeviceOrientationAvailable(
   dom_window->removeEventListener(EventTypeNames::deviceorientation, this,
                                   false);
 
-  // MediaControlsOrientationLockDelegate needs beta and gamma only.
+  // MediaControlsOrientationLockDelegate needs Device Orientation events with
+  // beta and gamma in order to unlock screen orientation and exit fullscreen
+  // when the device is rotated. Some devices cannot provide beta and/or gamma
+  // values and must be excluded. Unfortunately, some other devices incorrectly
+  // return true for both CanProvideBeta() and CanProvideGamma() but their
+  // Beta() and Gamma() values are permanently stuck on zero (crbug/760737); so
+  // we have to also exclude devices where both of these values are exactly
+  // zero, even though that's a valid (albeit unlikely) device orientation.
   DeviceOrientationData* data = event->Orientation();
   device_orientation_supported_ =
-      WTF::make_optional(data->CanProvideBeta() && data->CanProvideGamma());
+      WTF::make_optional(data->CanProvideBeta() && data->CanProvideGamma() &&
+                         (data->Beta() != 0.0 || data->Gamma() != 0.0));
 }
 
 void MediaControlsRotateToFullscreenDelegate::OnScreenOrientationChange() {
@@ -210,7 +218,7 @@ void MediaControlsRotateToFullscreenDelegate::OnScreenOrientationChange() {
 
   {
     std::unique_ptr<UserGestureIndicator> gesture =
-        LocalFrame::CreateUserGesture(video_element_->GetDocument().GetFrame());
+        Frame::NotifyUserActivation(video_element_->GetDocument().GetFrame());
 
     bool should_be_fullscreen =
         current_screen_orientation_ == video_orientation;
@@ -263,7 +271,7 @@ MediaControlsRotateToFullscreenDelegate::ComputeScreenOrientation() const {
   return SimpleOrientation::kUnknown;
 }
 
-DEFINE_TRACE(MediaControlsRotateToFullscreenDelegate) {
+void MediaControlsRotateToFullscreenDelegate::Trace(blink::Visitor* visitor) {
   EventListener::Trace(visitor);
   visitor->Trace(video_element_);
   visitor->Trace(visibility_observer_);

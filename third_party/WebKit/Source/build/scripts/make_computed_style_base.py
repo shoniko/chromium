@@ -12,8 +12,7 @@ import keyword_utils
 import bisect
 
 from name_utilities import (
-    enum_for_css_keyword, enum_type_name, enum_value_name, class_member_name, method_name,
-    class_name, join_names
+    enum_value_name, class_member_name, method_name, class_name, join_names
 )
 from itertools import chain
 
@@ -164,8 +163,7 @@ class Field(object):
 
     def __init__(self, field_role, name_for_methods, property_name, type_name, wrapper_pointer_name,
                  field_template, size, default_value, custom_copy, custom_compare, mutable,
-                 getter_method_name, setter_method_name, initial_method_name, default_generated_functions, **kwargs):
-        """Creates a new field."""
+                 getter_method_name, setter_method_name, initial_method_name, computed_style_custom_functions, **kwargs):
         self.name = class_member_name(name_for_methods)
         self.property_name = property_name
         self.type_name = type_name
@@ -201,7 +199,7 @@ class Field(object):
         self.internal_setter_method_name = method_name([setter_method_name, 'internal'])
         self.initial_method_name = initial_method_name
         self.resetter_method_name = method_name(['reset', name_for_methods])
-        self.default_generated_functions = default_generated_functions
+        self.computed_style_custom_functions = computed_style_custom_functions
         # If the size of the field is not None, it means it is a bit field
         self.is_bit_field = self.size is not None
 
@@ -218,7 +216,7 @@ def _get_include_paths(properties):
     return list(sorted(include_paths))
 
 
-def _create_groups(properties, alias_dictionary):
+def _create_groups(properties):
     """Create a tree of groups from a list of properties.
 
     Returns:
@@ -251,7 +249,7 @@ def _create_groups(properties, alias_dictionary):
             for group_name in property_['field_group'].split('->'):
                 current_group_dict[group_name] = current_group_dict.get(group_name, {None: []})
                 current_group_dict = current_group_dict[group_name]
-        current_group_dict[None].extend(_create_fields(property_, alias_dictionary))
+        current_group_dict[None].extend(_create_fields(property_))
 
     return _dict_to_group(None, root_group_dict)
 
@@ -326,7 +324,7 @@ def _create_enums(properties):
     return list(sorted(enums.values(), key=lambda e: e.type_name))
 
 
-def _create_property_field(property_, alias_dictionary):
+def _create_property_field(property_):
     """
     Create a property field.
     """
@@ -336,59 +334,23 @@ def _create_property_field(property_, alias_dictionary):
         ('MakeComputedStyleBase requires an default value for all fields, none specified '
          'for property ' + property_['name'])
 
-    if property_['field_template'] in alias_dictionary:
-        alias_template = property_['field_template']
-        for field in alias_dictionary[alias_template]:
-            if field != 'name':
-                property_[field] = alias_dictionary[alias_template][field]
-
+    type_name = property_['type_name']
     if property_['field_template'] == 'keyword':
-        type_name = property_['type_name']
-        default_value = type_name + '::' + enum_value_name(property_['default_value'])
         assert property_['field_size'] is None, \
             ("'" + property_['name'] + "' is a keyword field, "
              "so it should not specify a field_size")
         size = int(math.ceil(math.log(len(property_['keywords']), 2)))
     elif property_['field_template'] == 'multi_keyword':
-        type_name = property_['type_name']
-        default_value = type_name + '::' + enum_value_name(property_['default_value'])
         size = len(property_['keywords']) - 1  # Subtract 1 for 'none' keyword
-    elif property_['field_template'] == 'storage_only':
-        type_name = property_['type_name']
-        default_value = property_['default_value']
-        size = None
-        if type_name == 'bool':
-            size = 1
-        elif len(property_["keywords"]) > 0 and len(property_["include_paths"]) == 0:
-            # Assume that no property will ever have one keyword.
-            assert len(property_['keywords']) > 1, "There must be more than 1 keywords in a CSS property"
-            # Each keyword is represented as a number and the number of bit
-            # to represent the maximum number is calculated here
-            size = int(math.ceil(math.log(len(property_['keywords']), 2)))
-        else:
-            size = property_["field_size"]
     elif property_['field_template'] == 'external':
-        type_name = property_['type_name']
-        default_value = property_['default_value']
         size = None
     elif property_['field_template'] == 'primitive':
-        type_name = property_['type_name']
-        default_value = property_['default_value']
-        size = 1 if type_name == 'bool' else None  # pack bools with 1 bit.
+        size = 1 if type_name == 'bool' else property_["field_size"]  # pack bools with 1 bit.
     elif property_['field_template'] == 'pointer':
-        type_name = property_['type_name']
-        default_value = property_['default_value']
         size = None
     else:
-        assert property_['field_template'] in ('monotonic_flag',)
-        type_name = 'bool'
-        default_value = 'false'
+        assert property_['field_template'] == 'monotonic_flag', "Please put a valid value for field_template"
         size = 1
-
-    if property_['wrapper_pointer_name']:
-        assert property_['field_template'] in ['storage_only', 'pointer']
-        if property_['field_template'] == 'storage_only':
-            type_name = '{}<{}>'.format(property_['wrapper_pointer_name'], type_name)
 
     return Field(
         'property',
@@ -396,18 +358,18 @@ def _create_property_field(property_, alias_dictionary):
         property_name=property_['name'],
         inherited=property_['inherited'],
         independent=property_['independent'],
-        type_name=type_name,
+        type_name=property_['type_name'],
         wrapper_pointer_name=property_['wrapper_pointer_name'],
         field_template=property_['field_template'],
         size=size,
-        default_value=default_value,
+        default_value=property_['default_value'],
         custom_copy=property_['custom_copy'],
         custom_compare=property_['custom_compare'],
         mutable=property_['mutable'],
         getter_method_name=property_['getter'],
         setter_method_name=property_['setter'],
         initial_method_name=property_['initial'],
-        default_generated_functions=property_['default_generated_functions'],
+        computed_style_custom_functions=property_['computed_style_custom_functions'],
     )
 
 
@@ -432,11 +394,11 @@ def _create_inherited_flag_field(property_):
         getter_method_name=method_name(name_for_methods),
         setter_method_name=method_name(['set', name_for_methods]),
         initial_method_name=method_name(['initial', name_for_methods]),
-        default_generated_functions=property_["default_generated_functions"]
+        computed_style_custom_functions=property_["computed_style_custom_functions"],
     )
 
 
-def _create_fields(property_, alias_dictionary):
+def _create_fields(property_):
     """
     Create ComputedStyle fields from a property and return a list of Field objects.
     """
@@ -448,7 +410,7 @@ def _create_fields(property_, alias_dictionary):
         if property_['independent']:
             fields.append(_create_inherited_flag_field(property_))
 
-        fields.append(_create_property_field(property_, alias_dictionary))
+        fields.append(_create_property_field(property_))
 
     return fields
 
@@ -487,7 +449,7 @@ def _reorder_non_bit_fields(non_bit_fields):
     # (from biggest aligned to smallest).
     for field in non_bit_fields:
         assert field.alignment_type in ALIGNMENT_ORDER, \
-            "Type {} has unknown alignment. Please update ALIGNMENT_ORDER to include it.".format(field.alignment_type)
+            "Type {} has unknown alignment. Please update ALIGNMENT_ORDER to include it.".format(field.name)
     return list(sorted(non_bit_fields, key=lambda f: ALIGNMENT_ORDER.index(f.alignment_type)))
 
 
@@ -594,8 +556,8 @@ def _evaluate_rare_inherit_group(all_properties, properties_ranking_file,
 
 class ComputedStyleBaseWriter(make_style_builder.StyleBuilderWriter):
     def __init__(self, json5_file_paths):
-        # Read CSSProperties.json5
-        super(ComputedStyleBaseWriter, self).__init__([json5_file_paths[0]])
+        # Reads CSSProperties.json5
+        super(ComputedStyleBaseWriter, self).__init__(json5_file_paths)
 
         # Ignore shorthand properties
         for property_ in self._properties.values():
@@ -610,9 +572,8 @@ class ComputedStyleBaseWriter(make_style_builder.StyleBuilderWriter):
         # the generated enum will have the same order and continuity as
         # CSSProperties.json5 and we can get the longest continuous segment.
         # Thereby reduce the switch case statement to the minimum.
-        css_properties = keyword_utils.sort_keyword_properties_by_canonical_order(css_properties,
-                                                                                  json5_file_paths[3],
-                                                                                  self.json5_file.parameters)
+        css_properties = keyword_utils.sort_keyword_properties_by_canonical_order(
+            css_properties, json5_file_paths[4], self.json5_file.parameters)
 
         for property_ in css_properties:
             # Set default values for extra parameters in ComputedStyleExtraFields.json5.
@@ -622,7 +583,7 @@ class ComputedStyleBaseWriter(make_style_builder.StyleBuilderWriter):
 
         # Read ComputedStyleExtraFields.json5 using the parameter specification from the CSS properties file.
         extra_fields = json5_generator.Json5File.load_from_files(
-            [json5_file_paths[1]],
+            [json5_file_paths[2]],
             default_parameters=self.json5_file.parameters
         ).name_dictionaries
 
@@ -630,7 +591,7 @@ class ComputedStyleBaseWriter(make_style_builder.StyleBuilderWriter):
             if property_['mutable']:
                 assert property_['field_template'] == 'monotonic_flag', \
                     'mutable keyword only implemented for monotonic_flag'
-            make_style_builder.apply_property_naming_defaults(property_)
+            self.expand_parameters(property_)
 
         all_properties = css_properties + extra_fields
 
@@ -639,19 +600,17 @@ class ComputedStyleBaseWriter(make_style_builder.StyleBuilderWriter):
         # Organise fields into a tree structure where the root group
         # is ComputedStyleBase.
         group_parameters = dict([(conf["name"], conf["cumulative_distribution"]) for conf in
-                                 json5_generator.Json5File.load_from_files([json5_file_paths[5]]).name_dictionaries])
+                                 json5_generator.Json5File.load_from_files([json5_file_paths[6]]).name_dictionaries])
 
-        _evaluate_rare_non_inherited_group(all_properties, json5_file_paths[4],
+        _evaluate_rare_non_inherited_group(all_properties, json5_file_paths[5],
                                            len(group_parameters["rare_non_inherited_properties_rule"]),
                                            group_parameters["rare_non_inherited_properties_rule"])
-        _evaluate_rare_inherit_group(all_properties, json5_file_paths[4],
+        _evaluate_rare_inherit_group(all_properties, json5_file_paths[5],
                                      len(group_parameters["rare_inherited_properties_rule"]),
                                      group_parameters["rare_inherited_properties_rule"])
-        alias_dictionary = dict([(alias["name"], alias) for alias in
-                                 json5_generator.Json5File.load_from_files([json5_file_paths[6]]).name_dictionaries])
-        self._root_group = _create_groups(all_properties, alias_dictionary)
+        self._root_group = _create_groups(all_properties)
         self._diff_functions_map = _create_diff_groups_map(json5_generator.Json5File.load_from_files(
-            [json5_file_paths[2]]
+            [json5_file_paths[3]]
         ).name_dictionaries, self._root_group)
 
         self._include_paths = _get_include_paths(all_properties)

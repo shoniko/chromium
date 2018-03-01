@@ -13,7 +13,7 @@
 #include "ui/events/event_utils.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/canvas.h"
-#include "ui/message_center/message_center_style.h"
+#include "ui/message_center/public/cpp/message_center_constants.h"
 #include "ui/message_center/views/bounded_label.h"
 #include "ui/message_center/views/message_center_controller.h"
 #include "ui/message_center/views/notification_control_buttons_view.h"
@@ -47,9 +47,7 @@ class NotificationViewMDTest : public views::ViewsTestBase,
   void RemoveNotification(const std::string& notification_id,
                           bool by_user) override;
   std::unique_ptr<ui::MenuModel> CreateMenuModel(
-      const NotifierId& notifier_id,
-      const base::string16& display_source) override;
-  bool HasClickedListener(const std::string& notification_id) override;
+      const Notification& notification) override;
   void ClickOnNotificationButton(const std::string& notification_id,
                                  int button_index) override;
   void ClickOnSettingsButton(const std::string& notification_id) override;
@@ -145,16 +143,10 @@ void NotificationViewMDTest::RemoveNotification(
 }
 
 std::unique_ptr<ui::MenuModel> NotificationViewMDTest::CreateMenuModel(
-    const NotifierId& notifier_id,
-    const base::string16& display_source) {
+    const Notification& notification) {
   // For this test, this method should not be invoked.
   NOTREACHED();
   return nullptr;
-}
-
-bool NotificationViewMDTest::HasClickedListener(
-    const std::string& notification_id) {
-  return true;
 }
 
 void NotificationViewMDTest::ClickOnNotificationButton(

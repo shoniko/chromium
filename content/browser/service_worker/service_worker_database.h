@@ -20,13 +20,13 @@
 #include "base/sequence_checker.h"
 #include "base/time/time.h"
 #include "content/common/content_export.h"
-#include "content/common/origin_trials/trial_token_validator.h"
 #include "content/common/service_worker/service_worker_status_code.h"
 #include "content/common/service_worker/service_worker_types.h"
+#include "third_party/WebKit/common/origin_trials/trial_token_validator.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
-namespace tracked_objects {
+namespace base {
 class Location;
 }
 
@@ -77,7 +77,8 @@ class CONTENT_EXPORT ServiceWorkerDatabase {
     base::Time last_update_check;
     std::vector<GURL> foreign_fetch_scopes;
     std::vector<url::Origin> foreign_fetch_origins;
-    base::Optional<TrialTokenValidator::FeatureToTokensMap> origin_trial_tokens;
+    base::Optional<blink::TrialTokenValidator::FeatureToTokensMap>
+        origin_trial_tokens;
     NavigationPreloadState navigation_preload_state;
     std::set<uint32_t> used_features;
 
@@ -375,18 +376,10 @@ class CONTENT_EXPORT ServiceWorkerDatabase {
 
   bool IsOpen();
 
-  void Disable(
-      const tracked_objects::Location& from_here,
-      Status status);
-  void HandleOpenResult(
-      const tracked_objects::Location& from_here,
-      Status status);
-  void HandleReadResult(
-      const tracked_objects::Location& from_here,
-      Status status);
-  void HandleWriteResult(
-      const tracked_objects::Location& from_here,
-      Status status);
+  void Disable(const base::Location& from_here, Status status);
+  void HandleOpenResult(const base::Location& from_here, Status status);
+  void HandleReadResult(const base::Location& from_here, Status status);
+  void HandleWriteResult(const base::Location& from_here, Status status);
 
   const base::FilePath path_;
   std::unique_ptr<leveldb::Env> env_;

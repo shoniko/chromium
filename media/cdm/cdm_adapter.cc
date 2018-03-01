@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "media/base/audio_decoder_config.h"
@@ -20,6 +21,7 @@
 #include "media/base/channel_layout.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/decrypt_config.h"
+#include "media/base/key_systems.h"
 #include "media/base/limits.h"
 #include "media/base/sample_format.h"
 #include "media/base/video_codecs.h"
@@ -273,6 +275,27 @@ Decryptor::Status ToMediaDecryptorStatus(cdm::Status status) {
   return Decryptor::kError;
 }
 
+inline std::ostream& operator<<(std::ostream& out, cdm::Status status) {
+  switch (status) {
+    case cdm::kSuccess:
+      return out << "kSuccess";
+    case cdm::kNoKey:
+      return out << "kNoKey";
+    case cdm::kNeedMoreData:
+      return out << "kNeedMoreData";
+    case cdm::kDecryptError:
+      return out << "kDecryptError";
+    case cdm::kDecodeError:
+      return out << "kDecodeError";
+    case cdm::kInitializationError:
+      return out << "kInitializationError";
+    case cdm::kDeferredInitialization:
+      return out << "kDeferredInitialization";
+  }
+  NOTREACHED();
+  return out << "Invalid Status!";
+}
+
 SampleFormat ToMediaSampleFormat(cdm::AudioFormat format) {
   switch (format) {
     case cdm::kAudioFormatU8:
@@ -376,6 +399,14 @@ void* GetCdmHost(int host_interface_version, void* user_data) {
   }
 }
 
+void ReportSystemCodeUMA(const std::string& key_system, uint32_t system_code) {
+  // Sparse histogram macro does not cache the histogram, so it's safe to use
+  // macro with non-static histogram name here.
+  UMA_HISTOGRAM_SPARSE_SLOWLY(
+      "Media.EME." + GetKeySystemNameForUMA(key_system) + ".SystemCode",
+      system_code);
+}
+
 }  // namespace
 
 // static
@@ -430,15 +461,22 @@ CdmAdapter::CdmAdapter(
   DCHECK(helper_);
 }
 
-CdmAdapter::~CdmAdapter() {}
+CdmAdapter::~CdmAdapter() {
+  // Reject any outstanding promises and close all the existing sessions.
+  cdm_promise_adapter_.Clear();
+
+  if (audio_init_cb_)
+    audio_init_cb_.Run(false);
+  if (video_init_cb_)
+    video_init_cb_.Run(false);
+}
 
 CdmWrapper* CdmAdapter::CreateCdmInstance(const std::string& key_system) {
   DCHECK(task_runner_->BelongsToCurrentThread());
 
-  CreateCdmFunc create_cdm_func =
-      CdmModule::GetInstance()->GetCreateCdmFunc(key_system);
+  CreateCdmFunc create_cdm_func = CdmModule::GetInstance()->GetCreateCdmFunc();
   if (!create_cdm_func) {
-    DVLOG(1) << "Cannot get CreateCdmFunc for " + key_system;
+    LOG(ERROR) << "Failed to get CreateCdmFunc!";
     return nullptr;
   }
 
@@ -446,6 +484,16 @@ CdmWrapper* CdmAdapter::CreateCdmInstance(const std::string& key_system) {
                                        key_system.size(), GetCdmHost, this);
   DVLOG(1) << "CDM instance for " + key_system + (cdm ? "" : " could not be") +
                   " created.";
+
+  if (cdm) {
+    // The interface version is relatively small. So using normal histogram
+    // instead of a sparse histogram is okay. The following DCHECK asserts this.
+    DCHECK(cdm->GetInterfaceVersion() <= 30);
+    UMA_HISTOGRAM_ENUMERATION("Media.EME.CdmInterfaceVersion",
+                              cdm->GetInterfaceVersion(),
+                              cdm::ContentDecryptionModule::kVersion + 1);
+  }
+
   return cdm;
 }
 
@@ -588,7 +636,7 @@ void CdmAdapter::Decrypt(StreamType stream_type,
   cdm::Status status = cdm_->Decrypt(input_buffer, decrypted_block.get());
 
   if (status != cdm::kSuccess) {
-    DVLOG(1) << __func__ << " failed with cdm::Error " << status;
+    DVLOG(1) << __func__ << ": status = " << status;
     decrypt_cb.Run(ToMediaDecryptorStatus(status), nullptr);
     return;
   }
@@ -623,8 +671,8 @@ void CdmAdapter::InitializeAudioDecoder(const AudioDecoderConfig& config,
 
   cdm::Status status = cdm_->InitializeAudioDecoder(cdm_decoder_config);
   if (status != cdm::kSuccess && status != cdm::kDeferredInitialization) {
-    // DCHECK(status == cdm::kSessionError); http://crbug.com/570486
-    DVLOG(1) << __func__ << " failed with cdm::Error " << status;
+    DCHECK(status == cdm::kInitializationError);
+    DVLOG(1) << __func__ << ": status = " << status;
     init_cb.Run(false);
     return;
   }
@@ -658,8 +706,8 @@ void CdmAdapter::InitializeVideoDecoder(const VideoDecoderConfig& config,
 
   cdm::Status status = cdm_->InitializeVideoDecoder(cdm_decoder_config);
   if (status != cdm::kSuccess && status != cdm::kDeferredInitialization) {
-    // DCHECK(status == cdm::kSessionError); http://crbug.com/570486
-    DVLOG(1) << __func__ << " failed with cdm::Error " << status;
+    DCHECK(status == cdm::kInitializationError);
+    DVLOG(1) << __func__ << ": status = " << status;
     init_cb.Run(false);
     return;
   }
@@ -690,7 +738,7 @@ void CdmAdapter::DecryptAndDecodeAudio(
 
   const Decryptor::AudioFrames empty_frames;
   if (status != cdm::kSuccess) {
-    DVLOG(1) << __func__ << " failed with cdm::Error " << status;
+    DVLOG(1) << __func__ << ": status = " << status;
     audio_decode_cb.Run(ToMediaDecryptorStatus(status), empty_frames);
     return;
   }
@@ -722,7 +770,7 @@ void CdmAdapter::DecryptAndDecodeVideo(
       cdm_->DecryptAndDecodeFrame(input_buffer, video_frame.get());
 
   if (status != cdm::kSuccess) {
-    DVLOG(1) << __func__ << " failed with cdm::Error " << status;
+    DVLOG(1) << __func__ << ": status = " << status;
     video_decode_cb.Run(ToMediaDecryptorStatus(status), nullptr);
     return;
   }
@@ -801,6 +849,11 @@ void CdmAdapter::OnRejectPromise(uint32_t promise_id,
                                  uint32_t system_code,
                                  const char* error_message,
                                  uint32_t error_message_size) {
+  // This is the central place for library CDM promise rejection. Cannot report
+  // this is more generic classes like CdmPromise or CdmPromiseAdapter because
+  // they may be used multiple times in one promise chain that involves IPC.
+  ReportSystemCodeUMA(key_system_, system_code);
+
   DCHECK(task_runner_->BelongsToCurrentThread());
   cdm_promise_adapter_.RejectPromise(
       promise_id, ToMediaExceptionType(exception), system_code,
@@ -988,7 +1041,7 @@ void CdmAdapter::OnDeferredInitializationDone(cdm::StreamType stream_type,
                                               cdm::Status decoder_status) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DVLOG_IF(1, decoder_status != cdm::kSuccess)
-      << __func__ << " failed with cdm::Error " << decoder_status;
+      << __func__ << ": status = " << decoder_status;
 
   switch (stream_type) {
     case cdm::kStreamTypeAudio:
@@ -1014,13 +1067,14 @@ cdm::FileIO* CdmAdapter::CreateFileIO(cdm::FileIOClient* client) {
   return file_io.release();
 }
 
-void CdmAdapter::RequestStorageId() {
-  helper_->GetStorageId(
-      base::Bind(&CdmAdapter::OnStorageIdObtained, weak_factory_.GetWeakPtr()));
+void CdmAdapter::RequestStorageId(uint32_t version) {
+  helper_->GetStorageId(version, base::Bind(&CdmAdapter::OnStorageIdObtained,
+                                            weak_factory_.GetWeakPtr()));
 }
 
-void CdmAdapter::OnStorageIdObtained(const std::vector<uint8_t>& storage_id) {
-  cdm_->OnStorageId(storage_id.data(), storage_id.size());
+void CdmAdapter::OnStorageIdObtained(uint32_t version,
+                                     const std::vector<uint8_t>& storage_id) {
+  cdm_->OnStorageId(version, storage_id.data(), storage_id.size());
 }
 
 bool CdmAdapter::AudioFramesDataToAudioFrames(

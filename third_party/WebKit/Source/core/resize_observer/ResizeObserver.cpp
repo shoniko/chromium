@@ -4,7 +4,7 @@
 
 #include "core/resize_observer/ResizeObserver.h"
 
-#include "bindings/core/v8/resize_observer_callback.h"
+#include "bindings/core/v8/v8_resize_observer_callback.h"
 #include "core/dom/Element.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/layout/LayoutObject.h"
@@ -15,7 +15,7 @@
 namespace blink {
 
 ResizeObserver* ResizeObserver::Create(Document& document,
-                                       ResizeObserverCallback* callback) {
+                                       V8ResizeObserverCallback* callback) {
   return new ResizeObserver(callback, document);
 }
 
@@ -23,7 +23,7 @@ ResizeObserver* ResizeObserver::Create(Document& document, Delegate* delegate) {
   return new ResizeObserver(delegate, document);
 }
 
-ResizeObserver::ResizeObserver(ResizeObserverCallback* callback,
+ResizeObserver::ResizeObserver(V8ResizeObserverCallback* callback,
                                Document& document)
     : callback_(callback),
       skipped_observations_(false),
@@ -148,15 +148,17 @@ void ResizeObserver::ElementSizeChanged() {
     controller_->ObserverChanged();
 }
 
-DEFINE_TRACE(ResizeObserver) {
+void ResizeObserver::Trace(blink::Visitor* visitor) {
   visitor->Trace(callback_);
   visitor->Trace(delegate_);
   visitor->Trace(observations_);
   visitor->Trace(active_observations_);
   visitor->Trace(controller_);
+  ScriptWrappable::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(ResizeObserver) {
+void ResizeObserver::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(callback_);
 }
 

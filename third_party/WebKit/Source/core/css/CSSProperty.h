@@ -22,14 +22,9 @@
 #define CSSProperty_h
 
 #include "core/CSSPropertyNames.h"
-#include "core/css/CSSPropertyMetadata.h"
 #include "core/css/CSSValue.h"
 #include "core/css/properties/CSSPropertyAPI.h"
-#include "platform/RuntimeEnabledFeatures.h"
-#include "platform/text/TextDirection.h"
-#include "platform/text/WritingMode.h"
 #include "platform/wtf/Allocator.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -93,16 +88,11 @@ class CSSProperty {
 
   const CSSValue* Value() const { return value_.Get(); }
 
-  static CSSPropertyID ResolveDirectionAwareProperty(CSSPropertyID,
-                                                     TextDirection,
-                                                     WritingMode);
-  static bool IsAffectedByAllProperty(CSSPropertyID);
-
   const StylePropertyMetadata& Metadata() const { return metadata_; }
 
   bool operator==(const CSSProperty& other) const;
 
-  DEFINE_INLINE_TRACE() { visitor->Trace(value_); }
+  void Trace(blink::Visitor* visitor) { visitor->Trace(value_); }
 
  private:
   StylePropertyMetadata metadata_;

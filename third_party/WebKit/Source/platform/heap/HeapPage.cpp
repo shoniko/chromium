@@ -32,7 +32,7 @@
 
 #include "base/trace_event/process_memory_dump.h"
 #include "platform/MemoryCoordinator.h"
-#include "platform/ScriptForbiddenScope.h"
+#include "platform/bindings/ScriptForbiddenScope.h"
 #include "platform/heap/BlinkGCMemoryDumpProvider.h"
 #include "platform/heap/CallbackStack.h"
 #include "platform/heap/HeapCompact.h"
@@ -61,7 +61,7 @@
     BasePage* page = PageFromObject(object);                          \
     DCHECK(page);                                                     \
     bool is_container =                                               \
-        ThreadState::IsVectorArenaIndex(page->Arena()->ArenaIndex()); \
+        ThreadHeap::IsVectorArenaIndex(page->Arena()->ArenaIndex());  \
     if (!is_container && page->IsLargeObjectPage())                   \
       is_container =                                                  \
           static_cast<LargeObjectPage*>(page)->IsVectorBackingPage(); \
@@ -73,7 +73,7 @@
 // so that when it is finalized, its ASan annotation will be
 // correctly retired.
 #define ASAN_MARK_LARGE_VECTOR_CONTAINER(arena, large_object)            \
-  if (ThreadState::IsVectorArenaIndex(arena->ArenaIndex())) {            \
+  if (ThreadHeap::IsVectorArenaIndex(arena->ArenaIndex())) {             \
     BasePage* large_page = PageFromObject(large_object);                 \
     DCHECK(large_page->IsLargeObjectPage());                             \
     static_cast<LargeObjectPage*>(large_page)->SetIsVectorBackingPage(); \
@@ -260,11 +260,12 @@ Address BaseArena::LazySweep(size_t allocation_size, size_t gc_info_index) {
 
   TRACE_EVENT0("blink_gc", "BaseArena::lazySweepPages");
   ThreadState::SweepForbiddenScope sweep_forbidden(GetThreadState());
-  ScriptForbiddenIfMainThreadScope script_forbidden;
+  ScriptForbiddenScope script_forbidden;
 
-  double start_time = WTF::CurrentTimeMS();
+  double start_time = WTF::MonotonicallyIncreasingTimeMS();
   Address result = LazySweepPages(allocation_size, gc_info_index);
-  GetThreadState()->AccumulateSweepingTime(WTF::CurrentTimeMS() - start_time);
+  GetThreadState()->AccumulateSweepingTime(
+      WTF::MonotonicallyIncreasingTimeMS() - start_time);
   ThreadHeap::ReportMemoryUsageForTracing();
 
   return result;
@@ -294,8 +295,7 @@ bool BaseArena::LazySweepWithDeadline(double deadline_seconds) {
 
   CHECK(GetThreadState()->IsSweepingInProgress());
   DCHECK(GetThreadState()->SweepForbidden());
-  DCHECK(!GetThreadState()->IsMainThread() ||
-         ScriptForbiddenScope::IsScriptForbidden());
+  DCHECK(ScriptForbiddenScope::IsScriptForbidden());
 
   NormalPageArena* normal_arena = nullptr;
   if (first_unswept_page_ && !first_unswept_page_->IsLargeObjectPage()) {
@@ -328,8 +328,7 @@ bool BaseArena::LazySweepWithDeadline(double deadline_seconds) {
 void BaseArena::CompleteSweep() {
   CHECK(GetThreadState()->IsSweepingInProgress());
   DCHECK(GetThreadState()->SweepForbidden());
-  DCHECK(!GetThreadState()->IsMainThread() ||
-         ScriptForbiddenScope::IsScriptForbidden());
+  DCHECK(ScriptForbiddenScope::IsScriptForbidden());
 
   while (first_unswept_page_) {
     SweepUnsweptPage();
@@ -342,7 +341,7 @@ Address BaseArena::AllocateLargeObject(size_t allocation_size,
   // TODO(sof): should need arise, support eagerly finalized large objects.
   CHECK(ArenaIndex() != BlinkGC::kEagerSweepArenaIndex);
   LargeObjectArena* large_object_arena = static_cast<LargeObjectArena*>(
-      GetThreadState()->Arena(BlinkGC::kLargeObjectArenaIndex));
+      GetThreadState()->Heap().Arena(BlinkGC::kLargeObjectArenaIndex));
   Address large_object = large_object_arena->AllocateLargeObjectPage(
       allocation_size, gc_info_index);
   ASAN_MARK_LARGE_VECTOR_CONTAINER(this, large_object);
@@ -392,11 +391,11 @@ bool BaseArena::WillObjectBeLazilySwept(BasePage* page,
     size_t size = header->size();
     // Scan made it to |objectPointer| without encountering any marked objects.
     //  => lazy sweep will have processed this unmarked, but live, object.
-    //  => |objectPointer| will not be lazily swept.
+    //  => |object_pointer| will not be lazily swept.
     //
-    // Notice that |objectPointer| might be pointer to a GarbageCollectedMixin,
-    // hence using fromPayload() to derive the HeapObjectHeader isn't possible
-    // (and use its value to check if |headerAddress| is equal to it.)
+    // Notice that |object_pointer| might be pointer to a GarbageCollectedMixin,
+    // hence using |FromPayload| to derive the HeapObjectHeader isn't possible
+    // (and use its value to check if |header_address| is equal to it.)
     if (header_address > object_pointer)
       return false;
     if (!header->IsFree() && header->IsMarked()) {
@@ -409,6 +408,18 @@ bool BaseArena::WillObjectBeLazilySwept(BasePage* page,
   }
   NOTREACHED();
   return true;
+}
+
+void BaseArena::EnableIncrementalMarkingBarrier() {
+  DCHECK(!first_unswept_page_);
+  for (BasePage* page = first_page_; page; page = page->Next())
+    page->SetIncrementalMarking(true);
+}
+
+void BaseArena::DisableIncrementalMarkingBarrier() {
+  DCHECK(!first_unswept_page_);
+  for (BasePage* page = first_page_; page; page = page->Next())
+    page->SetIncrementalMarking(false);
 }
 
 NormalPageArena::NormalPageArena(ThreadState* state, int index)
@@ -607,7 +618,7 @@ void NormalPageArena::TakeFreelistSnapshot(const String& dump_name) {
 }
 
 void NormalPageArena::AllocatePage() {
-  GetThreadState()->ShouldFlushHeapDoesNotContainCache();
+  GetThreadState()->Heap().ShouldFlushHeapDoesNotContainCache();
   PageMemory* page_memory =
       GetThreadState()->Heap().GetFreePagePool()->Take(ArenaIndex());
 
@@ -628,9 +639,11 @@ void NormalPageArena::AllocatePage() {
       // gets a page and add the rest to the page pool.
       if (!page_memory) {
         bool result = memory->Commit();
-        // If you hit the ASSERT, it will mean that you're hitting
-        // the limit of the number of mmapped regions OS can support
-        // (e.g., /proc/sys/vm/max_map_count in Linux).
+        // If you hit the ASSERT, it will mean that you're hitting the limit
+        // of the number of mmapped regions OS can support
+        // (e.g., /proc/sys/vm/max_map_count in Linux) or on that Windows you
+        // have exceeded the max commit charge across all processes for the
+        // system.
         CHECK(result);
         page_memory = memory;
       } else {
@@ -727,7 +740,7 @@ bool NormalPageArena::Coalesce() {
     if (start_of_gap != page->PayloadEnd())
       AddToFreeList(start_of_gap, page->PayloadEnd() - start_of_gap);
   }
-  GetThreadState()->DecreaseAllocatedObjectSize(freed_size);
+  GetThreadState()->Heap().HeapStats().DecreaseAllocatedObjectSize(freed_size);
   DCHECK_EQ(promptly_freed_size_, freed_size);
   promptly_freed_size_ = 0;
   return true;
@@ -850,17 +863,17 @@ void NormalPageArena::SetRemainingAllocationSize(
   //  - if smaller, a net reduction in size since last call to
   //  updateRemainingAllocationSize().
   if (last_remaining_allocation_size_ > remaining_allocation_size_)
-    GetThreadState()->IncreaseAllocatedObjectSize(
+    GetThreadState()->Heap().HeapStats().IncreaseAllocatedObjectSize(
         last_remaining_allocation_size_ - remaining_allocation_size_);
   else if (last_remaining_allocation_size_ != remaining_allocation_size_)
-    GetThreadState()->DecreaseAllocatedObjectSize(
+    GetThreadState()->Heap().HeapStats().DecreaseAllocatedObjectSize(
         remaining_allocation_size_ - last_remaining_allocation_size_);
   last_remaining_allocation_size_ = remaining_allocation_size_;
 }
 
 void NormalPageArena::UpdateRemainingAllocationSize() {
   if (last_remaining_allocation_size_ > RemainingAllocationSize()) {
-    GetThreadState()->IncreaseAllocatedObjectSize(
+    GetThreadState()->Heap().HeapStats().IncreaseAllocatedObjectSize(
         last_remaining_allocation_size_ - RemainingAllocationSize());
     last_remaining_allocation_size_ = RemainingAllocationSize();
   }
@@ -998,7 +1011,7 @@ Address LargeObjectArena::DoAllocateLargeObjectPage(size_t allocation_size,
   large_object_size += kAllocationGranularity;
 #endif
 
-  GetThreadState()->ShouldFlushHeapDoesNotContainCache();
+  GetThreadState()->Heap().ShouldFlushHeapDoesNotContainCache();
   PageMemory* page_memory = PageMemory::Allocate(
       large_object_size, GetThreadState()->Heap().GetRegionTree());
   Address large_object_address = page_memory->WritableStart();
@@ -1026,7 +1039,8 @@ Address LargeObjectArena::DoAllocateLargeObjectPage(size_t allocation_size,
 
   GetThreadState()->Heap().HeapStats().IncreaseAllocatedSpace(
       large_object->size());
-  GetThreadState()->IncreaseAllocatedObjectSize(large_object->size());
+  GetThreadState()->Heap().HeapStats().IncreaseAllocatedObjectSize(
+      large_object->size());
   return result;
 }
 
@@ -1252,7 +1266,11 @@ bool FreeList::TakeSnapshot(const String& dump_base_name) {
 }
 
 BasePage::BasePage(PageMemory* storage, BaseArena* arena)
-    : storage_(storage), arena_(arena), next_(nullptr), swept_(true) {
+    : storage_(storage),
+      arena_(arena),
+      next_(nullptr),
+      swept_(true),
+      incremental_marking_(arena->GetThreadState()->IsIncrementalMarking()) {
 #if DCHECK_IS_ON()
   DCHECK(IsPageHeaderAddress(reinterpret_cast<Address>(this)));
 #endif
@@ -1368,8 +1386,10 @@ void NormalPage::Sweep() {
 #endif
   }
 
-  if (marked_object_size)
-    page_arena->GetThreadState()->IncreaseMarkedObjectSize(marked_object_size);
+  if (marked_object_size) {
+    page_arena->GetThreadState()->Heap().HeapStats().IncreaseMarkedObjectSize(
+        marked_object_size);
+  }
 }
 
 void NormalPage::SweepAndCompact(CompactionContext& context) {
@@ -1380,7 +1400,7 @@ void NormalPage::SweepAndCompact(CompactionContext& context) {
   NormalPageArena* page_arena = ArenaForNormalPage();
 #if defined(ADDRESS_SANITIZER)
   bool is_vector_arena =
-      ThreadState::IsVectorArenaIndex(page_arena->ArenaIndex());
+      ThreadHeap::IsVectorArenaIndex(page_arena->ArenaIndex());
 #endif
   HeapCompact* compact = page_arena->GetThreadState()->Heap().Compaction();
   for (Address header_address = Payload(); header_address < PayloadEnd();) {
@@ -1466,8 +1486,10 @@ void NormalPage::SweepAndCompact(CompactionContext& context) {
     allocation_point += size;
     DCHECK(allocation_point <= current_page->PayloadSize());
   }
-  if (marked_object_size)
-    page_arena->GetThreadState()->IncreaseMarkedObjectSize(marked_object_size);
+  if (marked_object_size) {
+    page_arena->GetThreadState()->Heap().HeapStats().IncreaseMarkedObjectSize(
+        marked_object_size);
+  }
 
 #if DCHECK_IS_ON() || defined(LEAK_SANITIZER) || defined(ADDRESS_SANITIZER) || \
     defined(MEMORY_SANITIZER)
@@ -1732,7 +1754,8 @@ void LargeObjectPage::RemoveFromHeap() {
 
 void LargeObjectPage::Sweep() {
   GetHeapObjectHeader()->Unmark();
-  Arena()->GetThreadState()->IncreaseMarkedObjectSize(size());
+  Arena()->GetThreadState()->Heap().HeapStats().IncreaseMarkedObjectSize(
+      size());
 }
 
 void LargeObjectPage::MakeConsistentForMutator() {

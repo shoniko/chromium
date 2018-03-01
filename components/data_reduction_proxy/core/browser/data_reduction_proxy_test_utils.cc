@@ -7,6 +7,7 @@
 #include <map>
 #include <utility>
 
+#include "base/command_line.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
@@ -29,6 +30,7 @@
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_server.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
 #include "net/base/network_delegate_impl.h"
@@ -215,7 +217,19 @@ void TestDataReductionProxyConfigServiceClient::
   OnApplicationStateChange(
       base::android::APPLICATION_STATE_HAS_RUNNING_ACTIVITIES);
 }
-#endif
+#endif  // OS_ANDROID
+
+void TestDataReductionProxyConfigServiceClient::SetRemoteConfigApplied(
+    bool remote_config_applied) {
+  remote_config_applied_ = remote_config_applied;
+}
+
+bool TestDataReductionProxyConfigServiceClient::RemoteConfigApplied() const {
+  if (!remote_config_applied_) {
+    return DataReductionProxyConfigServiceClient::RemoteConfigApplied();
+  }
+  return remote_config_applied_.value();
+}
 
 MockDataReductionProxyService::MockDataReductionProxyService(
     DataReductionProxySettings* settings,
@@ -663,6 +677,11 @@ void DataReductionProxyTestContext::
   RunUntilIdle();
 }
 
+void DataReductionProxyTestContext::DisableWarmupURLFetch() {
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kDisableDataReductionProxyWarmupURLFetch);
+}
+
 MockDataReductionProxyConfig* DataReductionProxyTestContext::mock_config()
     const {
   DCHECK(test_context_flags_ & USE_MOCK_CONFIG);
@@ -723,6 +742,8 @@ DataReductionProxyTestContext::TestConfigStorer::TestConfigStorer(
 void DataReductionProxyTestContext::TestConfigStorer::StoreSerializedConfig(
     const std::string& serialized_config) {
   prefs_->SetString(prefs::kDataReductionProxyConfig, serialized_config);
+  prefs_->SetInt64(prefs::kDataReductionProxyLastConfigRetrievalTime,
+                   (base::Time::Now() - base::Time()).InMicroseconds());
 }
 
 std::vector<net::ProxyServer>

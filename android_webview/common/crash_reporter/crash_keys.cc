@@ -77,6 +77,13 @@ size_t RegisterWebViewCrashKeys() {
       // sandbox/:
       {"seccomp-sigsys", kMediumSize},
 
+      // Site isolation.  These keys help debug renderer kills such as
+      // https://crbug.com/773140.
+      {"requested_site_url", kSmallSize},
+      {"requested_origin", kSmallSize},
+      {"killed_process_origin_lock", kSmallSize},
+      {"site_isolation_mode", kSmallSize},
+
       // Temporary for http://crbug.com/575245.
       {"swapout_frame_id", kSmallSize},
       {"swapout_proxy_id", kSmallSize},
@@ -112,6 +119,10 @@ size_t RegisterWebViewCrashKeys() {
 
       // Temporary for https://crbug.com/685996.
       {"user-cloud-policy-manager-connect-trace", kMediumSize},
+
+      // Accessibility keys. Temporary for http://crbug.com/765490.
+      {"ax_tree_error", kSmallSize},
+      {"ax_tree_update", kMediumSize},
   };
 
   // This dynamic set of keys is used for sets of key value pairs when gathering

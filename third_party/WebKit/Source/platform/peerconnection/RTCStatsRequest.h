@@ -32,7 +32,7 @@
 #define RTCStatsRequest_h
 
 #include "platform/heap/Handle.h"
-#include "platform/wtf/PassRefPtr.h"
+#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
@@ -49,7 +49,7 @@ class RTCStatsRequest : public GarbageCollectedFinalized<RTCStatsRequest> {
   virtual MediaStreamComponent* Component() = 0;
   virtual void RequestSucceeded(RTCStatsResponseBase*) = 0;
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  virtual void Trace(blink::Visitor* visitor) {}
 
  protected:
   RTCStatsRequest() {}

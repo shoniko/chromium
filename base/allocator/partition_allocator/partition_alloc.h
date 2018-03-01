@@ -64,9 +64,11 @@
 
 #include "base/allocator/partition_allocator/page_allocator.h"
 #include "base/allocator/partition_allocator/spin_lock.h"
+#include "base/base_export.h"
 #include "base/bits.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/sys_byteorder.h"
 #include "build/build_config.h"
 
@@ -265,9 +267,13 @@ struct PartitionPage {
   uint16_t page_offset;
   int16_t empty_cache_index;  // -1 if not in the empty cache.
 };
+static_assert(sizeof(PartitionPage) <= kPageMetadataSize,
+              "PartitionPage must be able to fit in a metadata slot");
 
 struct PartitionBucket {
-  PartitionPage* active_pages_head;  // Accessed most in hot path => goes first.
+  // Accessed most in hot path => goes first.
+  PartitionPage* active_pages_head;
+
   PartitionPage* empty_pages_head;
   PartitionPage* decommitted_pages_head;
   uint32_t slot_size;
@@ -276,7 +282,7 @@ struct PartitionBucket {
 };
 
 // An "extent" is a span of consecutive superpages. We link to the partition's
-// next extent (if there is one) at the very start of a superpage's metadata
+// next extent (if there is one) to the very start of a superpage's metadata
 // area.
 struct PartitionSuperPageExtentEntry {
   PartitionRootBase* root;
@@ -284,6 +290,9 @@ struct PartitionSuperPageExtentEntry {
   char* super_pages_end;
   PartitionSuperPageExtentEntry* next;
 };
+static_assert(
+    sizeof(PartitionSuperPageExtentEntry) <= kPageMetadataSize,
+    "PartitionSuperPageExtentEntry must be able to fit in a metadata slot");
 
 struct PartitionDirectMapExtent {
   PartitionDirectMapExtent* next_extent;
@@ -293,39 +302,38 @@ struct PartitionDirectMapExtent {
 };
 
 struct BASE_EXPORT PartitionRootBase {
-  size_t total_size_of_committed_pages;
-  size_t total_size_of_super_pages;
-  size_t total_size_of_direct_mapped_pages;
+  PartitionRootBase();
+  virtual ~PartitionRootBase();
+  size_t total_size_of_committed_pages = 0;
+  size_t total_size_of_super_pages = 0;
+  size_t total_size_of_direct_mapped_pages = 0;
   // Invariant: total_size_of_committed_pages <=
   //                total_size_of_super_pages +
   //                total_size_of_direct_mapped_pages.
-  unsigned num_buckets;
-  unsigned max_allocation;
-  bool initialized;
-  char* next_super_page;
-  char* next_partition_page;
-  char* next_partition_page_end;
-  PartitionSuperPageExtentEntry* current_extent;
-  PartitionSuperPageExtentEntry* first_extent;
-  PartitionDirectMapExtent* direct_map_list;
-  PartitionPage* global_empty_page_ring[kMaxFreeableSpans];
-  int16_t global_empty_page_ring_index;
-  uintptr_t inverted_self;
+  unsigned num_buckets = 0;
+  unsigned max_allocation = 0;
+  bool initialized = false;
+  char* next_super_page = nullptr;
+  char* next_partition_page = nullptr;
+  char* next_partition_page_end = nullptr;
+  PartitionSuperPageExtentEntry* current_extent = nullptr;
+  PartitionSuperPageExtentEntry* first_extent = nullptr;
+  PartitionDirectMapExtent* direct_map_list = nullptr;
+  PartitionPage* global_empty_page_ring[kMaxFreeableSpans] = {};
+  int16_t global_empty_page_ring_index = 0;
+  uintptr_t inverted_self = 0;
 
-  static subtle::SpinLock gInitializedLock;
-  static bool gInitialized;
-  // gSeedPage is used as a sentinel to indicate that there is no page
-  // in the active page list. We can use nullptr, but in that case we need
-  // to add a null-check branch to the hot allocation path. We want to avoid
-  // that.
-  static PartitionPage gSeedPage;
-  static PartitionBucket gPagedBucket;
   // gOomHandlingFunction is invoked when ParitionAlloc hits OutOfMemory.
   static void (*gOomHandlingFunction)();
 };
 
 // Never instantiate a PartitionRoot directly, instead use PartitionAlloc.
-struct PartitionRoot : public PartitionRootBase {
+struct BASE_EXPORT PartitionRoot : public PartitionRootBase {
+  PartitionRoot();
+  ~PartitionRoot() override;
+  // This references the buckets OFF the edge of this struct. All uses of
+  // PartitionRoot must have the bucket array come right after.
+  //
   // The PartitionAlloc templated class ensures the following is correct.
   ALWAYS_INLINE PartitionBucket* buckets() {
     return reinterpret_cast<PartitionBucket*>(this + 1);
@@ -337,19 +345,22 @@ struct PartitionRoot : public PartitionRootBase {
 
 // Never instantiate a PartitionRootGeneric directly, instead use
 // PartitionAllocatorGeneric.
-struct PartitionRootGeneric : public PartitionRootBase {
+struct BASE_EXPORT PartitionRootGeneric : public PartitionRootBase {
+  PartitionRootGeneric();
+  ~PartitionRootGeneric() override;
   subtle::SpinLock lock;
   // Some pre-computed constants.
-  size_t order_index_shifts[kBitsPerSizeT + 1];
-  size_t order_sub_index_masks[kBitsPerSizeT + 1];
+  size_t order_index_shifts[kBitsPerSizeT + 1] = {};
+  size_t order_sub_index_masks[kBitsPerSizeT + 1] = {};
   // The bucket lookup table lets us map a size_t to a bucket quickly.
   // The trailing +1 caters for the overflow case for very large allocation
   // sizes.  It is one flat array instead of a 2D array because in the 2D
   // world, we'd need to index array[blah][max+1] which risks undefined
   // behavior.
   PartitionBucket*
-      bucket_lookups[((kBitsPerSizeT + 1) * kGenericNumBucketsPerOrder) + 1];
-  PartitionBucket buckets[kGenericNumBuckets];
+      bucket_lookups[((kBitsPerSizeT + 1) * kGenericNumBucketsPerOrder) + 1] =
+          {};
+  PartitionBucket buckets[kGenericNumBuckets] = {};
 };
 
 // Flags for PartitionAllocGenericFlags.
@@ -446,10 +457,18 @@ class BASE_EXPORT PartitionAllocHooks {
   typedef void AllocationHook(void* address, size_t, const char* type_name);
   typedef void FreeHook(void* address);
 
+  // To unhook, call Set*Hook with nullptr.
   static void SetAllocationHook(AllocationHook* hook) {
+    // Chained allocation hooks are not supported. Registering a non-null
+    // hook when a non-null hook is already registered indicates somebody is
+    // trying to overwrite a hook.
+    DCHECK(!hook || !allocation_hook_) << "Overwriting allocation hook";
     allocation_hook_ = hook;
   }
-  static void SetFreeHook(FreeHook* hook) { free_hook_ = hook; }
+  static void SetFreeHook(FreeHook* hook) {
+    DCHECK(!hook || !free_hook_) << "Overwriting free hook";
+    free_hook_ = hook;
+  }
 
   static void AllocationHookIfEnabled(void* address,
                                       size_t size,
@@ -576,16 +595,23 @@ ALWAYS_INLINE PartitionPage* PartitionPointerToPageNoAlignmentCheck(void* ptr) {
   return page;
 }
 
+// Resturns start of the slot span for the PartitionPage.
 ALWAYS_INLINE void* PartitionPageToPointer(const PartitionPage* page) {
   uintptr_t pointer_as_uint = reinterpret_cast<uintptr_t>(page);
+
   uintptr_t super_page_offset = (pointer_as_uint & kSuperPageOffsetMask);
+
+  // A valid |page| must be past the first guard System page and within
+  // the following metadata region.
   DCHECK(super_page_offset > kSystemPageSize);
+  // Must be less than total metadata region.
   DCHECK(super_page_offset < kSystemPageSize + (kNumPartitionPagesPerSuperPage *
                                                 kPageMetadataSize));
   uintptr_t partition_page_index =
       (super_page_offset - kSystemPageSize) >> kPageMetadataShift;
-  // Index 0 is invalid because it is the metadata area and the last index is
-  // invalid because it is a guard page.
+  // Index 0 is invalid because it is the superpage extent metadata and the
+  // last index is invalid because the whole PartitionPage is set as guard
+  // pages for the metadata region.
   DCHECK(partition_page_index);
   DCHECK(partition_page_index < kNumPartitionPagesPerSuperPage - 1);
   uintptr_t super_page_base = (pointer_as_uint & kSuperPageBaseMask);
@@ -690,8 +716,10 @@ ALWAYS_INLINE void* PartitionBucketAlloc(PartitionRootBase* root,
   char* char_ret = static_cast<char*>(ret);
   // The value given to the application is actually just after the cookie.
   ret = char_ret + kCookieSize;
-  memset(ret, kUninitializedByte, no_cookie_size);
+
+  // Debug fill region kUninitializedByte and surround it with 2 cookies.
   PartitionCookieWriteValue(char_ret);
+  memset(ret, kUninitializedByte, no_cookie_size);
   PartitionCookieWriteValue(char_ret + kCookieSize + no_cookie_size);
 #endif
   return ret;
@@ -855,7 +883,6 @@ ALWAYS_INLINE size_t PartitionAllocActualSize(PartitionRootGeneric* root,
   } else if (size > kGenericMaxDirectMapped) {
     // Too large to allocate => return the size unchanged.
   } else {
-    DCHECK(bucket == &PartitionRootBase::gPagedBucket);
     size = PartitionDirectMapSize(size);
   }
   return PartitionCookieSizeAdjustSubtract(size);
@@ -885,6 +912,11 @@ ALWAYS_INLINE size_t PartitionAllocGetSize(void* ptr) {
 template <size_t N>
 class SizeSpecificPartitionAllocator {
  public:
+  SizeSpecificPartitionAllocator() {
+    memset(actual_buckets_, 0,
+           sizeof(PartitionBucket) * arraysize(actual_buckets_));
+  }
+  ~SizeSpecificPartitionAllocator() = default;
   static const size_t kMaxAllocation = N - kAllocationGranularity;
   static const size_t kNumBuckets = N / kAllocationGranularity;
   void init() {
@@ -897,14 +929,19 @@ class SizeSpecificPartitionAllocator {
   PartitionBucket actual_buckets_[kNumBuckets];
 };
 
-class PartitionAllocatorGeneric {
+class BASE_EXPORT PartitionAllocatorGeneric {
  public:
+  PartitionAllocatorGeneric();
+  ~PartitionAllocatorGeneric();
+
   void init() { PartitionAllocGenericInit(&partition_root_); }
   ALWAYS_INLINE PartitionRootGeneric* root() { return &partition_root_; }
 
  private:
   PartitionRootGeneric partition_root_;
 };
+
+BASE_EXPORT PartitionPage* GetSentinelPageForTesting();
 
 }  // namespace base
 

@@ -278,7 +278,7 @@ void NavigateToURLBlockUntilNavigationsComplete(Browser* browser,
 
 base::FilePath GetTestFilePath(const base::FilePath& dir,
                                const base::FilePath& file) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::FilePath path;
   PathService::Get(chrome::DIR_TEST_DATA, &path);
   return path.Append(dir).Append(file);
@@ -289,7 +289,7 @@ GURL GetTestUrl(const base::FilePath& dir, const base::FilePath& file) {
 }
 
 bool GetRelativeBuildDirectory(base::FilePath* build_dir) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   // This function is used to find the build directory so TestServer can serve
   // built files (nexes, etc).  TestServer expects a path relative to the source
   // root.
@@ -362,7 +362,7 @@ int FindInPage(WebContents* tab,
 }
 
 void DownloadURL(Browser* browser, const GURL& download_url) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::ScopedTempDir downloads_directory;
   ASSERT_TRUE(downloads_directory.CreateUniqueTempDir());
   browser->profile()->GetPrefs()->SetFilePath(prefs::kDownloadDefaultDirectory,
@@ -430,8 +430,10 @@ void GetCookies(const GURL& url,
   *value_size = -1;
   if (url.is_valid() && contents) {
     scoped_refptr<net::URLRequestContextGetter> context_getter =
-        contents->GetRenderProcessHost()->GetStoragePartition()->
-            GetURLRequestContext();
+        contents->GetMainFrame()
+            ->GetProcess()
+            ->GetStoragePartition()
+            ->GetURLRequestContext();
     base::WaitableEvent event(base::WaitableEvent::ResetPolicy::MANUAL,
                               base::WaitableEvent::InitialState::NOT_SIGNALED);
     CHECK(content::BrowserThread::PostTask(

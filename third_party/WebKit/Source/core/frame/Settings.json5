@@ -75,7 +75,7 @@
     // draw canvas in software.
     {
       name: "minimumAccelerated2dCanvasSize",
-      initial: "257*256",
+      initial: "65*64",
       type: "int",
     },
 
@@ -178,10 +178,14 @@
       invalidate: "AcceleratedCompositing",
     },
 
-    // 3D canvas (WebGL) support.
     {
-      name: "webGLEnabled",
-      initial: false,
+      name: "webGL1Enabled",
+      initial: true,
+    },
+
+    {
+      name: "webGL2Enabled",
+      initial: true,
     },
 
     {
@@ -474,13 +478,6 @@
     {
       name: "useSolidColorScrollbars",
       initial: false,
-    },
-
-    // Setting to have all APIs reflect the layout viewport.
-    // crbug.com/489206 tracks the reason for this flag's existence.
-    {
-      name: "inertVisualViewport",
-      initial: true,
     },
 
     // The rubber-band overscroll effect is implemented in Blink and is being moved
@@ -810,6 +807,12 @@
     },
 
     {
+      name: "savePreviousDocumentResources",
+      initial: "SavePreviousDocumentResources::kNever",
+      type: "SavePreviousDocumentResources",
+    },
+
+    {
       name: "progressBarCompletion",
       initial: "ProgressBarCompletion::kLoadEvent",
       type: "ProgressBarCompletion",
@@ -970,6 +973,10 @@
     {
       name: "forceDisplayList2dCanvasEnabled",
       initial: false,
+    },
+    {
+      name: "navigatorPlatformOverride",
+      type: "String",
     },
   ],
 }

@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <queue>
 
+#include "base/containers/circular_deque.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -38,15 +39,6 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
       priority_queue<AudioDevice, std::vector<AudioDevice>, AudioDeviceCompare>
           AudioDevicePriorityQueue;
   typedef std::vector<uint64_t> NodeIdList;
-
-  // Volume change reasons that are not user-initiated.
-  enum AutomatedVolumeChangeReason {
-    // Indicates it is from initializing audio state.
-    VOLUME_CHANGE_INITIALIZING_AUDIO_STATE,
-
-    // Indicates it is from restoring volume in maximimize mode screenshot.
-    VOLUME_CHANGE_MAXIMIZE_MODE_SCREENSHOT,
-  };
 
   class AudioObserver {
    public:
@@ -78,6 +70,9 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
 
     // Called when output channel remixing changed.
     virtual void OnOuputChannelRemixingChanged(bool mono_on);
+
+    // Called when hotword is detected.
+    virtual void OnHotwordTriggered(uint64_t tv_sec, uint64_t tv_nsec);
 
    protected:
     AudioObserver();
@@ -179,12 +174,6 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
   // Sets all active output devices' volume levels to |volume_percent|, whose
   // range is from 0-100%.
   void SetOutputVolumePercent(int volume_percent);
-
-  // Sets all active output devices' volume levels to |volume_percent|, whose
-  // range is from 0-100%, without notifying observers.
-  void SetOutputVolumePercentWithoutNotifyingObservers(
-      int volume_percent,
-      AutomatedVolumeChangeReason reason);
 
   // Sets all active input devices' gain level to |gain_percent|, whose range is
   // from 0-100%.
@@ -294,6 +283,7 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
   void ActiveOutputNodeChanged(uint64_t node_id) override;
   void ActiveInputNodeChanged(uint64_t node_id) override;
   void OutputNodeVolumeChanged(uint64_t node_id, int volume) override;
+  void HotwordTriggered(uint64_t tv_sec, uint64_t tv_nsec) override;
 
   // AudioPrefObserver overrides.
   void OnAudioPolicyPrefChanged() override;
@@ -517,15 +507,10 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
 
   bool cras_service_available_ = false;
 
-  // FIFO list of reasons passed to
-  // SetOutputVolumePercentWithoutNotifyingObservers() for which we're still
-  // waiting for OutputNodeVolumeChanged() calls. These are used to suppress
-  // notifications for those changes.
-  std::deque<AutomatedVolumeChangeReason> automated_volume_change_reasons_;
-
   bool initializing_audio_state_ = false;
   int init_volume_;
   uint64_t init_node_id_;
+  int init_volume_count_ = 0;
 
   bool front_camera_on_ = false;
   bool rear_camera_on_ = false;

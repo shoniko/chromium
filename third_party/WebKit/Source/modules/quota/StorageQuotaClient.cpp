@@ -28,7 +28,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "StorageQuotaClient.h"
+#include "modules/quota/StorageQuotaClient.h"
 
 #include "core/dom/Document.h"
 #include "core/dom/ExecutionContext.h"
@@ -74,7 +74,7 @@ const char* StorageQuotaClient::SupplementName() {
 
 StorageQuotaClient* StorageQuotaClient::From(ExecutionContext* context) {
   if (!context->IsDocument())
-    return 0;
+    return nullptr;
   return static_cast<StorageQuotaClient*>(
       Supplement<Page>::From(ToDocument(context)->GetPage(), SupplementName()));
 }

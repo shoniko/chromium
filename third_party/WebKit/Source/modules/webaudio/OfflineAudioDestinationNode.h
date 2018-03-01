@@ -30,7 +30,6 @@
 #include "modules/webaudio/AudioBuffer.h"
 #include "modules/webaudio/AudioDestinationNode.h"
 #include "modules/webaudio/OfflineAudioContext.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "platform/wtf/RefPtr.h"
 #include "public/platform/WebThread.h"
 
@@ -42,7 +41,7 @@ class OfflineAudioContext;
 
 class OfflineAudioDestinationHandler final : public AudioDestinationHandler {
  public:
-  static PassRefPtr<OfflineAudioDestinationHandler> Create(
+  static scoped_refptr<OfflineAudioDestinationHandler> Create(
       AudioNode&,
       unsigned number_of_channels,
       size_t frames_to_process,
@@ -64,6 +63,8 @@ class OfflineAudioDestinationHandler final : public AudioDestinationHandler {
   void StartRendering() override;
   void StopRendering() override;
   unsigned long MaxChannelCount() const override;
+
+  void RestartDestination() override;
 
   // Returns the rendering callback buffer size.  This should never be
   // called.
@@ -131,7 +132,7 @@ class OfflineAudioDestinationHandler final : public AudioDestinationHandler {
   // OfflineAudioDestinationNode. It is accessed by both audio and main thread.
   CrossThreadPersistent<AudioBuffer> render_target_;
   // Temporary AudioBus for each render quantum.
-  RefPtr<AudioBus> render_bus_;
+  scoped_refptr<AudioBus> render_bus_;
 
   // Rendering thread.
   std::unique_ptr<WebThread> render_thread_;

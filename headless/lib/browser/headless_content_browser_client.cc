@@ -14,6 +14,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/resource_dispatcher_host.h"
@@ -131,7 +132,7 @@ void HeadlessContentBrowserClient::OverrideWebkitPrefs(
     content::WebPreferences* prefs) {
   auto* browser_context = HeadlessBrowserContextImpl::From(
       render_view_host->GetProcess()->GetBrowserContext());
-  const base::Callback<void(headless::WebPreferences*)>& callback =
+  const base::Callback<void(WebPreferences*)>& callback =
       browser_context->options()->override_web_preferences_callback();
   if (callback)
     callback.Run(prefs);
@@ -158,9 +159,8 @@ HeadlessContentBrowserClient::GetServiceManifestOverlay(
 void HeadlessContentBrowserClient::RegisterOutOfProcessServices(
     OutOfProcessServiceMap* services) {
 #if BUILDFLAG(ENABLE_BASIC_PRINTING) && !defined(CHROME_MULTIPLE_DLL_CHILD)
-  (*services)[printing::mojom::kServiceName] = {
-      base::ASCIIToUTF16("PDF Compositor Service"),
-      content::SANDBOX_TYPE_UTILITY};
+  (*services)[printing::mojom::kServiceName] =
+      base::ASCIIToUTF16("PDF Compositor Service");
 #endif
 }
 
@@ -271,7 +271,6 @@ void HeadlessContentBrowserClient::AllowCertificateError(
     const net::SSLInfo& ssl_info,
     const GURL& request_url,
     content::ResourceType resource_type,
-    bool overridable,
     bool strict_enforcement,
     bool expired_previous_decision,
     const base::Callback<void(content::CertificateRequestResultType)>&
@@ -292,13 +291,47 @@ void HeadlessContentBrowserClient::AllowCertificateError(
 
 void HeadlessContentBrowserClient::ResourceDispatcherHostCreated() {
   resource_dispatcher_host_delegate_.reset(
-      new HeadlessResourceDispatcherHostDelegate);
+      new HeadlessResourceDispatcherHostDelegate(
+          browser_->options()->enable_resource_scheduler));
   content::ResourceDispatcherHost::Get()->SetDelegate(
       resource_dispatcher_host_delegate_.get());
 }
 
 net::NetLog* HeadlessContentBrowserClient::GetNetLog() {
   return browser_->browser_main_parts()->net_log();
+}
+
+bool HeadlessContentBrowserClient::AllowGetCookie(
+    const GURL& url,
+    const GURL& first_party,
+    const net::CookieList& cookie_list,
+    content::ResourceContext* context,
+    int render_process_id,
+    int render_frame_id) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+  LockedPtr<HeadlessBrowserContextImpl> browser_context =
+      browser_->GetBrowserContextForRenderFrame(render_process_id,
+                                                render_frame_id);
+  if (!browser_context)
+    return false;
+  return browser_context->options()->allow_cookies();
+}
+
+bool HeadlessContentBrowserClient::AllowSetCookie(
+    const GURL& url,
+    const GURL& first_party,
+    const std::string& cookie_line,
+    content::ResourceContext* context,
+    int render_process_id,
+    int render_frame_id,
+    const net::CookieOptions& options) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+  LockedPtr<HeadlessBrowserContextImpl> browser_context =
+      browser_->GetBrowserContextForRenderFrame(render_process_id,
+                                                render_frame_id);
+  if (!browser_context)
+    return false;
+  return browser_context->options()->allow_cookies();
 }
 
 }  // namespace headless

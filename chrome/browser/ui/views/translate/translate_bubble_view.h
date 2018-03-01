@@ -49,10 +49,12 @@ class TranslateBubbleView : public LocationBarBubbleDelegateView,
                             public content::WebContentsObserver {
  public:
   // Commands shown in the action-style combobox. The value corresponds to the
-  // position in the combobox menu. Gaps will become separators.
+  // position in the combobox menu.
   enum class DenialComboboxIndex {
     DONT_TRANSLATE = 0,
     NEVER_TRANSLATE_LANGUAGE = 1,
+    SEPARATOR = 2,
+    MENU_SIZE_NO_BLACKLIST = SEPARATOR,
     NEVER_TRANSLATE_SITE = 3,
     MENU_SIZE = 4,
   };
@@ -154,6 +156,7 @@ class TranslateBubbleView : public LocationBarBubbleDelegateView,
 
   friend class TranslateBubbleViewTest;
   friend void ::translate::test_utils::PressTranslate(::Browser*);
+  friend void ::translate::test_utils::PressRevert(::Browser*);
   FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest, TranslateButton);
   FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest, TranslateButtonIn2016Q2UI);
   FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest, CloseButtonIn2016Q2UI);
@@ -173,6 +176,9 @@ class TranslateBubbleView : public LocationBarBubbleDelegateView,
   FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest,
                            CancelButtonReturningAfterTranslate);
   FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest, CancelButtonReturningError);
+  FRIEND_TEST_ALL_PREFIXES(TranslateLanguageBrowserTest, TranslateAndRevert);
+  FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewBrowserTest,
+                           CheckNeverTranslateThisSiteBlacklist);
 
   TranslateBubbleView(views::View* anchor_view,
                       const gfx::Point& anchor_point,

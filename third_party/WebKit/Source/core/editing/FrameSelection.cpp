@@ -27,7 +27,6 @@
 
 #include <stdio.h>
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/HTMLNames.h"
 #include "core/css/StylePropertySet.h"
 #include "core/dom/AXObjectCache.h"
 #include "core/dom/CharacterData.h"
@@ -41,16 +40,21 @@
 #include "core/editing/CaretDisplayItemClient.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/Editor.h"
+#include "core/editing/EphemeralRange.h"
 #include "core/editing/FrameCaret.h"
 #include "core/editing/GranularityStrategy.h"
-#include "core/editing/InputMethodController.h"
 #include "core/editing/LayoutSelection.h"
+#include "core/editing/Position.h"
 #include "core/editing/SelectionController.h"
 #include "core/editing/SelectionEditor.h"
 #include "core/editing/SelectionModifier.h"
+#include "core/editing/SelectionTemplate.h"
 #include "core/editing/TextAffinity.h"
+#include "core/editing/VisiblePosition.h"
+#include "core/editing/VisibleSelection.h"
 #include "core/editing/VisibleUnits.h"
 #include "core/editing/commands/TypingCommand.h"
+#include "core/editing/ime/InputMethodController.h"
 #include "core/editing/iterators/TextIterator.h"
 #include "core/editing/serializers/Serialization.h"
 #include "core/frame/LocalDOMWindow.h"
@@ -59,8 +63,9 @@
 #include "core/frame/Settings.h"
 #include "core/html/HTMLBodyElement.h"
 #include "core/html/HTMLFrameElementBase.h"
-#include "core/html/HTMLInputElement.h"
-#include "core/html/HTMLSelectElement.h"
+#include "core/html/forms/HTMLInputElement.h"
+#include "core/html/forms/HTMLSelectElement.h"
+#include "core/html_names.h"
 #include "core/input/ContextMenuAllowedScope.h"
 #include "core/input/EventHandler.h"
 #include "core/layout/HitTestRequest.h"
@@ -113,17 +118,16 @@ Document& FrameSelection::GetDocument() const {
   return *LifecycleContext();
 }
 
-const VisibleSelection& FrameSelection::ComputeVisibleSelectionInDOMTree()
-    const {
+VisibleSelection FrameSelection::ComputeVisibleSelectionInDOMTree() const {
   return selection_editor_->ComputeVisibleSelectionInDOMTree();
 }
 
-const VisibleSelectionInFlatTree&
-FrameSelection::ComputeVisibleSelectionInFlatTree() const {
+VisibleSelectionInFlatTree FrameSelection::ComputeVisibleSelectionInFlatTree()
+    const {
   return selection_editor_->ComputeVisibleSelectionInFlatTree();
 }
 
-const SelectionInDOMTree& FrameSelection::GetSelectionInDOMTree() const {
+SelectionInDOMTree FrameSelection::GetSelectionInDOMTree() const {
   return selection_editor_->GetSelectionInDOMTree();
 }
 
@@ -142,19 +146,18 @@ ContainerNode* RootEditableElementOrTreeScopeRootNodeOf(
     return selection_root;
 
   Node* const node = position.ComputeContainerNode();
-  return node ? &node->GetTreeScope().RootNode() : 0;
+  return node ? &node->GetTreeScope().RootNode() : nullptr;
 }
 
-const VisibleSelection&
-FrameSelection::ComputeVisibleSelectionInDOMTreeDeprecated() const {
+VisibleSelection FrameSelection::ComputeVisibleSelectionInDOMTreeDeprecated()
+    const {
   // TODO(editing-dev): Hoist updateStyleAndLayoutIgnorePendingStylesheets
   // to caller. See http://crbug.com/590369 for more details.
   GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
   return ComputeVisibleSelectionInDOMTree();
 }
 
-const VisibleSelectionInFlatTree& FrameSelection::GetSelectionInFlatTree()
-    const {
+VisibleSelectionInFlatTree FrameSelection::GetSelectionInFlatTree() const {
   return ComputeVisibleSelectionInFlatTree();
 }
 
@@ -223,6 +226,7 @@ bool FrameSelection::SetSelectionDeprecated(
     return false;
   if (is_changed)
     selection_editor_->SetSelection(new_selection);
+  should_shrink_next_tap_ = options.ShouldShrinkNextTap();
   is_handle_visible_ = should_show_handle;
   ScheduleVisualUpdateForPaintInvalidationIfNeeded();
 
@@ -604,7 +608,7 @@ void FrameSelection::SelectFrameElementInParentIfFullySelected() {
       Position(owner_element_parent, owner_element_node_index));
   VisiblePosition after_owner_element = CreateVisiblePosition(
       Position(owner_element_parent, owner_element_node_index + 1),
-      VP_UPSTREAM_IF_POSSIBLE);
+      TextAffinity::kUpstreamIfPossible);
 
   SelectionInDOMTree::Builder builder;
   builder
@@ -634,9 +638,8 @@ static Node* NonBoundaryShadowTreeRootNode(const Position& position) {
 }
 
 void FrameSelection::SelectAll(SetSelectionBy set_selection_by) {
-  if (isHTMLSelectElement(GetDocument().FocusedElement())) {
-    HTMLSelectElement* select_element =
-        toHTMLSelectElement(GetDocument().FocusedElement());
+  if (auto* select_element =
+          ToHTMLSelectElementOrNull(GetDocument().FocusedElement())) {
     if (select_element->CanSelectAll()) {
       select_element->SelectAll();
       return;
@@ -900,15 +903,6 @@ String FrameSelection::SelectedTextForClipboard() const {
                  .Build());
 }
 
-LayoutRect FrameSelection::Bounds() const {
-  LocalFrameView* view = frame_->View();
-  if (!view)
-    return LayoutRect();
-
-  return Intersection(UnclippedBounds(),
-                      LayoutRect(view->VisibleContentRect()));
-}
-
 LayoutRect FrameSelection::UnclippedBounds() const {
   LocalFrameView* view = frame_->View();
   LayoutViewItem layout_view = frame_->ContentLayoutItem();
@@ -979,7 +973,7 @@ void FrameSelection::SetSelectionFromNone() {
   if (HTMLBodyElement* body =
           Traversal<HTMLBodyElement>::FirstChild(*document_element)) {
     SetSelection(SelectionInDOMTree::Builder()
-                     .Collapse(FirstPositionInOrBeforeNode(body))
+                     .Collapse(FirstPositionInOrBeforeNode(*body))
                      .Build());
   }
 }
@@ -1010,7 +1004,7 @@ void FrameSelection::ShowTreeForThis() const {
 
 #endif
 
-DEFINE_TRACE(FrameSelection) {
+void FrameSelection::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_);
   visitor->Trace(layout_selection_);
   visitor->Trace(selection_editor_);
@@ -1028,9 +1022,15 @@ void FrameSelection::ScheduleVisualUpdateForPaintInvalidationIfNeeded() const {
     frame_view->ScheduleVisualUpdateForPaintInvalidationIfNeeded();
 }
 
-bool FrameSelection::SelectWordAroundPosition(const VisiblePosition& position) {
-  static const EWordSide kWordSideList[2] = {kRightWordIfOnBoundary,
-                                             kLeftWordIfOnBoundary};
+bool FrameSelection::SelectWordAroundCaret() {
+  const VisibleSelection& selection = ComputeVisibleSelectionInDOMTree();
+  // TODO(editing-dev): The use of VisibleSelection needs to be audited. See
+  // http://crbug.com/657237 for more details.
+  if (!selection.IsCaret())
+    return false;
+  const VisiblePosition& position = selection.VisibleStart();
+  static const EWordSide kWordSideList[2] = {kNextWordIfOnBoundary,
+                                             kPreviousWordIfOnBoundary};
   for (EWordSide word_side : kWordSideList) {
     // TODO(yoichio): We should have Position version of |start/endOfWord|
     // for avoiding unnecessary canonicalization.
@@ -1060,7 +1060,7 @@ GranularityStrategy* FrameSelection::GetGranularityStrategy() {
   // initialize it right in the constructor - the correct settings may not be
   // set yet.
   SelectionStrategy strategy_type = SelectionStrategy::kCharacter;
-  Settings* settings = frame_ ? frame_->GetSettings() : 0;
+  Settings* settings = frame_ ? frame_->GetSettings() : nullptr;
   if (settings &&
       settings->GetSelectionStrategy() == SelectionStrategy::kDirection)
     strategy_type = SelectionStrategy::kDirection;
@@ -1165,6 +1165,10 @@ base::Optional<int> FrameSelection::LayoutSelectionEnd() const {
 
 void FrameSelection::ClearLayoutSelection() {
   layout_selection_->ClearSelection();
+}
+
+bool FrameSelection::IsDirectional() const {
+  return GetSelectionInDOMTree().IsDirectional();
 }
 
 }  // namespace blink

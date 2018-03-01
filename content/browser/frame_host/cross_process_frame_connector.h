@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 
-#include "cc/output/compositor_frame.h"
+#include "components/viz/common/quads/compositor_frame.h"
 #include "components/viz/common/surfaces/local_surface_id.h"
 #include "content/browser/renderer_host/frame_connector_delegate.h"
 #include "content/common/content_export.h"
@@ -78,18 +78,18 @@ class CONTENT_EXPORT CrossProcessFrameConnector
                             const viz::SurfaceSequence& sequence) override;
   gfx::Rect ChildFrameRect() override;
   void UpdateCursor(const WebCursor& cursor) override;
-  gfx::Point TransformPointToRootCoordSpace(
-      const gfx::Point& point,
+  gfx::PointF TransformPointToRootCoordSpace(
+      const gfx::PointF& point,
       const viz::SurfaceId& surface_id) override;
-  bool TransformPointToLocalCoordSpace(const gfx::Point& point,
+  bool TransformPointToLocalCoordSpace(const gfx::PointF& point,
                                        const viz::SurfaceId& original_surface,
                                        const viz::SurfaceId& local_surface_id,
-                                       gfx::Point* transformed_point) override;
+                                       gfx::PointF* transformed_point) override;
   bool TransformPointToCoordSpaceForView(
-      const gfx::Point& point,
+      const gfx::PointF& point,
       RenderWidgetHostViewBase* target_view,
       const viz::SurfaceId& local_surface_id,
-      gfx::Point* transformed_point) override;
+      gfx::PointF* transformed_point) override;
   void ForwardProcessAckedTouchEvent(const TouchEventWithLatencyInfo& touch,
                                      InputEventAckState ack_result) override;
   void BubbleScrollEvent(const blink::WebGestureEvent& event) override;
@@ -99,6 +99,10 @@ class CONTENT_EXPORT CrossProcessFrameConnector
   void UnlockMouse() override;
   bool IsInert() const override;
   bool IsHidden() const override;
+#if defined(USE_AURA)
+  void EmbedRendererWindowTreeClientInParent(
+      ui::mojom::WindowTreeClientPtr window_tree_client) override;
+#endif
 
   // Set the visibility of immediate child views, i.e. views whose parent view
   // is |view_|.

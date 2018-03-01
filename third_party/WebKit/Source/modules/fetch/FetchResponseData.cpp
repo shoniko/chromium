@@ -7,9 +7,9 @@
 #include "core/typed_arrays/DOMArrayBuffer.h"
 #include "modules/fetch/BodyStreamBuffer.h"
 #include "modules/fetch/FetchHeaderList.h"
-#include "platform/HTTPNames.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/loader/fetch/FetchUtils.h"
+#include "platform/network/http_names.h"
 #include "platform/wtf/PtrUtil.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerResponse.h"
 
@@ -300,7 +300,7 @@ void FetchResponseData::ReplaceBodyStreamBuffer(BodyStreamBuffer* buffer) {
   }
 }
 
-DEFINE_TRACE(FetchResponseData) {
+void FetchResponseData::Trace(blink::Visitor* visitor) {
   visitor->Trace(header_list_);
   visitor->Trace(internal_response_);
   visitor->Trace(buffer_);

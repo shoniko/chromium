@@ -46,7 +46,7 @@ void WebNotificationTray::HidePopups() {
   popup_collection_->MarkAllPopupsShown();
 }
 
-bool WebNotificationTray::ShowMessageCenter() {
+bool WebNotificationTray::ShowMessageCenter(bool show_by_click) {
   // Message center not available on Windows/Linux.
   return false;
 }
@@ -59,14 +59,7 @@ bool WebNotificationTray::ShowNotifierSettings() {
   return false;
 }
 
-bool WebNotificationTray::IsContextMenuEnabled() const {
-  // It can always return true because the notifications are invisible if
-  // the context menu shouldn't be enabled, such as in the lock screen.
-  return true;
-}
-
-void WebNotificationTray::OnMessageCenterTrayChanged() {
-}
+void WebNotificationTray::OnMessageCenterTrayChanged() {}
 
 message_center::MessageCenterTray* WebNotificationTray::GetMessageCenterTray() {
   return message_center_tray_.get();

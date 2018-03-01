@@ -71,7 +71,7 @@ void HbFaceDeleter::operator()(hb_face_t* face) {
     hb_face_destroy(face);
 }
 
-static PassRefPtr<HbFontCacheEntry> CreateHbFontCacheEntry(hb_face_t*);
+static scoped_refptr<HbFontCacheEntry> CreateHbFontCacheEntry(hb_face_t*);
 
 HarfBuzzFace::HarfBuzzFace(FontPlatformData* platform_data, uint64_t unique_id)
     : platform_data_(platform_data), unique_id_(unique_id) {
@@ -81,7 +81,7 @@ HarfBuzzFace::HarfBuzzFace(FontPlatformData* platform_data, uint64_t unique_id)
     HbFaceUniquePtr face(CreateFace());
     result.stored_value->value = CreateHbFontCacheEntry(face.get());
   }
-  result.stored_value->value->Ref();
+  result.stored_value->value->AddRef();
   unscaled_font_ = result.stored_value->value->HbFont();
   harf_buzz_font_data_ = result.stored_value->value->HbFontData();
 }
@@ -90,9 +90,9 @@ HarfBuzzFace::~HarfBuzzFace() {
   HarfBuzzFontCache::iterator result =
       FontGlobalContext::GetHarfBuzzFontCache().find(unique_id_);
   SECURITY_DCHECK(result != FontGlobalContext::GetHarfBuzzFontCache().end());
-  DCHECK_GT(result.Get()->value->RefCount(), 1);
-  result.Get()->value->Deref();
-  if (result.Get()->value->RefCount() == 1)
+  DCHECK(!result.Get()->value->HasOneRef());
+  result.Get()->value->Release();
+  if (result.Get()->value->HasOneRef())
     FontGlobalContext::GetHarfBuzzFontCache().erase(unique_id_);
 }
 
@@ -216,16 +216,17 @@ static hb_font_funcs_t* HarfBuzzSkiaGetFontFuncs() {
   // HarfBuzz will use the fallback implementation if they aren't set.
   if (!funcs) {
     funcs = hb_font_funcs_create();
-    hb_font_funcs_set_glyph_func(funcs, HarfBuzzGetGlyph, 0, 0);
+    hb_font_funcs_set_glyph_func(funcs, HarfBuzzGetGlyph, nullptr, nullptr);
     hb_font_funcs_set_glyph_h_advance_func(
-        funcs, HarfBuzzGetGlyphHorizontalAdvance, 0, 0);
+        funcs, HarfBuzzGetGlyphHorizontalAdvance, nullptr, nullptr);
     hb_font_funcs_set_glyph_h_kerning_func(
-        funcs, HarfBuzzGetGlyphHorizontalKerning, 0, 0);
+        funcs, HarfBuzzGetGlyphHorizontalKerning, nullptr, nullptr);
     hb_font_funcs_set_glyph_v_advance_func(
-        funcs, HarfBuzzGetGlyphVerticalAdvance, 0, 0);
+        funcs, HarfBuzzGetGlyphVerticalAdvance, nullptr, nullptr);
     hb_font_funcs_set_glyph_v_origin_func(funcs, HarfBuzzGetGlyphVerticalOrigin,
-                                          0, 0);
-    hb_font_funcs_set_glyph_extents_func(funcs, HarfBuzzGetGlyphExtents, 0, 0);
+                                          nullptr, nullptr);
+    hb_font_funcs_set_glyph_extents_func(funcs, HarfBuzzGetGlyphExtents,
+                                         nullptr, nullptr);
     hb_font_funcs_make_immutable(funcs);
     FontGlobalContext::SetHarfBuzzFontFuncs(funcs);
   }
@@ -296,7 +297,7 @@ hb_face_t* HarfBuzzFace::CreateFace() {
   // Fallback to table copies if there is no in-memory access.
   if (!face) {
     face = hb_face_create_for_tables(HarfBuzzSkiaGetTable,
-                                     platform_data_->Typeface(), 0);
+                                     platform_data_->Typeface(), nullptr);
     zero_copy_success_histogram.Count(false);
   } else {
     zero_copy_success_histogram.Count(true);
@@ -306,13 +307,13 @@ hb_face_t* HarfBuzzFace::CreateFace() {
   return face;
 }
 
-PassRefPtr<HbFontCacheEntry> CreateHbFontCacheEntry(hb_face_t* face) {
+scoped_refptr<HbFontCacheEntry> CreateHbFontCacheEntry(hb_face_t* face) {
   HbFontUniquePtr ot_font(hb_font_create(face));
   hb_ot_font_set_funcs(ot_font.get());
   // Creating a sub font means that non-available functions
   // are found from the parent.
   hb_font_t* unscaled_font = hb_font_create_sub_font(ot_font.get());
-  RefPtr<HbFontCacheEntry> cache_entry =
+  scoped_refptr<HbFontCacheEntry> cache_entry =
       HbFontCacheEntry::Create(unscaled_font);
   hb_font_set_funcs(unscaled_font, HarfBuzzSkiaGetFontFuncs(),
                     cache_entry->HbFontData(), nullptr);
@@ -331,7 +332,7 @@ static_assert(
     "size.");
 
 hb_font_t* HarfBuzzFace::GetScaledFont(
-    PassRefPtr<UnicodeRangeSet> range_set) const {
+    scoped_refptr<UnicodeRangeSet> range_set) const {
   platform_data_->SetupPaint(&harf_buzz_font_data_->paint_);
   harf_buzz_font_data_->paint_.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
   harf_buzz_font_data_->range_set_ = std::move(range_set);

@@ -8,6 +8,9 @@
 
 namespace content {
 
+void URLLoaderThrottle::Delegate::PauseReadingBodyFromNet() {}
+void URLLoaderThrottle::Delegate::ResumeReadingBodyFromNet() {}
+
 URLLoaderThrottle::Delegate::~Delegate() {}
 
 URLLoaderThrottle::~URLLoaderThrottle() {}
@@ -23,7 +26,10 @@ void URLLoaderThrottle::WillRedirectRequest(
     const net::RedirectInfo& redirect_info,
     bool* defer) {}
 
-void URLLoaderThrottle::WillProcessResponse(bool* defer) {}
+void URLLoaderThrottle::WillProcessResponse(
+    const GURL& response_url,
+    const ResourceResponseHead& response_head,
+    bool* defer) {}
 
 URLLoaderThrottle::URLLoaderThrottle() {}
 

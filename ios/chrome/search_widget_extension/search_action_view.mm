@@ -33,13 +33,17 @@ const CGFloat kIconSize = 35;
 
     UIVibrancyEffect* primaryEffect;
     UIVibrancyEffect* secondaryEffect;
-    if (base::ios::IsRunningOnIOS10OrLater()) {
+    if (@available(iOS 10, *)) {
       primaryEffect = [UIVibrancyEffect widgetPrimaryVibrancyEffect];
       secondaryEffect = [UIVibrancyEffect widgetSecondaryVibrancyEffect];
-    } else {
+    }
+#if !defined(__IPHONE_10_0) || __IPHONE_OS_VERSION_MIN_REQUIRED < __IPHONE_10_0
+    else {
       primaryEffect = [UIVibrancyEffect notificationCenterVibrancyEffect];
       secondaryEffect = [UIVibrancyEffect notificationCenterVibrancyEffect];
     }
+#endif  // !defined(__IPHONE_10_0) || __IPHONE_OS_VERSION_MIN_REQUIRED <
+        // __IPHONE_10_0
 
     UIVisualEffectView* primaryEffectView =
         [[UIVisualEffectView alloc] initWithEffect:primaryEffect];
@@ -49,14 +53,17 @@ const CGFloat kIconSize = 35;
          @[ primaryEffectView, secondaryEffectView ]) {
       [self addSubview:effectView];
       effectView.translatesAutoresizingMaskIntoConstraints = NO;
+      effectView.userInteractionEnabled = NO;
       [NSLayoutConstraint
           activateConstraints:ui_util::CreateSameConstraints(self, effectView)];
     }
 
     UIView* circleView = [[UIView alloc] initWithFrame:CGRectZero];
-    circleView.backgroundColor = base::ios::IsRunningOnIOS10OrLater()
-                                     ? [UIColor colorWithWhite:0 alpha:0.05]
-                                     : [UIColor whiteColor];
+    if (@available(iOS 10, *)) {
+      circleView.backgroundColor = [UIColor colorWithWhite:0 alpha:0.05];
+    } else {
+      circleView.backgroundColor = [UIColor whiteColor];
+    }
     circleView.layer.cornerRadius = kActionButtonSize / 2;
 
     UILabel* labelView = [[UILabel alloc] initWithFrame:CGRectZero];
@@ -78,26 +85,15 @@ const CGFloat kIconSize = 35;
     [secondaryEffectView.contentView addSubview:stack];
     [NSLayoutConstraint activateConstraints:ui_util::CreateSameConstraints(
                                                 secondaryEffectView, stack)];
-
-    // A transparent button constrained to the same size as the stack is added
-    // to handle taps on the stack view.
-    UIButton* actionButton = [[UIButton alloc] initWithFrame:CGRectZero];
-    actionButton.backgroundColor = [UIColor clearColor];
-    [actionButton addTarget:target
-                     action:actionSelector
-           forControlEvents:UIControlEventTouchUpInside];
-    actionButton.translatesAutoresizingMaskIntoConstraints = NO;
-    actionButton.accessibilityLabel = title;
-    [self addSubview:actionButton];
-    [NSLayoutConstraint activateConstraints:ui_util::CreateSameConstraints(
-                                                actionButton, stack)];
-
     UIImage* iconImage = [UIImage imageNamed:imageName];
-    iconImage =
-        [iconImage imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    if (@available(iOS 10, *)) {
+      iconImage =
+          [iconImage imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    }
+
     UIImageView* icon = [[UIImageView alloc] initWithImage:iconImage];
     icon.translatesAutoresizingMaskIntoConstraints = NO;
-    if (base::ios::IsRunningOnIOS10OrLater()) {
+    if (@available(iOS 10, *)) {
       [primaryEffectView.contentView addSubview:icon];
     } else {
       [self addSubview:icon];
@@ -111,6 +107,12 @@ const CGFloat kIconSize = 35;
       [icon.centerXAnchor constraintEqualToAnchor:circleView.centerXAnchor],
       [icon.centerYAnchor constraintEqualToAnchor:circleView.centerYAnchor],
     ]];
+
+    self.userInteractionEnabled = YES;
+    [self addTarget:target
+                  action:actionSelector
+        forControlEvents:UIControlEventTouchUpInside];
+    self.accessibilityLabel = title;
   }
   return self;
 }

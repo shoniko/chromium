@@ -5,6 +5,7 @@
 #include "chromeos/components/tether/fake_ble_connection_manager.h"
 
 #include "chromeos/components/tether/timer_factory.h"
+#include "device/bluetooth/bluetooth_adapter.h"
 
 namespace chromeos {
 
@@ -25,7 +26,6 @@ FakeBleConnectionManager::StatusAndRegisteredMessageTypes::
 
 FakeBleConnectionManager::FakeBleConnectionManager()
     : BleConnectionManager(nullptr,
-                           nullptr,
                            nullptr,
                            nullptr,
                            nullptr,

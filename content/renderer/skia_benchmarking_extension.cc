@@ -11,8 +11,8 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "cc/base/math_util.h"
-#include "content/public/child/v8_value_converter.h"
 #include "content/public/renderer/chrome_object_extensions_utils.h"
+#include "content/public/renderer/v8_value_converter.h"
 #include "content/renderer/render_thread_impl.h"
 #include "gin/arguments.h"
 #include "gin/data_object_builder.h"
@@ -243,11 +243,11 @@ void SkiaBenchmarking::Rasterize(gin::Arguments* args) {
   picture->picture->playback(&benchmarking_canvas, &controller);
 
   blink::WebArrayBuffer buffer =
-      blink::WebArrayBuffer::Create(bitmap.getSize(), 1);
+      blink::WebArrayBuffer::Create(bitmap.computeByteSize(), 1);
   uint32_t* packed_pixels = reinterpret_cast<uint32_t*>(bitmap.getPixels());
   uint8_t* buffer_pixels = reinterpret_cast<uint8_t*>(buffer.Data());
   // Swizzle from native Skia format to RGBA as we copy out.
-  for (size_t i = 0; i < bitmap.getSize(); i += 4) {
+  for (size_t i = 0; i < bitmap.computeByteSize(); i += 4) {
     uint32_t c = packed_pixels[i >> 2];
     buffer_pixels[i] = SkGetPackedR32(c);
     buffer_pixels[i + 1] = SkGetPackedG32(c);

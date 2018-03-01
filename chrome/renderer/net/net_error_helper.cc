@@ -23,11 +23,11 @@
 #include "components/error_page/common/localized_error.h"
 #include "components/error_page/common/net_error_info.h"
 #include "components/grit/components_resources.h"
-#include "content/public/child/child_url_loader_factory_getter.h"
 #include "content/public/common/associated_interface_provider.h"
 #include "content/public/common/associated_interface_registry.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/renderer/child_url_loader_factory_getter.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/public/renderer/document_state.h"
 #include "content/public/renderer/render_frame.h"
@@ -37,11 +37,11 @@
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "third_party/WebKit/public/platform/WebCachePolicy.h"
 #include "third_party/WebKit/public/platform/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/platform/WebURLResponse.h"
+#include "third_party/WebKit/public/platform/modules/fetch/fetch_api_request.mojom-shared.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebDocumentLoader.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
@@ -231,7 +231,7 @@ void NetErrorHelper::GenerateLocalizedErrorPage(
 
   int resource_id = IDR_NET_ERROR_HTML;
   const base::StringPiece template_html(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(resource_id));
+      ui::ResourceBundle::GetSharedInstance().GetRawDataResource(resource_id));
   if (template_html.empty()) {
     NOTREACHED() << "unable to load template.";
   } else {
@@ -294,8 +294,8 @@ void NetErrorHelper::FetchNavigationCorrections(
     const std::string& navigation_correction_request_body) {
   DCHECK(!correction_fetcher_.get());
 
-  correction_fetcher_.reset(
-      content::ResourceFetcher::Create(navigation_correction_url));
+  correction_fetcher_ =
+      content::ResourceFetcher::Create(navigation_correction_url);
   correction_fetcher_->SetMethod("POST");
   correction_fetcher_->SetBody(navigation_correction_request_body);
   correction_fetcher_->SetHeader("Content-Type", "application/json");
@@ -322,7 +322,7 @@ void NetErrorHelper::SendTrackingRequest(
     const GURL& tracking_url,
     const std::string& tracking_request_body) {
   // If there's already a pending tracking request, this will cancel it.
-  tracking_fetcher_.reset(content::ResourceFetcher::Create(tracking_url));
+  tracking_fetcher_ = content::ResourceFetcher::Create(tracking_url);
   tracking_fetcher_->SetMethod("POST");
   tracking_fetcher_->SetBody(tracking_request_body);
   tracking_fetcher_->SetHeader("Content-Type", "application/json");
@@ -350,7 +350,7 @@ void NetErrorHelper::LoadPageFromCache(const GURL& page_url) {
             web_frame->GetDocumentLoader()->GetRequest().HttpMethod().Ascii());
 
   blink::WebURLRequest request(page_url);
-  request.SetCachePolicy(blink::WebCachePolicy::kReturnCacheDataDontLoad);
+  request.SetCacheMode(blink::mojom::FetchCacheMode::kOnlyIfCached);
   web_frame->LoadRequest(request);
 }
 

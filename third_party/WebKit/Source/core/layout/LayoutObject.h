@@ -30,9 +30,10 @@
 #include "core/CoreExport.h"
 #include "core/dom/Document.h"
 #include "core/dom/DocumentLifecycle.h"
-#include "core/editing/EphemeralRange.h"
-#include "core/editing/PositionWithAffinity.h"
+#include "core/dom/Element.h"
+#include "core/editing/Forward.h"
 #include "core/frame/LocalFrameView.h"
+#include "core/html_names.h"
 #include "core/layout/LayoutObjectChildList.h"
 #include "core/layout/MapCoordinatesFlags.h"
 #include "core/layout/ScrollAlignment.h"
@@ -65,6 +66,7 @@ class HitTestResult;
 class InlineBox;
 class LayoutBoxModelObject;
 class LayoutBlock;
+class LayoutBlockFlow;
 class LayoutFlowThread;
 class LayoutGeometryMap;
 class LayoutMultiColumnSpannerPlaceholder;
@@ -200,6 +202,8 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
                                  public DisplayItemClient {
   friend class LayoutObjectChildList;
   FRIEND_TEST_ALL_PREFIXES(LayoutObjectTest, MutableForPaintingClearPaintFlags);
+  FRIEND_TEST_ALL_PREFIXES(LayoutObjectTest,
+                           LocationInBackingAndSelectionVisualRect);
   friend class VisualRectMappingTest;
   WTF_MAKE_NONCOPYABLE(LayoutObject);
 
@@ -219,6 +223,14 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
 
   // DisplayItemClient methods.
   LayoutRect VisualRect() const final { return visual_rect_; }
+  LayoutRect PartialInvalidationRect() const final {
+    return rare_paint_data_ ? rare_paint_data_->PartialInvalidationRect()
+                            : LayoutRect();
+  }
+  void ClearPartialInvalidationRect() const final {
+    DCHECK(RuntimeEnabledFeatures::SlimmingPaintV175Enabled());
+    return GetMutableForPainting().SetPartialInvalidationRect(LayoutRect());
+  }
   String DebugName() const final;
 
   LayoutObject* Parent() const { return parent_; }
@@ -288,6 +300,9 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   LayoutBoxModelObject* EnclosingBoxModelObject() const;
 
   LayoutBox* EnclosingScrollableBox() const;
+
+  // Returns |EnclosingBox()| if it's a LayoutNGBlockFlow, or nullptr otherwise.
+  LayoutBlockFlow* EnclosingNGBlockFlow() const;
 
   // Function to return our enclosing flow thread if we are contained inside
   // one. This function follows the containing block chain.
@@ -430,10 +445,6 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   void AddAbsoluteRectForLayer(IntRect& result);
   bool RequiresAnonymousTableWrappers(const LayoutObject*) const;
 
-  // Gets ::selection pseudo style from Shadow host(in case of input elements)
-  // or from parent element.
-  RefPtr<ComputedStyle> GetUncachedSelectionStyle() const;
-
  public:
 #ifndef NDEBUG
   void ShowTreeForThis() const;
@@ -494,6 +505,8 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   bool IsLayoutNGBlockFlow() const {
     return IsOfType(kLayoutObjectNGBlockFlow);
   }
+  bool IsLayoutNGMixin() const { return IsOfType(kLayoutObjectNGMixin); }
+  bool IsLayoutNGListItem() const { return IsOfType(kLayoutObjectNGListItem); }
   bool IsLayoutTableCol() const {
     return IsOfType(kLayoutObjectLayoutTableCol);
   }
@@ -866,7 +879,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   ComputedStyle* GetCachedPseudoStyle(
       PseudoId,
       const ComputedStyle* parent_style = nullptr) const;
-  RefPtr<ComputedStyle> GetUncachedPseudoStyle(
+  scoped_refptr<ComputedStyle> GetUncachedPseudoStyle(
       const PseudoStyleRequest&,
       const ComputedStyle* parent_style = nullptr) const;
 
@@ -1126,6 +1139,11 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
                const HitTestLocation& location_in_container,
                const LayoutPoint& accumulated_offset,
                HitTestFilter = kHitTestAll);
+  // Returns the node that is ultimately added to the hit test result. Some
+  // objects report a hit testing node that is not their own (such as
+  // continuations and some psuedo elements) and it is important that the
+  // node be consistent between point- and list-based hit test results.
+  virtual Node* NodeForHitTest() const;
   virtual void UpdateHitTestResult(HitTestResult&, const LayoutPoint&);
   virtual bool NodeAtPoint(HitTestResult&,
                            const HitTestLocation& location_in_container,
@@ -1142,20 +1160,21 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
       MarkingBehavior marking_behaviour = kMarkContainerChain);
 
   // Set the style of the object and update the state of the object accordingly.
-  void SetStyle(RefPtr<ComputedStyle>);
+  void SetStyle(scoped_refptr<ComputedStyle>);
 
   // Set the style of the object if it's generated content.
-  void SetPseudoStyle(RefPtr<ComputedStyle>);
+  void SetPseudoStyle(scoped_refptr<ComputedStyle>);
 
   // Updates only the local style ptr of the object.  Does not update the state
   // of the object, and so only should be called when the style is known not to
   // have changed (or from setStyle).
-  void SetStyleInternal(RefPtr<ComputedStyle> style) {
+  void SetStyleInternal(scoped_refptr<ComputedStyle> style) {
     style_ = std::move(style);
   }
 
-  void SetStyleWithWritingModeOf(RefPtr<ComputedStyle>, LayoutObject* parent);
-  void SetStyleWithWritingModeOfParent(RefPtr<ComputedStyle>);
+  void SetStyleWithWritingModeOf(scoped_refptr<ComputedStyle>,
+                                 LayoutObject* parent);
+  void SetStyleWithWritingModeOfParent(scoped_refptr<ComputedStyle>);
   void AddChildWithWritingModeOfParent(LayoutObject* new_child,
                                        LayoutObject* before_child);
 
@@ -1327,8 +1346,8 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // TODO(jchaffraix): We will probably want to rename it to match CSS 3.
   virtual LayoutUnit MaxPreferredLogicalWidth() const { return LayoutUnit(); }
 
-  const ComputedStyle* Style() const { return style_.Get(); }
-  ComputedStyle* MutableStyle() const { return style_.Get(); }
+  const ComputedStyle* Style() const { return style_.get(); }
+  ComputedStyle* MutableStyle() const { return style_.get(); }
 
   // style_ can only be nullptr before the first style is set, thus most
   // callers will never see a nullptr style and should use StyleRef().
@@ -1346,11 +1365,11 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   inline const ComputedStyle& StyleRef(bool first_line) const;
 
   static inline Color ResolveColor(const ComputedStyle& style_to_use,
-                                   int color_property) {
+                                   CSSPropertyID color_property) {
     return style_to_use.VisitedDependentColor(color_property);
   }
 
-  inline Color ResolveColor(int color_property) const {
+  inline Color ResolveColor(CSSPropertyID color_property) const {
     return Style()->VisitedDependentColor(color_property);
   }
 
@@ -1368,12 +1387,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
 
   // Invalidate the paint of a specific subrectangle within a given object. The
   // rect is in the object's coordinate space.
-  // If a DisplayItemClient is specified, that client is invalidated rather than
-  // |this|.
-  // Returns the visual rect that was invalidated (i.e, invalidation in the
-  // space of the GraphicsLayer backing this LayoutObject).
-  LayoutRect InvalidatePaintRectangle(const LayoutRect&,
-                                      DisplayItemClient* = nullptr) const;
+  void InvalidatePaintRectangle(const LayoutRect&);
 
   void SetShouldDoFullPaintInvalidationIncludingNonCompositingDescendants();
 
@@ -1387,7 +1401,12 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // non-SVG objects and LayoutSVGRoot only. SVG objects (except LayoutSVGRoot)
   // should use visualRectInLocalSVGCoordinates() and map with SVG transforms
   // instead.
-  virtual LayoutRect LocalVisualRect() const;
+  LayoutRect LocalVisualRect() const {
+    if (StyleRef().Visibility() != EVisibility::kVisible &&
+        VisualRectRespectsVisibility())
+      return LayoutRect();
+    return LocalVisualRectIgnoringVisibility();
+  }
 
   // Given a rect in the object's coordinate space, mutates the rect into one
   // representing the size of its visual painted output as if |ancestor| was the
@@ -1457,16 +1476,12 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // View coordinates means the coordinate space of |view()|.
   LayoutRect SelectionRectInViewCoordinates() const;
 
-  virtual bool CanBeSelectionLeaf() const { return false; }
+  bool CanBeSelectionLeaf() const;
   bool HasSelectedChildren() const {
     return GetSelectionState() != SelectionState::kNone;
   }
 
   bool IsSelectable() const;
-  // Obtains the selection colors that should be used when painting a selection.
-  Color SelectionBackgroundColor() const;
-  Color SelectionForegroundColor(const GlobalPaintFlags) const;
-  Color SelectionEmphasisMarkColor(const GlobalPaintFlags) const;
 
   /**
      * Returns the local coordinates of the caret within this layout object.
@@ -1477,9 +1492,9 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
      * useful for character range rect computations
      */
   virtual LayoutRect LocalCaretRect(
-      InlineBox*,
+      const InlineBox*,
       int caret_offset,
-      LayoutUnit* extra_width_to_end_of_line = nullptr);
+      LayoutUnit* extra_width_to_end_of_line = nullptr) const;
 
   // When performing a global document tear-down, the layoutObject of the
   // document is cleared. We use this as a hook to detect the case of document
@@ -1610,8 +1625,8 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   virtual IntRect AbsoluteElementBoundingBoxRect() const;
 
   // Compute a list of hit-test rectangles per layer rooted at this
-  // layoutObject.
-  virtual void ComputeLayerHitTestRects(LayerHitTestRects&) const;
+  // layoutObject with at most the given touch action.
+  virtual void ComputeLayerHitTestRects(LayerHitTestRects&, TouchAction) const;
 
   static RespectImageOrientationEnum ShouldRespectImageOrientation(
       const LayoutObject*);
@@ -1626,6 +1641,18 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // Called when the previous visual rect(s) is no longer valid.
   virtual void ClearPreviousVisualRects();
 
+  // Visual offset of this LayoutObject's top-left position from the
+  // "paint offset root":
+  // - In SPv1 mode, this is the containing composited PaintLayer, or
+  //   PaintLayer with a transform, whichever is nearer along the containing
+  //   block chain.
+  // - In SPv2 mode, this is the containing root PaintLayer of the
+  //   root LocalFrameView, or PaintLayer with a transform, whichever is nearer
+  //   along the containing block chain.
+  // LayoutObject::PaintOffset does not take into account fragmentation.
+  // See also FragmentData::PaintOffset, which does take it into account.
+  // TODO(chrishtr): remove this field in favor of FragmentData::PaintOffset
+  // once paint invalidation is fully implemented for fragmentation.
   const LayoutPoint& PaintOffset() const { return paint_offset_; }
 
   PaintInvalidationReason FullPaintInvalidationReason() const {
@@ -1741,12 +1768,16 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
                 DocumentLifecycle::kInPrePaint);
       layout_object_.paint_offset_ = p;
     }
-    void SetHasPreviousLocationInBacking(bool b) {
-      layout_object_.bitfields_.SetHasPreviousLocationInBacking(b);
+    void SetLocationInBacking(const LayoutPoint& p) {
+      if (layout_object_.GetRarePaintData() ||
+          p != layout_object_.VisualRect().Location())
+        layout_object_.EnsureRarePaintData().SetLocationInBacking(p);
     }
-    void SetHasPreviousSelectionVisualRect(bool b) {
-      layout_object_.bitfields_.SetHasPreviousSelectionVisualRect(b);
+    void SetSelectionVisualRect(const LayoutRect& r) {
+      if (layout_object_.GetRarePaintData() || !r.IsEmpty())
+        layout_object_.EnsureRarePaintData().SetSelectionVisualRect(r);
     }
+
     void SetPreviousBackgroundObscured(bool b) {
       layout_object_.SetPreviousBackgroundObscured(b);
     }
@@ -1760,6 +1791,10 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     }
     void SetNeedsPaintPropertyUpdate() {
       layout_object_.SetNeedsPaintPropertyUpdate();
+    }
+
+    void SetPartialInvalidationRect(const LayoutRect& r) {
+      layout_object_.SetPartialInvalidationRect(r);
     }
 
 #if DCHECK_IS_ON()
@@ -1787,6 +1822,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     // See ../paint/README.md for more on fragments.
     FragmentData* FirstFragment();
     FragmentData& EnsureFirstFragment();
+    void ClearFirstFragment();
 
     friend class LayoutObject;
     MutableForPainting(const LayoutObject& layout_object)
@@ -1856,15 +1892,6 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     return bitfields_.IsBackgroundAttachmentFixedObject();
   }
 
-  // Paint invalidators will access the internal global map storing the data
-  // only when the flag is set, to avoid unnecessary map lookups.
-  bool HasLocationInBacking() const {
-    return bitfields_.HasPreviousLocationInBacking();
-  }
-  bool HasSelectionVisualRect() const {
-    return bitfields_.HasPreviousSelectionVisualRect();
-  }
-
   bool BackgroundChangedSinceLastPaintInvalidation() const {
     return bitfields_.BackgroundChangedSinceLastPaintInvalidation();
   }
@@ -1878,6 +1905,17 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   bool PreviousOutlineMayBeAffectedByDescendants() const {
     return bitfields_.PreviousOutlineMayBeAffectedByDescendants();
   }
+
+  LayoutPoint LocationInBacking() const {
+    return rare_paint_data_ ? rare_paint_data_->LocationInBacking()
+                            : VisualRect().Location();
+  }
+  LayoutRect SelectionVisualRect() const {
+    return rare_paint_data_ ? rare_paint_data_->SelectionVisualRect()
+                            : LayoutRect();
+  }
+
+  void InvalidateIfControlStateChanged(ControlState);
 
  protected:
   enum LayoutObjectType {
@@ -1897,6 +1935,8 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     kLayoutObjectMedia,
     kLayoutObjectMenuList,
     kLayoutObjectNGBlockFlow,
+    kLayoutObjectNGMixin,
+    kLayoutObjectNGListItem,
     kLayoutObjectProgress,
     kLayoutObjectQuote,
     kLayoutObjectLayoutButton,
@@ -1996,10 +2036,13 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // containerRect is a rect that has already been added for the currentLayer
   // which is likely to be a container for child elements. Any rect wholly
   // contained by containerRect can be skipped.
-  virtual void AddLayerHitTestRects(LayerHitTestRects&,
-                                    const PaintLayer* current_layer,
-                                    const LayoutPoint& layer_offset,
-                                    const LayoutRect& container_rect) const;
+  virtual void AddLayerHitTestRects(
+      LayerHitTestRects&,
+      const PaintLayer* current_layer,
+      const LayoutPoint& layer_offset,
+      TouchAction supported_fast_actions,
+      const LayoutRect& container_rect,
+      TouchAction container_whitelisted_touch_action) const;
 
   // Add hit-test rects for this layoutObject only to the provided list.
   // layerOffset is the offset of this layoutObject within the current layer
@@ -2008,12 +2051,19 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
                                        const LayoutPoint& layer_offset) const {}
 
   void SetVisualRect(const LayoutRect& rect) { visual_rect_ = rect; }
+  void SetPartialInvalidationRect(const LayoutRect& rect) {
+    if (GetRarePaintData() || !rect.IsEmpty())
+      EnsureRarePaintData().SetPartialInvalidationRect(rect);
+  }
 
 #if DCHECK_IS_ON()
   virtual bool PaintInvalidationStateIsDirty() const {
     return BackgroundChangedSinceLastPaintInvalidation() ||
            ShouldCheckForPaintInvalidation() || ShouldInvalidateSelection() ||
-           NeedsPaintOffsetAndVisualRectUpdate();
+           NeedsPaintOffsetAndVisualRectUpdate() ||
+           (!RuntimeEnabledFeatures::SlimmingPaintV175Enabled() &&
+            rare_paint_data_ &&
+            !rare_paint_data_->PartialInvalidationRect().IsEmpty());
   }
 #endif
 
@@ -2048,10 +2098,15 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   RarePaintData& EnsureRarePaintData();
   RarePaintData* GetRarePaintData() const { return rare_paint_data_.get(); }
 
+  virtual bool VisualRectRespectsVisibility() const { return true; }
+  virtual LayoutRect LocalVisualRectIgnoringVisibility() const;
+
+  virtual bool CanBeSelectionLeafInternal() const { return false; }
+
  private:
   // Used only by applyFirstLineChanges to get a first line style based off of a
   // given new style, without accessing the cache.
-  RefPtr<ComputedStyle> UncachedFirstLineStyle() const;
+  scoped_refptr<ComputedStyle> UncachedFirstLineStyle() const;
 
   // Adjusts a visual rect in the space of |visual_rect_| to be in the space of
   // the |paint_invalidation_container|, if needed. They can be different only
@@ -2077,6 +2132,8 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
                         const FillLayer& new_layers);
   void UpdateCursorImages(const CursorList* old_cursors,
                           const CursorList* new_cursors);
+  void CheckCounterChanges(const ComputedStyle* old_style,
+                           const ComputedStyle* new_style);
 
   void SetNeedsOverflowRecalcAfterStyleChange();
 
@@ -2103,8 +2160,6 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   ComputedStyle* CachedFirstLineStyle() const;
   StyleDifference AdjustStyleDifference(StyleDifference) const;
 
-  Color SelectionColor(int color_property, const GlobalPaintFlags) const;
-
   void RemoveShapeImageClient(ShapeValue*);
   void RemoveCursorImageClient(const CursorList*);
 
@@ -2124,7 +2179,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   void ApplyPseudoStyleChanges(const ComputedStyle& old_style);
   void ApplyFirstLineChanges(const ComputedStyle& old_style);
 
-  RefPtr<ComputedStyle> style_;
+  scoped_refptr<ComputedStyle> style_;
 
   // Oilpan: This untraced pointer to the owning Node is considered safe.
   UntracedMember<Node> node_;
@@ -2214,8 +2269,6 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
           is_scroll_anchor_object_(false),
           scroll_anchor_disabling_style_changed_(false),
           has_box_decoration_background_(false),
-          has_previous_location_in_backing_(false),
-          has_previous_selection_visual_rect_(false),
           needs_paint_property_update_(true),
           subtree_needs_paint_property_update_(true),
           descendant_needs_paint_property_update_(true),
@@ -2393,11 +2446,6 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     ADD_BOOLEAN_BITFIELD(has_box_decoration_background_,
                          HasBoxDecorationBackground);
 
-    ADD_BOOLEAN_BITFIELD(has_previous_location_in_backing_,
-                         HasPreviousLocationInBacking);
-    ADD_BOOLEAN_BITFIELD(has_previous_selection_visual_rect_,
-                         HasPreviousSelectionVisualRect);
-
     // Whether the paint properties need to be updated. For more details, see
     // LayoutObject::needsPaintPropertyUpdate().
     ADD_BOOLEAN_BITFIELD(needs_paint_property_update_,
@@ -2426,7 +2474,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
 
    protected:
     // Use protected to avoid warning about unused variable.
-    unsigned unused_bits_ : 3;
+    unsigned unused_bits_ : 5;
 
    private:
     // This is the cached 'position' value of this object
@@ -2747,8 +2795,14 @@ inline double AdjustScrollForAbsoluteZoom(double value,
   return AdjustScrollForAbsoluteZoom(value, layout_object.StyleRef());
 }
 
-CORE_EXPORT const LayoutObject* AssociatedLayoutObjectOf(const Node&,
-                                                         int offset_in_node);
+enum class LayoutObjectSide {
+  kRemainingTextIfOnBoundary,
+  kFirstLetterIfOnBoundary
+};
+CORE_EXPORT const LayoutObject* AssociatedLayoutObjectOf(
+    const Node&,
+    int offset_in_node,
+    LayoutObjectSide = LayoutObjectSide::kRemainingTextIfOnBoundary);
 
 #define DEFINE_LAYOUT_OBJECT_TYPE_CASTS(thisType, predicate)           \
   DEFINE_TYPE_CASTS(thisType, LayoutObject, object, object->predicate, \

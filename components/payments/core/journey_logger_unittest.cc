@@ -7,7 +7,7 @@
 #include "base/metrics/metrics_hashes.h"
 #include "base/test/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
-#include "components/metrics/proto/ukm/entry.pb.h"
+#include "base/test/scoped_task_environment.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "components/ukm/ukm_source.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
@@ -927,6 +927,7 @@ TEST(JourneyLoggerTest, RecordJourneyStatsHistograms_TwoPaymentRequests) {
 // the Payment Request.
 TEST(JourneyLoggerTest,
      RecordJourneyStatsHistograms_CheckoutFunnelUkm_UserAborted) {
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   using UkmEntry = ukm::builders::PaymentRequest_CheckoutEvents;
   ukm::TestAutoSetUkmRecorder ukm_recorder;
   char test_url[] = "http://www.google.com/";
@@ -969,7 +970,9 @@ TEST(JourneyLoggerTest,
   EXPECT_EQ(JourneyLogger::EVENT_SHOWN | JourneyLogger::EVENT_PAY_CLICKED |
                 JourneyLogger::EVENT_REQUEST_SHIPPING |
                 JourneyLogger::EVENT_REQUEST_PAYER_EMAIL |
-                JourneyLogger::EVENT_REQUEST_METHOD_BASIC_CARD,
+                JourneyLogger::EVENT_REQUEST_METHOD_BASIC_CARD |
+                JourneyLogger::EVENT_USER_ABORTED |
+                JourneyLogger::EVENT_HAD_NECESSARY_COMPLETE_SUGGESTIONS,
             step_metric->value);
 }
 
@@ -977,6 +980,7 @@ TEST(JourneyLoggerTest,
 // completes the Payment Request.
 TEST(JourneyLoggerTest,
      RecordJourneyStatsHistograms_CheckoutFunnelUkm_Completed) {
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   using UkmEntry = ukm::builders::PaymentRequest_CheckoutEvents;
   ukm::TestAutoSetUkmRecorder ukm_recorder;
   char test_url[] = "http://www.google.com/";
@@ -1015,7 +1019,9 @@ TEST(JourneyLoggerTest,
   ASSERT_NE(nullptr, step_metric);
   EXPECT_EQ(JourneyLogger::EVENT_SHOWN | JourneyLogger::EVENT_REQUEST_SHIPPING |
                 JourneyLogger::EVENT_REQUEST_PAYER_EMAIL |
-                JourneyLogger::EVENT_REQUEST_METHOD_BASIC_CARD,
+                JourneyLogger::EVENT_REQUEST_METHOD_BASIC_CARD |
+                JourneyLogger::EVENT_COMPLETED |
+                JourneyLogger::EVENT_HAD_NECESSARY_COMPLETE_SUGGESTIONS,
             step_metric->value);
 }
 

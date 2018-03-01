@@ -11,13 +11,14 @@
 #include "ash/frame/default_header_painter.h"
 #include "ash/frame/frame_border_hit_test.h"
 #include "ash/frame/header_painter_util.h"
+#include "ash/public/cpp/app_types.h"
 #include "ash/shell.h"
-#include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ash/wm/window_util.h"
-#include "build/build_config.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
+#include "chrome/browser/ui/ash/tablet_mode_client.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/extensions/hosted_app_browser_controller.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_header_painter_ash.h"
@@ -40,10 +41,6 @@
 #include "ui/views/controls/label.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
-
-#if defined(OS_CHROMEOS)
-#include "ash/public/cpp/app_types.h"
-#endif
 
 namespace {
 
@@ -71,13 +68,11 @@ BrowserNonClientFrameViewAsh::BrowserNonClientFrameViewAsh(
   ash::wm::InstallResizeHandleWindowTargeterForWindow(frame->GetNativeWindow(),
                                                       nullptr);
   ash::Shell::Get()->AddShellObserver(this);
-  ash::Shell::Get()->tablet_mode_controller()->AddObserver(this);
 }
 
 BrowserNonClientFrameViewAsh::~BrowserNonClientFrameViewAsh() {
-  // TODO(sammiequon): Add test for shutdown procedure.
-  if (ash::Shell::Get()->tablet_mode_controller())
-    ash::Shell::Get()->tablet_mode_controller()->RemoveObserver(this);
+  if (TabletModeClient::Get())
+    TabletModeClient::Get()->RemoveObserver(this);
   ash::Shell::Get()->RemoveShellObserver(this);
 }
 
@@ -85,6 +80,8 @@ void BrowserNonClientFrameViewAsh::Init() {
   caption_button_container_ = new ash::FrameCaptionButtonContainerView(frame());
   caption_button_container_->UpdateSizeButtonVisibility();
   AddChildView(caption_button_container_);
+
+  Browser* browser = browser_view()->browser();
 
   // Initializing the TabIconView is expensive, so only do it if we need to.
   if (browser_view()->ShouldShowWindowIcon()) {
@@ -100,9 +97,21 @@ void BrowserNonClientFrameViewAsh::Init() {
     header_painter->Init(frame(), this, caption_button_container_);
     if (window_icon_)
       header_painter->UpdateLeftHeaderView(window_icon_);
-    // For non app (i.e. WebUI) windows (e.g. Settings) use MD frame color.
-    if (!browser_view()->browser()->is_app())
+
+    extensions::HostedAppBrowserController* app_controller =
+        browser->hosted_app_controller();
+    if (app_controller) {
+      // Hosted apps apply a theme color if specified by the extension.
+      base::Optional<SkColor> theme_color = app_controller->GetThemeColor();
+      if (theme_color) {
+        SkColor opaque_theme_color =
+            SkColorSetA(theme_color.value(), SK_AlphaOPAQUE);
+        header_painter->SetFrameColors(opaque_theme_color, opaque_theme_color);
+      }
+    } else if (!browser->is_app()) {
+      // For non app (i.e. WebUI) windows (e.g. Settings) use MD frame color.
       header_painter->SetFrameColors(kMdWebUIFrameColor, kMdWebUIFrameColor);
+    }
   } else {
     BrowserHeaderPainterAsh* header_painter = new BrowserHeaderPainterAsh;
     header_painter_.reset(header_painter);
@@ -110,15 +119,17 @@ void BrowserNonClientFrameViewAsh::Init() {
                          caption_button_container_);
   }
 
-#if defined(OS_CHROMEOS)
-  if (browser_view()->browser()->is_app()) {
+  if (browser->is_app()) {
     frame()->GetNativeWindow()->SetProperty(
         aura::client::kAppType, static_cast<int>(ash::AppType::CHROME_APP));
   } else {
     frame()->GetNativeWindow()->SetProperty(
         aura::client::kAppType, static_cast<int>(ash::AppType::BROWSER));
   }
-#endif
+
+  // TabletModeClient may not be initialized during unit tests.
+  if (TabletModeClient::Get())
+    TabletModeClient::Get()->AddObserver(this);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -331,43 +342,52 @@ void BrowserNonClientFrameViewAsh::OnOverviewModeEnded() {
   caption_button_container_->SetVisible(true);
 }
 
-void BrowserNonClientFrameViewAsh::OnTabletModeStarted() {
+///////////////////////////////////////////////////////////////////////////////
+// ash::mojom::TabletModeClient:
+
+void BrowserNonClientFrameViewAsh::OnTabletModeToggled(bool enabled) {
   caption_button_container_->UpdateSizeButtonVisibility();
 
-  // Enter immersive mode if the feature is enabled and the widget is not
-  // already in fullscreen mode. Popups that are not activated but not
-  // minimized are still put in immersive mode, since they may still be visible
-  // but not activated due to something transparent and/or not fullscreen (ie.
-  // fullscreen launcher).
-  if (ash::Shell::Get()->tablet_mode_controller()->ShouldAutoHideTitlebars() &&
-      !frame()->IsFullscreen() && !browser_view()->IsBrowserTypeNormal() &&
-      !frame()->IsMinimized()) {
-    browser_view()->immersive_mode_controller()->SetEnabled(true);
-    return;
+  if (enabled) {
+    // Enter immersive mode if the feature is enabled and the widget is not
+    // already in fullscreen mode. Popups that are not activated but not
+    // minimized are still put in immersive mode, since they may still be
+    // visible but not activated due to something transparent and/or not
+    // fullscreen (ie. fullscreen launcher).
+    if (TabletModeClient::Get()->auto_hide_title_bars() &&
+        !frame()->IsFullscreen() && !browser_view()->IsBrowserTypeNormal() &&
+        !frame()->IsMinimized()) {
+      browser_view()->immersive_mode_controller()->SetEnabled(true);
+      return;
+    }
+  } else {
+    // Exit immersive mode if the feature is enabled and the widget is not in
+    // fullscreen mode.
+    if (TabletModeClient::Get()->auto_hide_title_bars() &&
+        !frame()->IsFullscreen() && !browser_view()->IsBrowserTypeNormal()) {
+      browser_view()->immersive_mode_controller()->SetEnabled(false);
+      return;
+    }
   }
-  InvalidateLayout();
-  frame()->client_view()->InvalidateLayout();
-  frame()->GetRootView()->Layout();
-}
 
-void BrowserNonClientFrameViewAsh::OnTabletModeEnded() {
-  caption_button_container_->UpdateSizeButtonVisibility();
-
-  // Exit immersive mode if the feature is enabled and the widget is not in
-  // fullscreen mode.
-  if (!frame()->IsFullscreen() && !browser_view()->IsBrowserTypeNormal()) {
-    browser_view()->immersive_mode_controller()->SetEnabled(false);
-    return;
-  }
   InvalidateLayout();
-  frame()->client_view()->InvalidateLayout();
-  frame()->GetRootView()->Layout();
+  // Can be null in tests.
+  if (frame()->client_view())
+    frame()->client_view()->InvalidateLayout();
+  if (frame()->GetRootView())
+    frame()->GetRootView()->Layout();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // TabIconViewModel:
 
 bool BrowserNonClientFrameViewAsh::ShouldTabIconViewAnimate() const {
+  // Hosted apps use their app icon and shouldn't show a throbber.
+  if (extensions::HostedAppBrowserController::IsForExperimentalHostedAppBrowser(
+          browser_view()->browser())) {
+    return false;
+  }
+
   // This function is queried during the creation of the window as the
   // TabIconView we host is initialized, so we need to null check the selected
   // WebContents because in this condition there is not yet a selected tab.
@@ -420,10 +440,6 @@ bool BrowserNonClientFrameViewAsh::UsePackagedAppHeaderStyle() const {
 
 void BrowserNonClientFrameViewAsh::LayoutProfileIndicatorIcon() {
   DCHECK(profile_indicator_icon());
-#if !defined(OS_CHROMEOS)
-  // ChromeOS shows avatar on V1 app.
-  DCHECK(browser_view()->IsTabStripVisible());
-#endif
 
   const gfx::ImageSkia incognito_icon = GetIncognitoAvatarIcon();
   const int avatar_bottom = GetTopInset(false) +

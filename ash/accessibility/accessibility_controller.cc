@@ -4,6 +4,8 @@
 
 #include "ash/accessibility/accessibility_controller.h"
 
+#include <memory>
+
 #include "ash/high_contrast/high_contrast_controller.h"
 #include "ash/public/cpp/ash_pref_names.h"
 #include "ash/public/cpp/config.h"
@@ -20,6 +22,8 @@
 #include "services/ui/public/interfaces/accessibility_manager.mojom.h"
 #include "services/ui/public/interfaces/constants.mojom.h"
 #include "ui/base/cursor/cursor_type.h"
+
+using session_manager::SessionState;
 
 namespace ash {
 namespace {
@@ -89,17 +93,24 @@ bool AccessibilityController::IsHighContrastEnabled() const {
   return high_contrast_enabled_;
 }
 
-// static
-bool AccessibilityController::RequiresCursorCompositing(PrefService* prefs) {
-  return prefs->GetBoolean(prefs::kAccessibilityLargeCursorEnabled) ||
-         prefs->GetBoolean(prefs::kAccessibilityHighContrastEnabled) ||
-         prefs->GetBoolean(prefs::kAccessibilityScreenMagnifierEnabled);
+void AccessibilityController::OnSigninScreenPrefServiceInitialized(
+    PrefService* prefs) {
+  ObservePrefs(prefs);
 }
 
 void AccessibilityController::OnActiveUserPrefServiceChanged(
     PrefService* prefs) {
-  // Watch for pref updates from webui settings.
-  pref_change_registrar_ = base::MakeUnique<PrefChangeRegistrar>();
+  ObservePrefs(prefs);
+}
+
+void AccessibilityController::SetPrefServiceForTest(PrefService* prefs) {
+  pref_service_for_test_ = prefs;
+  ObservePrefs(prefs);
+}
+
+void AccessibilityController::ObservePrefs(PrefService* prefs) {
+  // Watch for pref updates from webui settings and policy.
+  pref_change_registrar_ = std::make_unique<PrefChangeRegistrar>();
   pref_change_registrar_->Init(prefs);
   pref_change_registrar_->Add(
       prefs::kAccessibilityLargeCursorEnabled,
@@ -114,20 +125,15 @@ void AccessibilityController::OnActiveUserPrefServiceChanged(
       base::Bind(&AccessibilityController::UpdateHighContrastFromPref,
                  base::Unretained(this)));
 
+  // Load current state.
   UpdateLargeCursorFromPref();
   UpdateHighContrastFromPref();
-}
-
-void AccessibilityController::SetPrefServiceForTest(PrefService* prefs) {
-  pref_service_for_test_ = prefs;
-  OnActiveUserPrefServiceChanged(prefs);
 }
 
 PrefService* AccessibilityController::GetActivePrefService() const {
   if (pref_service_for_test_)
     return pref_service_for_test_;
-
-  return Shell::Get()->session_controller()->GetLastActiveUserPrefService();
+  return Shell::Get()->session_controller()->GetActivePrefService();
 }
 
 void AccessibilityController::UpdateLargeCursorFromPref() {
@@ -150,7 +156,7 @@ void AccessibilityController::UpdateLargeCursorFromPref() {
   ShellPort::Get()->SetCursorSize(
       large_cursor_enabled_ ? ui::CursorSize::kLarge : ui::CursorSize::kNormal);
   Shell::Get()->SetLargeCursorSizeInDip(large_cursor_size_in_dip_);
-  Shell::Get()->SetCursorCompositingEnabled(RequiresCursorCompositing(prefs));
+  Shell::Get()->UpdateCursorCompositingEnabled();
 }
 
 void AccessibilityController::UpdateHighContrastFromPref() {
@@ -177,7 +183,7 @@ void AccessibilityController::UpdateHighContrastFromPref() {
 
   // Under classic ash high contrast mode is handled internally.
   Shell::Get()->high_contrast_controller()->SetEnabled(enabled);
-  Shell::Get()->SetCursorCompositingEnabled(RequiresCursorCompositing(prefs));
+  Shell::Get()->UpdateCursorCompositingEnabled();
 }
 
 }  // namespace ash

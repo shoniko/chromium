@@ -54,6 +54,7 @@ void MAYBE_OneShotAccessibilityTreeSearchTest::SetUp() {
   root.id = 1;
   root.SetName("Document");
   root.role = ui::AX_ROLE_ROOT_WEB_AREA;
+  root.location = gfx::RectF(0, 0, 800, 600);
   root.child_ids.push_back(2);
   root.child_ids.push_back(3);
   root.child_ids.push_back(6);
@@ -62,10 +63,12 @@ void MAYBE_OneShotAccessibilityTreeSearchTest::SetUp() {
   heading.id = 2;
   heading.SetName("Heading");
   heading.role = ui::AX_ROLE_HEADING;
+  heading.location = gfx::RectF(0, 0, 800, 50);
 
   ui::AXNodeData list;
   list.id = 3;
   list.role = ui::AX_ROLE_LIST;
+  list.location = gfx::RectF(0, 50, 500, 500);
   list.child_ids.push_back(4);
   list.child_ids.push_back(5);
 
@@ -73,17 +76,19 @@ void MAYBE_OneShotAccessibilityTreeSearchTest::SetUp() {
   list_item_1.id = 4;
   list_item_1.SetName("Autobots");
   list_item_1.role = ui::AX_ROLE_LIST_ITEM;
+  list_item_1.location = gfx::RectF(10, 10, 200, 30);
 
   ui::AXNodeData list_item_2;
   list_item_2.id = 5;
   list_item_2.SetName("Decepticons");
   list_item_2.role = ui::AX_ROLE_LIST_ITEM;
+  list_item_2.location = gfx::RectF(10, 40, 200, 60);
 
   ui::AXNodeData footer;
   footer.id = 6;
   footer.SetName("Footer");
   footer.role = ui::AX_ROLE_FOOTER;
-  footer.AddState(ui::AX_STATE_OFFSCREEN);
+  footer.location = gfx::RectF(0, 650, 100, 800);
 
   tree_.reset(new TestBrowserAccessibilityManager(
       MakeAXTreeUpdate(root, heading, list, list_item_1, list_item_2, footer)));

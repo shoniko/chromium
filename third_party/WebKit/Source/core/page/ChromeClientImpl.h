@@ -127,7 +127,7 @@ class CORE_EXPORT ChromeClientImpl final : public ChromeClient {
   DateTimeChooser* OpenDateTimeChooser(
       DateTimeChooserClient*,
       const DateTimeChooserParameters&) override;
-  void OpenFileChooser(LocalFrame*, RefPtr<FileChooser>) override;
+  void OpenFileChooser(LocalFrame*, scoped_refptr<FileChooser>) override;
   void EnumerateChosenDirectory(FileChooser*) override;
   void SetCursor(const Cursor&, LocalFrame*) override;
   void SetCursorOverridden(bool) override;
@@ -219,10 +219,9 @@ class CORE_EXPORT ChromeClientImpl final : public ChromeClient {
 
   FloatSize ElasticOverscroll() const override;
 
-  void DidObserveNonGetFetchFromScript() const override;
-
   std::unique_ptr<WebFrameScheduler> CreateFrameScheduler(
-      BlameContext*) override;
+      BlameContext*,
+      WebFrameScheduler::FrameType) override;
 
   double LastFrameTimeMonotonic() const override;
 

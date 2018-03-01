@@ -20,14 +20,12 @@ namespace blink {
 class Document;
 class Element;
 class ExceptionState;
-class IntersectionObserverCallback;
 class IntersectionObserverDelegate;
 class IntersectionObserverInit;
 class ScriptState;
+class V8IntersectionObserverCallback;
 
-class CORE_EXPORT IntersectionObserver final
-    : public GarbageCollectedFinalized<IntersectionObserver>,
-      public ScriptWrappable {
+class CORE_EXPORT IntersectionObserver final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -39,7 +37,7 @@ class CORE_EXPORT IntersectionObserver final
                                       IntersectionObserverDelegate&,
                                       ExceptionState&);
   static IntersectionObserver* Create(ScriptState*,
-                                      IntersectionObserverCallback*,
+                                      V8IntersectionObserverCallback*,
                                       const IntersectionObserverInit&,
                                       ExceptionState&);
   static IntersectionObserver* Create(const Vector<Length>& root_margin,
@@ -85,8 +83,8 @@ class CORE_EXPORT IntersectionObserver final
     return observations_;
   }
 
-  DECLARE_TRACE();
-  DECLARE_TRACE_WRAPPERS();
+  void Trace(blink::Visitor*);
+  void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  private:
   explicit IntersectionObserver(IntersectionObserverDelegate&,

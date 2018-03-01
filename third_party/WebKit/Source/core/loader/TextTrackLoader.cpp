@@ -29,11 +29,11 @@
 #include "core/dom/TaskRunnerHelper.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "platform/SharedBuffer.h"
-#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
 #include "platform/loader/fetch/FetchParameters.h"
 #include "platform/loader/fetch/RawResource.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
+#include "platform/loader/fetch/fetch_initiator_type_names.h"
 #include "platform/weborigin/SecurityOrigin.h"
 
 namespace blink {
@@ -45,7 +45,7 @@ TextTrackLoader::TextTrackLoader(TextTrackLoaderClient& client,
       cue_load_timer_(TaskRunnerHelper::Get(TaskType::kNetworking, &document),
                       this,
                       &TextTrackLoader::CueLoadTimerFired),
-      state_(kIdle),
+      state_(kLoading),
       new_cues_available_(false) {}
 
 TextTrackLoader::~TextTrackLoader() {}
@@ -175,7 +175,7 @@ void TextTrackLoader::GetNewCues(
     cue_parser_->GetNewCues(output_cues);
 }
 
-DEFINE_TRACE(TextTrackLoader) {
+void TextTrackLoader::Trace(blink::Visitor* visitor) {
   visitor->Trace(client_);
   visitor->Trace(cue_parser_);
   visitor->Trace(document_);

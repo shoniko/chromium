@@ -67,6 +67,8 @@ class StyleRuleUsageTracker;
 class StyleSheetContents;
 class ViewportStyleResolver;
 
+enum InvalidationScope { kInvalidateCurrentScope, kInvalidateAllScopes };
+
 class CORE_EXPORT StyleEngine final
     : public GarbageCollectedFinalized<StyleEngine>,
       public FontSelectorClient,
@@ -96,11 +98,6 @@ class CORE_EXPORT StyleEngine final
   const HeapVector<TraceWrapperMember<StyleSheet>>&
   StyleSheetsForStyleSheetList(TreeScope&);
 
-  const HeapVector<
-      std::pair<WebStyleSheetId, TraceWrapperMember<CSSStyleSheet>>>&
-  InjectedAuthorStyleSheets() const {
-    return injected_author_style_sheets_;
-  }
   CSSStyleSheet* InspectorStyleSheet() const { return inspector_style_sheet_; }
 
   const ActiveStyleSheetVector ActiveStyleSheetsForInspector();
@@ -116,8 +113,8 @@ class CORE_EXPORT StyleEngine final
   void ViewportRulesChanged();
   void HtmlImportAddedOrRemoved();
 
-  WebStyleSheetId InjectAuthorSheet(StyleSheetContents* author_sheet);
-  void RemoveInjectedAuthorSheet(WebStyleSheetId author_sheet_id);
+  WebStyleSheetId AddUserSheet(StyleSheetContents*);
+  void RemoveUserSheet(WebStyleSheetId);
   CSSStyleSheet& EnsureInspectorStyleSheet();
   RuleSet* WatchedSelectorsRuleSet() {
     DCHECK(IsMaster());
@@ -257,11 +254,11 @@ class CORE_EXPORT StyleEngine final
                                               Element& after_element);
   void ScheduleNthPseudoInvalidations(ContainerNode&);
   void ScheduleInvalidationsForRuleSets(TreeScope&,
-                                        const HeapHashSet<Member<RuleSet>>&);
+                                        const HeapHashSet<Member<RuleSet>>&,
+                                        InvalidationScope =
+                                            kInvalidateCurrentScope);
 
-  void ElementWillBeRemoved(Element& element) {
-    style_invalidator_.RescheduleSiblingInvalidationsAsDescendants(element);
-  }
+  void NodeWillBeRemoved(Node&);
 
   unsigned StyleForElementCount() const { return style_for_element_count_; }
   void IncStyleForElementCount() { style_for_element_count_++; }
@@ -271,12 +268,24 @@ class CORE_EXPORT StyleEngine final
 
   void ApplyRuleSetChanges(TreeScope&,
                            const ActiveStyleSheetVector& old_style_sheets,
-                           const ActiveStyleSheetVector& new_style_sheets);
+                           const ActiveStyleSheetVector& new_style_sheets,
+                           InvalidationScope = kInvalidateCurrentScope);
+
+  void CollectMatchingUserRules(ElementRuleCollector&) const;
 
   void CustomPropertyRegistered();
 
-  DECLARE_VIRTUAL_TRACE();
-  DECLARE_TRACE_WRAPPERS();
+  bool NeedsWhitespaceReattachment() const {
+    return !whitespace_reattach_set_.IsEmpty();
+  }
+  bool NeedsWhitespaceReattachment(Element* element) const {
+    return whitespace_reattach_set_.Contains(element);
+  }
+  void ClearWhitespaceReattachSet() { whitespace_reattach_set_.clear(); }
+  void MarkForWhitespaceReattachment();
+
+  virtual void Trace(blink::Visitor*);
+  void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  private:
   // FontSelectorClient implementation.
@@ -286,7 +295,8 @@ class CORE_EXPORT StyleEngine final
   StyleEngine(Document&);
   bool NeedsActiveStyleSheetUpdate() const {
     return all_tree_scopes_dirty_ || tree_scopes_removed_ ||
-           document_scope_dirty_ || dirty_tree_scopes_.size();
+           document_scope_dirty_ || dirty_tree_scopes_.size() ||
+           user_style_dirty_;
   }
 
   TreeScopeStyleSheetCollection& EnsureStyleSheetCollectionFor(TreeScope&);
@@ -296,6 +306,7 @@ class CORE_EXPORT StyleEngine final
 
   void MarkDocumentDirty();
   void MarkTreeScopeDirty(TreeScope&);
+  void MarkUserStyleDirty();
 
   bool IsMaster() const { return is_master_; }
   Document* Master();
@@ -340,6 +351,7 @@ class CORE_EXPORT StyleEngine final
   void InvalidateSlottedElements(HTMLSlotElement&);
 
   void UpdateViewport();
+  void UpdateActiveUserStyleSheets();
   void UpdateActiveStyleSheets();
   void UpdateGlobalRuleSet() {
     DCHECK(!NeedsActiveStyleSheetUpdate());
@@ -361,7 +373,9 @@ class CORE_EXPORT StyleEngine final
   int pending_body_stylesheets_ = 0;
 
   HeapVector<std::pair<WebStyleSheetId, TraceWrapperMember<CSSStyleSheet>>>
-      injected_author_style_sheets_;
+      user_style_sheets_;
+  ActiveStyleSheetVector active_user_style_sheets_;
+
   Member<CSSStyleSheet> inspector_style_sheet_;
 
   TraceWrapperMember<DocumentStyleSheetCollection>
@@ -377,6 +391,7 @@ class CORE_EXPORT StyleEngine final
   bool document_scope_dirty_ = true;
   bool all_tree_scopes_dirty_ = false;
   bool tree_scopes_removed_ = false;
+  bool user_style_dirty_ = false;
   UnorderedTreeScopeSet dirty_tree_scopes_;
   UnorderedTreeScopeSet active_tree_scopes_;
   TreeOrderedList tree_boundary_crossing_scopes_;
@@ -393,6 +408,12 @@ class CORE_EXPORT StyleEngine final
   Member<CSSGlobalRuleSet> global_rule_set_;
   StyleInvalidator style_invalidator_;
 
+  // This is a set of rendered elements which had one or more of its rendered
+  // children removed since the last lifecycle update. For such elements we need
+  // to re-attach whitespace children. Also see reattach_all_whitespace_nodes_
+  // in the WhitespaceAttacher class.
+  HeapHashSet<Member<Element>> whitespace_reattach_set_;
+
   Member<CSSFontSelector> font_selector_;
 
   HeapHashMap<AtomicString, WeakMember<StyleSheetContents>>
@@ -403,7 +424,7 @@ class CORE_EXPORT StyleEngine final
   std::unique_ptr<StyleResolverStats> style_resolver_stats_;
   unsigned style_for_element_count_ = 0;
 
-  WebStyleSheetId injected_author_sheets_id_count_ = 0;
+  WebStyleSheetId user_sheets_id_count_ = 0;
 
   friend class StyleEngineTest;
 };

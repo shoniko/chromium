@@ -74,14 +74,14 @@ TEST(ValuesTest, ConstructStringFromConstCharPtr) {
   EXPECT_EQ("foobar", value.GetString());
 }
 
-TEST(ValuesTest, ConstructStringFromStdStringConstRef) {
+TEST(ValuesTest, ConstructStringFromStringPiece) {
   std::string str = "foobar";
-  Value value(str);
+  Value value{StringPiece(str)};
   EXPECT_EQ(Value::Type::STRING, value.type());
   EXPECT_EQ("foobar", value.GetString());
 }
 
-TEST(ValuesTest, ConstructStringFromStdStringRefRef) {
+TEST(ValuesTest, ConstructStringFromStdStringRRef) {
   std::string str = "foobar";
   Value value(std::move(str));
   EXPECT_EQ(Value::Type::STRING, value.type());
@@ -95,16 +95,9 @@ TEST(ValuesTest, ConstructStringFromConstChar16Ptr) {
   EXPECT_EQ("foobar", value.GetString());
 }
 
-TEST(ValuesTest, ConstructStringFromString16) {
+TEST(ValuesTest, ConstructStringFromStringPiece16) {
   string16 str = ASCIIToUTF16("foobar");
-  Value value(str);
-  EXPECT_EQ(Value::Type::STRING, value.type());
-  EXPECT_EQ("foobar", value.GetString());
-}
-
-TEST(ValuesTest, ConstructStringFromStringPiece) {
-  StringPiece str = "foobar";
-  Value value(str);
+  Value value{StringPiece16(str)};
   EXPECT_EQ(Value::Type::STRING, value.type());
   EXPECT_EQ("foobar", value.GetString());
 }
@@ -752,7 +745,7 @@ TEST(ValuesTest, List) {
   mixed_list->Set(3, std::make_unique<Value>("foo"));
   ASSERT_EQ(4u, mixed_list->GetSize());
 
-  Value *value = NULL;
+  Value* value = nullptr;
   bool bool_value = false;
   int int_value = 0;
   double double_value = 0.0;
@@ -1017,7 +1010,7 @@ TEST(ValuesTest, DictionaryWithoutPathExpansion) {
   EXPECT_FALSE(dict.Get("this.isnt.expanded", &value3));
   Value* value4;
   ASSERT_TRUE(dict.GetWithoutPathExpansion("this.isnt.expanded", &value4));
-  EXPECT_EQ(Value::Type::NONE, value4->GetType());
+  EXPECT_EQ(Value::Type::NONE, value4->type());
 }
 
 // Tests the deprecated version of SetWithoutPathExpansion.
@@ -1041,7 +1034,7 @@ TEST(ValuesTest, DictionaryWithoutPathExpansionDeprecated) {
   EXPECT_FALSE(dict.Get("this.isnt.expanded", &value3));
   Value* value4;
   ASSERT_TRUE(dict.GetWithoutPathExpansion("this.isnt.expanded", &value4));
-  EXPECT_EQ(Value::Type::NONE, value4->GetType());
+  EXPECT_EQ(Value::Type::NONE, value4->type());
 }
 
 TEST(ValuesTest, DictionaryRemovePath) {
@@ -1923,7 +1916,21 @@ TEST(ValuesTest, GetWithNullOutValue) {
 TEST(ValuesTest, SelfSwap) {
   base::Value test(1);
   std::swap(test, test);
-  EXPECT_TRUE(test.GetInt() == 1);
+  EXPECT_EQ(1, test.GetInt());
+}
+
+TEST(ValuesTest, FromToUniquePtrValue) {
+  std::unique_ptr<DictionaryValue> dict = std::make_unique<DictionaryValue>();
+  dict->SetString("name", "Froogle");
+  dict->SetString("url", "http://froogle.com");
+  Value dict_copy = dict->Clone();
+
+  Value dict_converted = Value::FromUniquePtrValue(std::move(dict));
+  EXPECT_EQ(dict_copy, dict_converted);
+
+  std::unique_ptr<Value> val =
+      Value::ToUniquePtrValue(std::move(dict_converted));
+  EXPECT_EQ(dict_copy, *val);
 }
 
 }  // namespace base

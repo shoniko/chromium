@@ -22,7 +22,7 @@ class CSSLazyPropertyParserImpl : public CSSLazyPropertyParser {
   // CSSLazyPropertyParser:
   StylePropertySet* ParseProperties() override;
 
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) {
     visitor->Trace(lazy_state_);
     CSSLazyPropertyParser::Trace(visitor);
   }

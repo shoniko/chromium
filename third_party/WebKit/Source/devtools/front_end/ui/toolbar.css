@@ -89,11 +89,10 @@
     flex: auto;
     overflow: hidden;
     text-align: right;
-    color: #333 !important;
 }
 
-.toolbar-button .toolbar-dropdown-arrow {
-    background-color: #333 !important;
+.toolbar-button.dark-text .toolbar-dropdown-arrow {
+    background-color: #333;
 }
 
 .toolbar-has-glyph .toolbar-text {
@@ -124,6 +123,10 @@
 
 .toolbar-button:disabled {
     opacity: 0.5;
+}
+
+.toolbar-button.dark-text .toolbar-text{
+    color: #333 !important;
 }
 
 :not(.toolbar-render-as-links) .toolbar-button:enabled.hover:not(:active) .toolbar-glyph {
@@ -223,8 +226,8 @@ select.toolbar-item[data-keyboard-focus="true"]:focus > * {
 
 .toolbar-input {
     width: 120px;
-    height: 20px;
-    padding: 3px;
+    height: 19px;
+    padding: 4px 3px 3px 3px;
     margin: 1px 3px;
     background-color: white;
     border: solid 1px #d8d8d8;
@@ -255,6 +258,17 @@ select.toolbar-item[data-keyboard-focus="true"]:focus > * {
 
 .toolbar-input-empty .toolbar-input-clear-button {
     display: none;
+}
+
+.toolbar-prompt-proxy {
+    flex: 1;
+}
+
+.toolbar-input-prompt {
+    flex: 1;
+    overflow: hidden;
+    white-space: nowrap;
+    cursor: auto;
 }
 
 /* Separator */

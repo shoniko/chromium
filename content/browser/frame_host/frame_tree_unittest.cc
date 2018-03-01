@@ -16,6 +16,7 @@
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/frame_messages.h"
 #include "content/common/frame_owner_properties.h"
+#include "content/common/frame_policy.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
@@ -24,7 +25,6 @@
 #include "content/test/test_render_view_host.h"
 #include "content/test/test_web_contents.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/web/WebSandboxFlags.h"
 
 namespace content {
 
@@ -123,9 +123,10 @@ class FrameTreeTest : public RenderViewHostImplTestHarness {
   }
 
   std::string GetTraversalOrder(FrameTree* frame_tree,
-                                FrameTreeNode* node_to_skip) {
+                                FrameTreeNode* subtree_to_skip) {
     std::string result;
-    for (FrameTreeNode* node : frame_tree->NodesExcept(node_to_skip)) {
+    for (FrameTreeNode* node :
+         frame_tree->NodesExceptSubtree(subtree_to_skip)) {
       if (!result.empty())
         result += " ";
       result += base::Int64ToString(node->current_frame_host()->GetRoutingID());
@@ -158,28 +159,28 @@ TEST_F(FrameTreeTest, Shape) {
   // Simulate attaching a series of frames to build the frame tree.
   frame_tree->AddFrame(root, process_id, 14, blink::WebTreeScopeType::kDocument,
                        std::string(), "uniqueName0",
-                       blink::WebSandboxFlags::kNone,
-                       ParsedFeaturePolicyHeader(), FrameOwnerProperties());
+                       base::UnguessableToken::Create(), FramePolicy(),
+                       FrameOwnerProperties());
   frame_tree->AddFrame(root, process_id, 15, blink::WebTreeScopeType::kDocument,
                        std::string(), "uniqueName1",
-                       blink::WebSandboxFlags::kNone,
-                       ParsedFeaturePolicyHeader(), FrameOwnerProperties());
+                       base::UnguessableToken::Create(), FramePolicy(),
+                       FrameOwnerProperties());
   frame_tree->AddFrame(root, process_id, 16, blink::WebTreeScopeType::kDocument,
                        std::string(), "uniqueName2",
-                       blink::WebSandboxFlags::kNone,
-                       ParsedFeaturePolicyHeader(), FrameOwnerProperties());
+                       base::UnguessableToken::Create(), FramePolicy(),
+                       FrameOwnerProperties());
   frame_tree->AddFrame(root->child_at(0), process_id, 244,
                        blink::WebTreeScopeType::kDocument, std::string(),
-                       "uniqueName3", blink::WebSandboxFlags::kNone,
-                       ParsedFeaturePolicyHeader(), FrameOwnerProperties());
+                       "uniqueName3", base::UnguessableToken::Create(),
+                       FramePolicy(), FrameOwnerProperties());
   frame_tree->AddFrame(root->child_at(1), process_id, 255,
                        blink::WebTreeScopeType::kDocument, no_children_node,
-                       "uniqueName4", blink::WebSandboxFlags::kNone,
-                       ParsedFeaturePolicyHeader(), FrameOwnerProperties());
+                       "uniqueName4", base::UnguessableToken::Create(),
+                       FramePolicy(), FrameOwnerProperties());
   frame_tree->AddFrame(root->child_at(0), process_id, 245,
                        blink::WebTreeScopeType::kDocument, std::string(),
-                       "uniqueName5", blink::WebSandboxFlags::kNone,
-                       ParsedFeaturePolicyHeader(), FrameOwnerProperties());
+                       "uniqueName5", base::UnguessableToken::Create(),
+                       FramePolicy(), FrameOwnerProperties());
 
   EXPECT_EQ(
       "2: [14: [244: [], 245: []], "
@@ -190,43 +191,42 @@ TEST_F(FrameTreeTest, Shape) {
   FrameTreeNode* child_16 = root->child_at(2);
   frame_tree->AddFrame(child_16, process_id, 264,
                        blink::WebTreeScopeType::kDocument, std::string(),
-                       "uniqueName6", blink::WebSandboxFlags::kNone,
-                       ParsedFeaturePolicyHeader(), FrameOwnerProperties());
+                       "uniqueName6", base::UnguessableToken::Create(),
+                       FramePolicy(), FrameOwnerProperties());
   frame_tree->AddFrame(child_16, process_id, 265,
                        blink::WebTreeScopeType::kDocument, std::string(),
-                       "uniqueName7", blink::WebSandboxFlags::kNone,
-                       ParsedFeaturePolicyHeader(), FrameOwnerProperties());
+                       "uniqueName7", base::UnguessableToken::Create(),
+                       FramePolicy(), FrameOwnerProperties());
   frame_tree->AddFrame(child_16, process_id, 266,
                        blink::WebTreeScopeType::kDocument, std::string(),
-                       "uniqueName8", blink::WebSandboxFlags::kNone,
-                       ParsedFeaturePolicyHeader(), FrameOwnerProperties());
+                       "uniqueName8", base::UnguessableToken::Create(),
+                       FramePolicy(), FrameOwnerProperties());
   frame_tree->AddFrame(child_16, process_id, 267,
                        blink::WebTreeScopeType::kDocument, deep_subtree,
-                       "uniqueName9", blink::WebSandboxFlags::kNone,
-                       ParsedFeaturePolicyHeader(), FrameOwnerProperties());
+                       "uniqueName9", base::UnguessableToken::Create(),
+                       FramePolicy(), FrameOwnerProperties());
   frame_tree->AddFrame(child_16, process_id, 268,
                        blink::WebTreeScopeType::kDocument, std::string(),
-                       "uniqueName10", blink::WebSandboxFlags::kNone,
-                       ParsedFeaturePolicyHeader(), FrameOwnerProperties());
+                       "uniqueName10", base::UnguessableToken::Create(),
+                       FramePolicy(), FrameOwnerProperties());
 
   FrameTreeNode* child_267 = child_16->child_at(3);
   frame_tree->AddFrame(child_267, process_id, 365,
                        blink::WebTreeScopeType::kDocument, std::string(),
-                       "uniqueName11", blink::WebSandboxFlags::kNone,
-                       ParsedFeaturePolicyHeader(), FrameOwnerProperties());
+                       "uniqueName11", base::UnguessableToken::Create(),
+                       FramePolicy(), FrameOwnerProperties());
   frame_tree->AddFrame(child_267->child_at(0), process_id, 455,
                        blink::WebTreeScopeType::kDocument, std::string(),
-                       "uniqueName12", blink::WebSandboxFlags::kNone,
-                       ParsedFeaturePolicyHeader(), FrameOwnerProperties());
+                       "uniqueName12", base::UnguessableToken::Create(),
+                       FramePolicy(), FrameOwnerProperties());
   frame_tree->AddFrame(child_267->child_at(0)->child_at(0), process_id, 555,
                        blink::WebTreeScopeType::kDocument, std::string(),
-                       "uniqueName13", blink::WebSandboxFlags::kNone,
-                       ParsedFeaturePolicyHeader(), FrameOwnerProperties());
-  frame_tree->AddFrame(child_267->child_at(0)->child_at(0)->child_at(0),
-                       process_id, 655, blink::WebTreeScopeType::kDocument,
-                       std::string(), "uniqueName14",
-                       blink::WebSandboxFlags::kNone,
-                       ParsedFeaturePolicyHeader(), FrameOwnerProperties());
+                       "uniqueName13", base::UnguessableToken::Create(),
+                       FramePolicy(), FrameOwnerProperties());
+  frame_tree->AddFrame(
+      child_267->child_at(0)->child_at(0)->child_at(0), process_id, 655,
+      blink::WebTreeScopeType::kDocument, std::string(), "uniqueName14",
+      base::UnguessableToken::Create(), FramePolicy(), FrameOwnerProperties());
 
   // Now that's it's fully built, verify the tree structure is as expected.
   EXPECT_EQ(
@@ -246,20 +246,20 @@ TEST_F(FrameTreeTest, Shape) {
   FrameTreeNode* child_655 = child_555->child_at(0);
   EXPECT_EQ("2 14 15 16 244 245 255 264 265 266 267 268 365 455 555 655",
             GetTraversalOrder(frame_tree, nullptr));
-  EXPECT_EQ("", GetTraversalOrder(frame_tree, root));
-  EXPECT_EQ("2 15 16 255 264 265 266 267 268 365 455 555 655",
+  EXPECT_EQ("2", GetTraversalOrder(frame_tree, root));
+  EXPECT_EQ("2 14 15 16 255 264 265 266 267 268 365 455 555 655",
             GetTraversalOrder(frame_tree, child_14));
-  EXPECT_EQ("2 14 15 16 245 255 264 265 266 267 268 365 455 555 655",
+  EXPECT_EQ("2 14 15 16 244 245 255 264 265 266 267 268 365 455 555 655",
             GetTraversalOrder(frame_tree, child_244));
-  EXPECT_EQ("2 14 15 16 244 255 264 265 266 267 268 365 455 555 655",
+  EXPECT_EQ("2 14 15 16 244 245 255 264 265 266 267 268 365 455 555 655",
             GetTraversalOrder(frame_tree, child_245));
-  EXPECT_EQ("2 14 16 244 245 264 265 266 267 268 365 455 555 655",
+  EXPECT_EQ("2 14 15 16 244 245 264 265 266 267 268 365 455 555 655",
             GetTraversalOrder(frame_tree, child_15));
-  EXPECT_EQ("2 14 15 16 244 245 255 264 265 266 268",
+  EXPECT_EQ("2 14 15 16 244 245 255 264 265 266 267 268",
             GetTraversalOrder(frame_tree, child_267));
-  EXPECT_EQ("2 14 15 16 244 245 255 264 265 266 267 268 365 455",
-            GetTraversalOrder(frame_tree, child_555));
   EXPECT_EQ("2 14 15 16 244 245 255 264 265 266 267 268 365 455 555",
+            GetTraversalOrder(frame_tree, child_555));
+  EXPECT_EQ("2 14 15 16 244 245 255 264 265 266 267 268 365 455 555 655",
             GetTraversalOrder(frame_tree, child_655));
 
   frame_tree->RemoveFrame(child_555);
@@ -299,26 +299,21 @@ TEST_F(FrameTreeTest, FindFrames) {
 
   main_test_rfh()->OnCreateChildFrame(
       22, blink::WebTreeScopeType::kDocument, "child0", "uniqueName0",
-      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
-      FrameOwnerProperties());
+      base::UnguessableToken::Create(), FramePolicy(), FrameOwnerProperties());
   main_test_rfh()->OnCreateChildFrame(
       23, blink::WebTreeScopeType::kDocument, "child1", "uniqueName1",
-      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
-      FrameOwnerProperties());
+      base::UnguessableToken::Create(), FramePolicy(), FrameOwnerProperties());
   main_test_rfh()->OnCreateChildFrame(
       24, blink::WebTreeScopeType::kDocument, std::string(), "uniqueName2",
-      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
-      FrameOwnerProperties());
+      base::UnguessableToken::Create(), FramePolicy(), FrameOwnerProperties());
   FrameTreeNode* child0 = root->child_at(0);
   FrameTreeNode* child1 = root->child_at(1);
-
   FrameTreeNode* child2 = root->child_at(2);
 
   // Add one grandchild frame.
   child1->current_frame_host()->OnCreateChildFrame(
       33, blink::WebTreeScopeType::kDocument, "grandchild", "uniqueName3",
-      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
-      FrameOwnerProperties());
+      base::UnguessableToken::Create(), FramePolicy(), FrameOwnerProperties());
   FrameTreeNode* grandchild = child1->child_at(0);
 
   // Ensure they can be found by FTN id.
@@ -356,16 +351,13 @@ TEST_F(FrameTreeTest, GetSibling) {
   FrameTreeNode* root = frame_tree->root();
   main_test_rfh()->OnCreateChildFrame(
       22, blink::WebTreeScopeType::kDocument, "child0", "uniqueName0",
-      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
-      FrameOwnerProperties());
+      base::UnguessableToken::Create(), FramePolicy(), FrameOwnerProperties());
   main_test_rfh()->OnCreateChildFrame(
       23, blink::WebTreeScopeType::kDocument, "child1", "uniqueName1",
-      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
-      FrameOwnerProperties());
+      base::UnguessableToken::Create(), FramePolicy(), FrameOwnerProperties());
   main_test_rfh()->OnCreateChildFrame(
       24, blink::WebTreeScopeType::kDocument, "child2", "uniqueName2",
-      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
-      FrameOwnerProperties());
+      base::UnguessableToken::Create(), FramePolicy(), FrameOwnerProperties());
   FrameTreeNode* child0 = root->child_at(0);
   FrameTreeNode* child1 = root->child_at(1);
   FrameTreeNode* child2 = root->child_at(2);
@@ -373,8 +365,7 @@ TEST_F(FrameTreeTest, GetSibling) {
   // Add one grandchild frame.
   child1->current_frame_host()->OnCreateChildFrame(
       33, blink::WebTreeScopeType::kDocument, "grandchild", "uniqueName3",
-      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
-      FrameOwnerProperties());
+      base::UnguessableToken::Create(), FramePolicy(), FrameOwnerProperties());
   FrameTreeNode* grandchild = child1->child_at(0);
 
   // Test PreviousSibling().
@@ -405,16 +396,14 @@ TEST_F(FrameTreeTest, ObserverWalksTreeDuringFrameCreation) {
   // Simulate attaching a series of frames to build the frame tree.
   main_test_rfh()->OnCreateChildFrame(
       14, blink::WebTreeScopeType::kDocument, std::string(), "uniqueName0",
-      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
-      FrameOwnerProperties());
+      base::UnguessableToken::Create(), FramePolicy(), FrameOwnerProperties());
   EXPECT_EQ(
       "RenderFrameHostChanged(new)(14) -> 2: []\n"
       "RenderFrameCreated(14) -> 2: [14: []]",
       activity.GetLog());
   main_test_rfh()->OnCreateChildFrame(
       18, blink::WebTreeScopeType::kDocument, std::string(), "uniqueName1",
-      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
-      FrameOwnerProperties());
+      base::UnguessableToken::Create(), FramePolicy(), FrameOwnerProperties());
   EXPECT_EQ(
       "RenderFrameHostChanged(new)(18) -> 2: [14: []]\n"
       "RenderFrameCreated(18) -> 2: [14: [], 18: []]",
@@ -434,16 +423,14 @@ TEST_F(FrameTreeTest, ObserverWalksTreeAfterCrash) {
 
   main_test_rfh()->OnCreateChildFrame(
       22, blink::WebTreeScopeType::kDocument, std::string(), "uniqueName0",
-      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
-      FrameOwnerProperties());
+      base::UnguessableToken::Create(), FramePolicy(), FrameOwnerProperties());
   EXPECT_EQ(
       "RenderFrameHostChanged(new)(22) -> 2: []\n"
       "RenderFrameCreated(22) -> 2: [22: []]",
       activity.GetLog());
   main_test_rfh()->OnCreateChildFrame(
       23, blink::WebTreeScopeType::kDocument, std::string(), "uniqueName1",
-      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
-      FrameOwnerProperties());
+      base::UnguessableToken::Create(), FramePolicy(), FrameOwnerProperties());
   EXPECT_EQ(
       "RenderFrameHostChanged(new)(23) -> 2: [22: []]\n"
       "RenderFrameCreated(23) -> 2: [22: [], 23: []]",
@@ -472,8 +459,8 @@ TEST_F(FrameTreeTest, FailAddFrameWithWrongProcessId) {
   // Simulate attaching a frame from mismatched process id.
   ASSERT_FALSE(frame_tree->AddFrame(
       root, process_id + 1, 1, blink::WebTreeScopeType::kDocument,
-      std::string(), "uniqueName0", blink::WebSandboxFlags::kNone,
-      ParsedFeaturePolicyHeader(), FrameOwnerProperties()));
+      std::string(), "uniqueName0", base::UnguessableToken::Create(),
+      FramePolicy(), FrameOwnerProperties()));
   ASSERT_EQ("2: []", GetTreeState(frame_tree));
 }
 
@@ -487,19 +474,16 @@ TEST_F(FrameTreeTest, ProcessCrashClearsGlobalMap) {
 
   main_test_rfh()->OnCreateChildFrame(
       22, blink::WebTreeScopeType::kDocument, std::string(), "uniqueName0",
-      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
-      FrameOwnerProperties());
+      base::UnguessableToken::Create(), FramePolicy(), FrameOwnerProperties());
   main_test_rfh()->OnCreateChildFrame(
       23, blink::WebTreeScopeType::kDocument, std::string(), "uniqueName1",
-      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
-      FrameOwnerProperties());
+      base::UnguessableToken::Create(), FramePolicy(), FrameOwnerProperties());
 
   // Add one grandchild frame.
   RenderFrameHostImpl* child1_rfh = root->child_at(0)->current_frame_host();
   child1_rfh->OnCreateChildFrame(
       33, blink::WebTreeScopeType::kDocument, std::string(), "uniqueName2",
-      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
-      FrameOwnerProperties());
+      base::UnguessableToken::Create(), FramePolicy(), FrameOwnerProperties());
 
   // Ensure they can be found by id.
   int id1 = root->child_at(0)->frame_tree_node_id();

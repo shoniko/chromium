@@ -12,6 +12,7 @@
 #include <string>
 
 #include "base/callback.h"
+#include "base/containers/queue.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "content/browser/frame_host/frame_tree_node.h"
@@ -20,6 +21,7 @@
 namespace content {
 
 struct FrameOwnerProperties;
+struct FramePolicy;
 class Navigator;
 class RenderFrameHostDelegate;
 class RenderViewHostDelegate;
@@ -59,11 +61,12 @@ class CONTENT_EXPORT FrameTree {
    private:
     friend class NodeRange;
 
-    NodeIterator(FrameTreeNode* starting_node, FrameTreeNode* node_to_skip);
+    NodeIterator(FrameTreeNode* starting_node,
+                 FrameTreeNode* root_of_subtree_to_skip);
 
     FrameTreeNode* current_node_;
-    FrameTreeNode* const node_to_skip_;
-    std::queue<FrameTreeNode*> queue_;
+    FrameTreeNode* const root_of_subtree_to_skip_;
+    base::queue<FrameTreeNode*> queue_;
   };
 
   class CONTENT_EXPORT NodeRange {
@@ -74,10 +77,10 @@ class CONTENT_EXPORT FrameTree {
    private:
     friend class FrameTree;
 
-    NodeRange(FrameTreeNode* root, FrameTreeNode* node_to_skip);
+    NodeRange(FrameTreeNode* root, FrameTreeNode* root_of_subtree_to_skip);
 
     FrameTreeNode* const root_;
-    FrameTreeNode* const node_to_skip_;
+    FrameTreeNode* const root_of_subtree_to_skip_;
   };
 
   // Each FrameTreeNode will default to using the given |navigator| for
@@ -125,8 +128,8 @@ class CONTENT_EXPORT FrameTree {
                 blink::WebTreeScopeType scope,
                 const std::string& frame_name,
                 const std::string& frame_unique_name,
-                blink::WebSandboxFlags sandbox_flags,
-                const ParsedFeaturePolicyHeader& container_policy,
+                const base::UnguessableToken& devtools_frame_token,
+                const FramePolicy& frame_policy,
                 const FrameOwnerProperties& frame_owner_properties);
 
   // Removes a frame from the frame tree. |child|, its children, and objects
@@ -215,8 +218,8 @@ class CONTENT_EXPORT FrameTree {
 
   // Returns a range to iterate over all FrameTreeNodes in the frame tree in
   // breadth-first traversal order, skipping the subtree rooted at
-  // |node_to_skip|.
-  NodeRange NodesExcept(FrameTreeNode* node_to_skip);
+  // |node|, but including |node| itself.
+  NodeRange NodesExceptSubtree(FrameTreeNode* node);
 
   // These delegates are installed into all the RenderViewHosts and
   // RenderFrameHosts that we create.

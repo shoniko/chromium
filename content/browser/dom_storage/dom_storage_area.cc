@@ -345,8 +345,10 @@ void DOMStorageArea::ScheduleImmediateCommit() {
 void DOMStorageArea::ClearShallowCopiedCommitBatches() {
   if (is_shutdown_)
     return;
-  while (commit_batches_.back().type == CommitBatchHolder::TYPE_CLONE)
+  while (!commit_batches_.empty() &&
+         commit_batches_.back().type == CommitBatchHolder::TYPE_CLONE) {
     commit_batches_.pop_back();
+  }
   original_persistent_namespace_ids_ = nullptr;
 }
 
@@ -473,7 +475,7 @@ void DOMStorageArea::OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd) {
       url[index] = '_';
   }
   std::string name =
-      base::StringPrintf("dom_storage/%s/0x%" PRIXPTR, url.c_str(),
+      base::StringPrintf("site_storage/%s/0x%" PRIXPTR, url.c_str(),
                          reinterpret_cast<uintptr_t>(this));
 
   const char* system_allocator_name =

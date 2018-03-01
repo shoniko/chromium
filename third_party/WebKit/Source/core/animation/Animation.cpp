@@ -46,12 +46,12 @@
 #include "core/inspector/InspectorTraceEvents.h"
 #include "core/paint/PaintLayer.h"
 #include "core/probe/CoreProbes.h"
-#include "platform/RuntimeEnabledFeatures.h"
-#include "platform/ScriptForbiddenScope.h"
 #include "platform/WebTaskRunner.h"
 #include "platform/animation/CompositorAnimationPlayer.h"
+#include "platform/bindings/ScriptForbiddenScope.h"
 #include "platform/heap/Persistent.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/MathExtras.h"
 #include "platform/wtf/PtrUtil.h"
 #include "public/platform/Platform.h"
@@ -136,7 +136,7 @@ Animation::Animation(ExecutionContext* execution_context,
   if (content_) {
     if (content_->GetAnimation()) {
       content_->GetAnimation()->cancel();
-      content_->GetAnimation()->setEffect(0);
+      content_->GetAnimation()->setEffect(nullptr);
     }
     content_->Attach(this);
   }
@@ -498,7 +498,7 @@ void Animation::setEffect(AnimationEffectReadOnly* new_effect) {
     // FIXME: This logic needs to be updated once groups are implemented
     if (new_effect->GetAnimation()) {
       new_effect->GetAnimation()->cancel();
-      new_effect->GetAnimation()->setEffect(0);
+      new_effect->GetAnimation()->setEffect(nullptr);
     }
     new_effect->Attach(this);
     SetOutdated();
@@ -717,7 +717,16 @@ void Animation::setPlaybackRate(double playback_rate) {
 
   PlayStateUpdateScope update_scope(*this, kTimingUpdateOnDemand);
 
+  double start_time_before = start_time_;
   SetPlaybackRateInternal(playback_rate);
+
+  // Adds a UseCounter to check if setting playbackRate causes a compensatory
+  // seek forcing a change in start_time_
+  if (!std::isnan(start_time_before) && start_time_ != start_time_before &&
+      play_state_ != kFinished) {
+    UseCounter::Count(GetExecutionContext(),
+                      WebFeature::kAnimationSetPlaybackRateCompensatorySeek);
+  }
 }
 
 void Animation::SetPlaybackRateInternal(double playback_rate) {
@@ -1253,7 +1262,7 @@ void Animation::RejectAndResetPromiseMaybeAsync(AnimationPromise* promise) {
   }
 }
 
-DEFINE_TRACE(Animation) {
+void Animation::Trace(blink::Visitor* visitor) {
   visitor->Trace(content_);
   visitor->Trace(timeline_);
   visitor->Trace(pending_finished_event_);

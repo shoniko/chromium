@@ -120,7 +120,7 @@ class CORE_EXPORT EmptyChromeClient : public ChromeClient {
                      const WebDragData&,
                      WebDragOperationsMask,
                      const WebImage& drag_image,
-                     const WebPoint& drag_image_offset) {}
+                     const WebPoint& drag_image_offset) override {}
   bool AcceptsLoadDrops() const override { return true; }
 
   bool ShouldReportDetailedMessageForSource(LocalFrame&,
@@ -190,7 +190,7 @@ class CORE_EXPORT EmptyChromeClient : public ChromeClient {
       const DateTimeChooserParameters&) override;
   void OpenTextDataListChooser(HTMLInputElement&) override;
 
-  void OpenFileChooser(LocalFrame*, RefPtr<FileChooser>) override;
+  void OpenFileChooser(LocalFrame*, scoped_refptr<FileChooser>) override;
 
   void SetCursor(const Cursor&, LocalFrame* local_root) override {}
   void SetCursorOverridden(bool) override {}
@@ -218,14 +218,15 @@ class CORE_EXPORT EmptyChromeClient : public ChromeClient {
 
   void RegisterPopupOpeningObserver(PopupOpeningObserver*) override {}
   void UnregisterPopupOpeningObserver(PopupOpeningObserver*) override {}
-  void NotifyPopupOpeningObservers() const {}
+  void NotifyPopupOpeningObservers() const override {}
 
   void SetCursorForPlugin(const WebCursorInfo&, LocalFrame*) override {}
 
   void InstallSupplements(LocalFrame&) override {}
 
   std::unique_ptr<WebFrameScheduler> CreateFrameScheduler(
-      BlameContext*) override;
+      BlameContext*,
+      WebFrameScheduler::FrameType) override;
 };
 
 class CORE_EXPORT EmptyLocalFrameClient : public LocalFrameClient {
@@ -348,7 +349,7 @@ class CORE_EXPORT EmptyLocalFrameClient : public LocalFrameClient {
 
   WebCookieJar* CookieJar() const override { return 0; }
 
-  service_manager::InterfaceProvider* GetInterfaceProvider() {
+  service_manager::InterfaceProvider* GetInterfaceProvider() override {
     return &interface_provider_;
   }
 
@@ -363,16 +364,12 @@ class CORE_EXPORT EmptyLocalFrameClient : public LocalFrameClient {
       WebApplicationCacheHostClient*) override;
 
   TextCheckerClient& GetTextCheckerClient() const override;
-  std::unique_ptr<WebURLLoader> CreateURLLoader(
-      const ResourceRequest& request,
-      WebTaskRunner* task_runner) override {
-    // TODO(yhirano): Stop using Platform::CreateURLLoader() here.
-    WrappedResourceRequest wrapped(request);
-    return Platform::Current()->CreateURLLoader(
-        wrapped, task_runner->ToSingleThreadTaskRunner());
+  std::unique_ptr<WebURLLoaderFactory> CreateURLLoaderFactory() override {
+    return Platform::Current()->CreateDefaultURLLoaderFactory();
   }
 
   void AnnotatedRegionsChanged() override {}
+  String GetInstrumentationToken() override { return g_empty_string; };
 
  protected:
   EmptyLocalFrameClient() {}
@@ -461,7 +458,7 @@ class CORE_EXPORT EmptyRemoteFrameClient : public RemoteFrameClient {
   void Reload(FrameLoadType, ClientRedirectPolicy) override {}
   unsigned BackForwardLength() override { return 0; }
   void ForwardPostMessage(MessageEvent*,
-                          RefPtr<SecurityOrigin> target,
+                          scoped_refptr<SecurityOrigin> target,
                           LocalFrame* source_frame) const override {}
   void FrameRectsChanged(const IntRect& frame_rect) override {}
   void UpdateRemoteViewportIntersection(

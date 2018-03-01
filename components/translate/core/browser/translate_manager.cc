@@ -11,12 +11,11 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
-#include "components/metrics/proto/translate_event.pb.h"
+#include "components/language/core/browser/language_model.h"
 #include "components/prefs/pref_service.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/translate/core/browser/page_translated_details.h"
@@ -40,6 +39,7 @@
 #include "net/base/network_change_notifier.h"
 #include "net/base/url_util.h"
 #include "net/http/http_status_code.h"
+#include "third_party/metrics_proto/translate_event.pb.h"
 
 namespace translate {
 
@@ -48,7 +48,7 @@ const base::Feature kTranslateLanguageByULP{"TranslateLanguageByULP",
 namespace {
 
 // Callbacks for translate errors.
-TranslateManager::TranslateErrorCallbackList* g_callback_list_ = NULL;
+TranslateManager::TranslateErrorCallbackList* g_callback_list_ = nullptr;
 
 const char kReportLanguageDetectionErrorURL[] =
     "https://translate.google.com/translate_error?client=cr&action=langidc";
@@ -127,15 +127,14 @@ TranslateManager::RegisterTranslateErrorCallback(
   return g_callback_list_->Add(callback);
 }
 
-TranslateManager::TranslateManager(
-    TranslateClient* translate_client,
-    TranslateRanker* translate_ranker,
-    const std::string& accept_languages_pref_name)
+TranslateManager::TranslateManager(TranslateClient* translate_client,
+                                   TranslateRanker* translate_ranker,
+                                   language::LanguageModel* language_model)
     : page_seq_no_(0),
-      accept_languages_pref_name_(accept_languages_pref_name),
       translate_client_(translate_client),
       translate_driver_(translate_client_->GetTranslateDriver()),
       translate_ranker_(translate_ranker),
+      language_model_(language_model),
       language_state_(translate_driver_),
       translate_event_(base::MakeUnique<metrics::TranslateEventProto>()),
       weak_method_factory_(this) {}
@@ -145,11 +144,6 @@ base::WeakPtr<TranslateManager> TranslateManager::GetWeakPtr() {
 }
 
 void TranslateManager::InitiateTranslation(const std::string& page_lang) {
-  // TODO(rogerm): Remove ScopedTracker below once crbug.com/646711 is closed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "646711 translate::TranslateManager::InitiateTranslation"));
-
   // Short-circuit out if not in a state where initiating translation makes
   // sense (this method may be called muhtiple times for a given page).
   if (!language_state_.page_needs_translation() ||
@@ -180,7 +174,8 @@ void TranslateManager::InitiateTranslation(const std::string& page_lang) {
   if (!translate_prefs->IsEnabled()) {
     TranslateBrowserMetrics::ReportInitiationStatus(
         TranslateBrowserMetrics::INITIATION_STATUS_DISABLED_BY_PREFS);
-    std::string target_lang = GetTargetLanguage(translate_prefs.get());
+    std::string target_lang =
+        GetTargetLanguage(translate_prefs.get(), language_model_);
     std::string language_code =
         TranslateDownloadManager::GetLanguageCode(page_lang);
     InitTranslateEvent(language_code, target_lang, *translate_prefs);
@@ -208,7 +203,8 @@ void TranslateManager::InitiateTranslation(const std::string& page_lang) {
     return;
   }
 
-  std::string target_lang = GetTargetLanguage(translate_prefs.get());
+  std::string target_lang =
+      GetTargetLanguage(translate_prefs.get(), language_model_);
   std::string language_code =
       TranslateDownloadManager::GetLanguageCode(page_lang);
 
@@ -364,7 +360,7 @@ void TranslateManager::TranslatePage(const std::string& original_source_lang,
       TranslateErrors::NONE, triggered_from_menu);
 
   TranslateScript* script = TranslateDownloadManager::GetInstance()->script();
-  DCHECK(script != NULL);
+  DCHECK(script != nullptr);
 
   const std::string& script_data = script->data();
   if (!script_data.empty()) {
@@ -481,28 +477,41 @@ void TranslateManager::OnTranslateScriptFetchComplete(
 }
 
 // static
-std::string TranslateManager::GetTargetLanguage(const TranslatePrefs* prefs) {
-  // Get target language from ULP if the ULP experiment is enabled.
-  std::string language = TranslateManager::GetTargetLanguageFromULP(prefs);
-  if (!language.empty())
-    return language;
+std::string TranslateManager::GetTargetLanguage(
+    const TranslatePrefs* prefs,
+    language::LanguageModel* language_model) {
+  if (language_model) {
+    // Use the first language from the model that translate supports.
+    for (const auto& lang : language_model->GetLanguages()) {
+      std::string lang_code =
+          TranslateDownloadManager::GetLanguageCode(lang.lang_code);
+      translate::ToTranslateLanguageSynonym(&lang_code);
+      if (TranslateDownloadManager::IsSupportedLanguage(lang_code))
+        return lang_code;
+    }
+  } else {
+    // Get target language from ULP if the ULP experiment is enabled.
+    std::string language = TranslateManager::GetTargetLanguageFromULP(prefs);
+    if (!language.empty())
+      return language;
 
-  // Get the browser's user interface language.
-  language = TranslateDownloadManager::GetLanguageCode(
-      TranslateDownloadManager::GetInstance()->application_locale());
-  // Map 'he', 'nb', 'fil' back to 'iw', 'no', 'tl'
-  translate::ToTranslateLanguageSynonym(&language);
-  if (TranslateDownloadManager::IsSupportedLanguage(language))
-    return language;
+    // Get the browser's user interface language.
+    language = TranslateDownloadManager::GetLanguageCode(
+        TranslateDownloadManager::GetInstance()->application_locale());
+    // Map 'he', 'nb', 'fil' back to 'iw', 'no', 'tl'
+    translate::ToTranslateLanguageSynonym(&language);
+    if (TranslateDownloadManager::IsSupportedLanguage(language))
+      return language;
 
-  // Will translate to the first supported language on the Accepted Language
-  // list or not at all if no such candidate exists.
-  std::vector<std::string> accept_languages_list;
-  prefs->GetLanguageList(&accept_languages_list);
-  for (const auto& lang : accept_languages_list) {
-    std::string lang_code = TranslateDownloadManager::GetLanguageCode(lang);
-    if (TranslateDownloadManager::IsSupportedLanguage(lang_code))
-      return lang_code;
+    // Will translate to the first supported language on the Accepted Language
+    // list or not at all if no such candidate exists.
+    std::vector<std::string> accept_languages_list;
+    prefs->GetLanguageList(&accept_languages_list);
+    for (const auto& lang : accept_languages_list) {
+      std::string lang_code = TranslateDownloadManager::GetLanguageCode(lang);
+      if (TranslateDownloadManager::IsSupportedLanguage(lang_code))
+        return lang_code;
+    }
   }
 
   return std::string();

@@ -10,7 +10,8 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "chromeos/components/tether/initializer.h"
+#include "base/timer/timer.h"
+#include "chromeos/components/tether/tether_component.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/network/network_state_handler.h"
@@ -40,7 +41,7 @@ class TetherService : public KeyedService,
                       public cryptauth::CryptAuthDeviceManager::Observer,
                       public device::BluetoothAdapter::Observer,
                       public chromeos::NetworkStateHandlerObserver,
-                      public chromeos::tether::Initializer::Observer {
+                      public chromeos::tether::TetherComponent::Observer {
  public:
   TetherService(Profile* profile,
                 chromeos::PowerManagerClient* power_manager_client,
@@ -87,7 +88,7 @@ class TetherService : public KeyedService,
   // chromeos::NetworkStateHandlerObserver:
   void DeviceListChanged() override;
 
-  // chromeos::tether::Initializer::Observer:
+  // chromeos::tether::TetherComponent::Observer:
   void OnShutdownComplete() override;
 
   // Callback when the controlling pref changes.
@@ -130,6 +131,9 @@ class TetherService : public KeyedService,
   FRIEND_TEST_ALL_PREFIXES(TetherServiceTest, TestEnabled);
   FRIEND_TEST_ALL_PREFIXES(TetherServiceTest, TestBluetoothNotification);
   FRIEND_TEST_ALL_PREFIXES(TetherServiceTest, TestBluetoothNotPresent);
+  FRIEND_TEST_ALL_PREFIXES(TetherServiceTest,
+                           TestBluetoothNotPresent_FalsePositive);
+  FRIEND_TEST_ALL_PREFIXES(TetherServiceTest, TestWifiNotPresent);
 
   // Reflects InstantTethering_TechnologyStateAndReason enum in enums.xml. Do
   // not rearrange.
@@ -144,8 +148,12 @@ class TetherService : public KeyedService,
     USER_PREFERENCE_DISABLED = 7,
     ENABLED = 8,
     BLE_NOT_PRESENT = 9,
+    WIFI_NOT_PRESENT = 10,
     TETHER_FEATURE_STATE_MAX
   };
+
+  // For debug logs.
+  static std::string TetherFeatureStateToString(TetherFeatureState state);
 
   void OnBluetoothAdapterFetched(
       scoped_refptr<device::BluetoothAdapter> adapter);
@@ -165,6 +173,8 @@ class TetherService : public KeyedService,
   bool IsBluetoothPresent() const;
   bool IsBluetoothPowered() const;
 
+  bool IsWifiPresent() const;
+
   bool IsCellularAvailableButNotEnabled() const;
 
   // Whether Tether is allowed to be used. If the controlling preference
@@ -180,9 +190,14 @@ class TetherService : public KeyedService,
   // Record to UMA Tether's current feature state.
   void RecordTetherFeatureState();
 
+  // Attempt to record the current Tether FeatureState.
+  void RecordTetherFeatureStateIfPossible();
+
   void SetNotificationPresenterForTest(
       std::unique_ptr<chromeos::tether::NotificationPresenter>
           notification_presenter);
+
+  void SetTimerForTest(std::unique_ptr<base::Timer> timer);
 
   // Whether the service has been shut down.
   bool shut_down_ = false;
@@ -191,7 +206,19 @@ class TetherService : public KeyedService,
   // was closed).
   bool suspended_ = false;
 
+  // Whether the BLE advertising interval has attempted to be set during this
+  // session.
   bool has_attempted_to_set_ble_advertising_interval_ = false;
+
+  // The first report of TetherFeatureState::BLE_NOT_PRESENT is usually
+  // incorrect and hence is a false positive. This property tracks if the first
+  // report has been hit yet.
+  bool ble_not_present_false_positive_encountered_ = false;
+
+  // The TetherFeatureState obtained the last time that
+  // GetTetherTechnologyState() was called. Used only for logging purposes.
+  TetherFeatureState previous_feature_state_ =
+      TetherFeatureState::TETHER_FEATURE_STATE_MAX;
 
   Profile* profile_;
   chromeos::PowerManagerClient* power_manager_client_;
@@ -200,10 +227,11 @@ class TetherService : public KeyedService,
   chromeos::NetworkStateHandler* network_state_handler_;
   std::unique_ptr<chromeos::tether::NotificationPresenter>
       notification_presenter_;
-  std::unique_ptr<chromeos::tether::Initializer> initializer_;
+  std::unique_ptr<chromeos::tether::TetherComponent> tether_component_;
 
   PrefChangeRegistrar registrar_;
   scoped_refptr<device::BluetoothAdapter> adapter_;
+  std::unique_ptr<base::Timer> timer_;
 
   base::WeakPtrFactory<TetherService> weak_ptr_factory_;
 

@@ -8,6 +8,7 @@
 #include "components/safe_browsing/base_ui_manager.h"
 #include "components/safe_browsing/browser/threat_details.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
+#include "components/safe_browsing/features.h"
 #include "components/security_interstitials/content/unsafe_resource.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -25,6 +26,9 @@ bool TriggerNeedsScout(const TriggerType trigger_type) {
     case TriggerType::AD_SAMPLE:
       // Ad samples need Scout-level opt-in.
       return true;
+    case TriggerType::GAIA_PASSWORD_REUSE:
+      // Gaia password reuses only need legacy SBER opt-in.
+      return false;
   }
   // By default, require Scout so we are more restrictive on data collection.
   return true;
@@ -40,6 +44,11 @@ bool TriggerNeedsOptInForCollection(const TriggerType trigger_type) {
       // Ad samples happen in the background so the user must already be opted
       // in before the trigger is allowed to run.
       return true;
+    case TriggerType::GAIA_PASSWORD_REUSE:
+      // For Gaia password reuses, it is unlikely for users to change opt-in
+      // while the trigger runs, so we require opt-in for collection to avoid
+      // overheads.
+      return true;
   }
   // By default, require opt-in for all triggers.
   return true;
@@ -47,6 +56,15 @@ bool TriggerNeedsOptInForCollection(const TriggerType trigger_type) {
 
 bool CanSendReport(const SBErrorOptions& error_display_options,
                    const TriggerType trigger_type) {
+  // If the |kAdSamplerCollectButDontSendFeature| feature is enabled then we
+  // will overlook other checks to force the report to be created (which is safe
+  // because we ensure it will be discarded downstream).
+  // TODO(crbug.com/776893): Remote the feature and this logic.
+  if (trigger_type == TriggerType::AD_SAMPLE &&
+      base::FeatureList::IsEnabled(kAdSamplerCollectButDontSendFeature)) {
+    return true;
+  }
+
   // Some triggers require that users are eligible for elevated Scout data
   // collection in order to run.
   bool scout_check_ok = !TriggerNeedsScout(trigger_type) ||
@@ -84,12 +102,22 @@ SBErrorOptions TriggerManager::GetSBErrorDisplayOptions(
                         IsScout(pref_service),
                         /*is_proceed_anyway_disabled=*/false,
                         /*should_open_links_in_new_tab=*/false,
+                        /*show_back_to_safety_button=*/true,
                         /*help_center_article_link=*/std::string());
 }
 
 bool TriggerManager::CanStartDataCollection(
     const SBErrorOptions& error_display_options,
     const TriggerType trigger_type) {
+  // If the |kAdSamplerCollectButDontSendFeature| feature is enabled then we
+  // will overlook other checks to force the report to be created (which is safe
+  // because we ensure it will be discarded downstream).
+  // TODO(crbug.com/776893): Remote the feature and this logic.
+  if (trigger_type == TriggerType::AD_SAMPLE &&
+      base::FeatureList::IsEnabled(kAdSamplerCollectButDontSendFeature)) {
+    return true;
+  }
+
   // Some triggers require that the user be opted-in to extended reporting in
   // order to run, while others can run without opt-in (eg: because users are
   // prompted for opt-in as part of the trigger).

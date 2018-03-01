@@ -9,6 +9,7 @@ cr.define('extension_detail_view_tests', function() {
     Layout: 'layout',
     ClickableElements: 'clickable elements',
     Indicator: 'indicator',
+    Warnings: 'warnings',
   };
 
   suite('ExtensionItemTest', function() {
@@ -26,10 +27,6 @@ cr.define('extension_detail_view_tests', function() {
 
     /** @type {extension_test_util.MockItemDelegate} */
     var mockDelegate;
-
-    suiteSetup(function() {
-      return PolymerTest.importHtml('chrome://extensions/item.html');
-    });
 
     // Initialize an extension item before each test.
     setup(function() {
@@ -51,7 +48,7 @@ cr.define('extension_detail_view_tests', function() {
     test(assert(TestNames.Layout), function() {
       Polymer.dom.flush();
 
-      extension_test_util.testIronIcons(item);
+      extension_test_util.testIcons(item);
 
       var testIsVisible = extension_test_util.isVisible.bind(null, item);
       expectTrue(testIsVisible('#close-button'));
@@ -68,11 +65,7 @@ cr.define('extension_detail_view_tests', function() {
         {key: 'runOnAllUrls', id: '#allow-on-all-sites'},
         {key: 'errorCollection', id: '#collect-errors'},
       ];
-      var isChecked = function(id) {
-        var el = item.$$(id);
-        assert(el, id);
-        return el.hasAttribute('checked');
-      };
+      var isChecked = id => item.$$(id).checked;
       for (let option of accessOptions) {
         expectTrue(extension_test_util.isVisible(item, option.id));
         expectFalse(isChecked(option.id), option.id);
@@ -128,16 +121,16 @@ cr.define('extension_detail_view_tests', function() {
       item.set('data.optionsPage', {openInTab: true, url: optionsUrl});
       Polymer.dom.flush();
       mockDelegate.testClickingCalls(
-          item.$$('#allow-incognito'), 'setItemAllowedIncognito',
+          item.$$('#allow-incognito').getLabel(), 'setItemAllowedIncognito',
           [extensionData.id, true]);
       mockDelegate.testClickingCalls(
-          item.$$('#allow-on-file-urls'), 'setItemAllowedOnFileUrls',
+          item.$$('#allow-on-file-urls').getLabel(), 'setItemAllowedOnFileUrls',
           [extensionData.id, true]);
       mockDelegate.testClickingCalls(
-          item.$$('#allow-on-all-sites'), 'setItemAllowedOnAllSites',
+          item.$$('#allow-on-all-sites').getLabel(), 'setItemAllowedOnAllSites',
           [extensionData.id, true]);
       mockDelegate.testClickingCalls(
-          item.$$('#collect-errors'), 'setItemCollectsErrors',
+          item.$$('#collect-errors').getLabel(), 'setItemCollectsErrors',
           [extensionData.id, true]);
       mockDelegate.testClickingCalls(
           item.$$('#extensions-options'), 'showItemOptionsPage',
@@ -152,6 +145,62 @@ cr.define('extension_detail_view_tests', function() {
       item.set('data.controlledInfo', {type: 'POLICY', text: 'policy'});
       Polymer.dom.flush();
       expectFalse(indicator.hidden);
+    });
+
+    test(assert(TestNames.Warnings), function() {
+      var testWarningVisible = function(id, isVisible) {
+        var f = isVisible ? expectTrue : expectFalse;
+        f(extension_test_util.isVisible(item, id));
+      }
+
+      testWarningVisible('#corrupted-warning', false);
+      testWarningVisible('#suspicious-warning', false);
+      testWarningVisible('#blacklisted-warning', false);
+      testWarningVisible('#update-required-warning', false);
+
+      item.set('data.disableReasons.corruptInstall', true);
+      Polymer.dom.flush();
+      testWarningVisible('#corrupted-warning', true);
+      testWarningVisible('#suspicious-warning', false);
+      testWarningVisible('#blacklisted-warning', false);
+      testWarningVisible('#update-required-warning', false);
+
+      item.set('data.disableReasons.suspiciousInstall', true);
+      Polymer.dom.flush();
+      testWarningVisible('#corrupted-warning', true);
+      testWarningVisible('#suspicious-warning', true);
+      testWarningVisible('#blacklisted-warning', false);
+      testWarningVisible('#update-required-warning', false);
+
+      item.set('data.blacklistText', 'This item is blacklisted');
+      Polymer.dom.flush();
+      testWarningVisible('#corrupted-warning', true);
+      testWarningVisible('#suspicious-warning', true);
+      testWarningVisible('#blacklisted-warning', true);
+      testWarningVisible('#update-required-warning', false);
+
+      item.set('data.blacklistText', undefined);
+      Polymer.dom.flush();
+      testWarningVisible('#corrupted-warning', true);
+      testWarningVisible('#suspicious-warning', true);
+      testWarningVisible('#blacklisted-warning', false);
+      testWarningVisible('#update-required-warning', false);
+
+      item.set('data.disableReasons.updateRequired', true);
+      Polymer.dom.flush();
+      testWarningVisible('#corrupted-warning', true);
+      testWarningVisible('#suspicious-warning', true);
+      testWarningVisible('#blacklisted-warning', false);
+      testWarningVisible('#update-required-warning', true);
+
+      item.set('data.disableReasons.corruptInstall', false);
+      item.set('data.disableReasons.suspiciousInstall', false);
+      item.set('data.disableReasons.updateRequired', false);
+      Polymer.dom.flush();
+      testWarningVisible('#corrupted-warning', false);
+      testWarningVisible('#suspicious-warning', false);
+      testWarningVisible('#blacklisted-warning', false);
+      testWarningVisible('#update-required-warning', false);
     });
   });
 

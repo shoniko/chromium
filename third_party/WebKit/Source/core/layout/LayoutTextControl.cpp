@@ -23,8 +23,9 @@
 #include "core/layout/LayoutTextControl.h"
 
 #include "core/css/StyleChangeReason.h"
-#include "core/html/TextControlElement.h"
+#include "core/html/forms/TextControlElement.h"
 #include "core/layout/HitTestResult.h"
+#include "core/page/Page.h"
 #include "platform/scroll/ScrollbarTheme.h"
 
 namespace blink {
@@ -79,6 +80,7 @@ void LayoutTextControl::AdjustInnerEditorStyle(
   // element.
   text_block_style.SetDirection(Style()->Direction());
   text_block_style.SetUnicodeBidi(Style()->GetUnicodeBidi());
+  text_block_style.SetUserSelect(EUserSelect::kText);
 
   UpdateUserModifyProperty(*GetTextControlElement(), text_block_style);
 }
@@ -110,7 +112,7 @@ void LayoutTextControl::UpdateFromElement() {
 int LayoutTextControl::ScrollbarThickness() const {
   // FIXME: We should get the size of the scrollbar from the LayoutTheme
   // instead.
-  return ScrollbarTheme::GetTheme().ScrollbarThickness();
+  return GetDocument().GetPage()->GetScrollbarTheme().ScrollbarThickness();
 }
 
 void LayoutTextControl::ComputeLogicalHeight(

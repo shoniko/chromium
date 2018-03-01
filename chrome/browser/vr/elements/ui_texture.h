@@ -39,9 +39,9 @@ class UiTexture {
   virtual bool HitTest(const gfx::PointF& point) const;
 
   bool dirty() const { return dirty_; }
-  void set_ready_for_testing() { dirty_ = false; }
 
   void SetMode(ColorScheme::Mode mode);
+  void OnInitialized();
 
   // This function sets |font_list| to a list of available fonts for |text|. If
   // no font supports |text|, it returns false and leave |font_list| untouched.
@@ -82,7 +82,9 @@ class UiTexture {
       TextAlignment text_alignment,
       WrappingBehavior wrapping_behavior);
 
-  static std::unique_ptr<gfx::RenderText> CreateRenderText(
+  static std::unique_ptr<gfx::RenderText> CreateRenderText();
+
+  static std::unique_ptr<gfx::RenderText> CreateConfiguredRenderText(
       const base::string16& text,
       const gfx::FontList& font_list,
       SkColor color,

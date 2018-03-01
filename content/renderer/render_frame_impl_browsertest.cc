@@ -9,7 +9,6 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "content/child/web_url_loader_impl.h"
 #include "content/common/frame_messages.h"
 #include "content/common/frame_owner_properties.h"
 #include "content/common/renderer.mojom.h"
@@ -19,6 +18,7 @@
 #include "content/public/test/frame_load_waiter.h"
 #include "content/public/test/render_view_test.h"
 #include "content/public/test/test_utils.h"
+#include "content/renderer/loader/web_url_loader_impl.h"
 #include "content/renderer/navigation_state_impl.h"
 #include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_view_impl.h"
@@ -76,8 +76,9 @@ class RenderFrameImplTest : public RenderViewTest {
 
     RenderFrameImpl::CreateFrame(
         kSubframeRouteId, MSG_ROUTING_NONE, MSG_ROUTING_NONE,
-        kFrameProxyRouteId, MSG_ROUTING_NONE, frame_replication_state,
-        &compositor_deps_, widget_params, FrameOwnerProperties());
+        kFrameProxyRouteId, MSG_ROUTING_NONE, base::UnguessableToken::Create(),
+        frame_replication_state, &compositor_deps_, widget_params,
+        FrameOwnerProperties());
 
     frame_ = RenderFrameImpl::FromRoutingID(kSubframeRouteId);
     EXPECT_FALSE(frame_->is_main_frame_);

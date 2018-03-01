@@ -17,8 +17,6 @@
 #include "content/common/edit_command.h"
 #include "content/common/input/input_event.h"
 #include "content/common/input/input_event_ack.h"
-#include "content/common/input/input_event_ack_source.h"
-#include "content/common/input/input_event_ack_state.h"
 #include "content/common/input/input_event_dispatch_type.h"
 #include "content/common/input/input_param_traits.h"
 #include "content/common/input/synthetic_gesture_params.h"
@@ -28,6 +26,8 @@
 #include "content/common/input/synthetic_smooth_drag_gesture_params.h"
 #include "content/common/input/synthetic_smooth_scroll_gesture_params.h"
 #include "content/common/input/synthetic_tap_gesture_params.h"
+#include "content/public/common/input_event_ack_source.h"
+#include "content/public/common/input_event_ack_state.h"
 #include "ipc/ipc_message_macros.h"
 #include "third_party/WebKit/public/platform/WebInputEvent.h"
 #include "third_party/WebKit/public/platform/WebPointerProperties.h"
@@ -292,10 +292,12 @@ IPC_MESSAGE_ROUTED2(InputMsg_SelectRange,
 // Sent by the browser to ask the renderer to adjust the selection start and
 // end points by the given amounts. A negative amount moves the selection
 // towards the beginning of the document, a positive amount moves the selection
-// towards the end of the document.
-IPC_MESSAGE_ROUTED2(InputMsg_AdjustSelectionByCharacterOffset,
+// towards the end of the document. Will send show selection menu event when
+// needed.
+IPC_MESSAGE_ROUTED3(InputMsg_AdjustSelectionByCharacterOffset,
                     int /* start_adjust*/,
-                    int /* end_adjust */)
+                    int /* end_adjust */,
+                    bool /* show_selection_menu */)
 
 // Requests the renderer to move the selection extent point to a new position.
 // Expects a MoveRangeSelectionExtent_ACK message when finished.

@@ -42,6 +42,7 @@
 #include "content/browser/service_worker/service_worker_fetch_dispatcher.h"
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/browser/service_worker/service_worker_test_utils.h"
+#include "content/browser/service_worker/service_worker_type_converters.h"
 #include "content/browser/service_worker/service_worker_version.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/service_worker/service_worker_messages.h"
@@ -51,6 +52,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/resource_dispatcher_host.h"
@@ -83,6 +85,9 @@
 #include "storage/browser/blob/blob_data_snapshot.h"
 #include "storage/browser/blob/blob_reader.h"
 #include "storage/browser/blob/blob_storage_context.h"
+#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_event_status.mojom.h"
+#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_object.mojom.h"
+#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_registration.mojom.h"
 
 namespace content {
 
@@ -328,13 +333,13 @@ void CountScriptResources(
   int version_id;
   size_t index = infos.size() - 1;
   if (infos[index].installing_version.version_id !=
-      kInvalidServiceWorkerVersionId)
+      blink::mojom::kInvalidServiceWorkerVersionId)
     version_id = infos[index].installing_version.version_id;
   else if (infos[index].waiting_version.version_id !=
-           kInvalidServiceWorkerVersionId)
+           blink::mojom::kInvalidServiceWorkerVersionId)
     version_id = infos[1].waiting_version.version_id;
   else if (infos[index].active_version.version_id !=
-           kInvalidServiceWorkerVersionId)
+           blink::mojom::kInvalidServiceWorkerVersionId)
     version_id = infos[index].active_version.version_id;
   else
     return;
@@ -415,13 +420,13 @@ net::HttpResponseInfo CreateHttpResponseInfo() {
   return info;
 }
 
-const std::string kNavigationPreloadAbortError =
-    "The service worker navigation preload request was cancelled before "
-    "'preloadResponse' settled. If you intend to use 'preloadResponse', use "
-    "waitUntil() or respondWith() to wait for the promise to settle.";
-const std::string kNavigationPreloadNetworkError =
-    "The service worker navigation preload request failed with a network "
-    "error.";
+const char kNavigationPreloadAbortError[] =
+    "NetworkError: The service worker navigation preload request was cancelled "
+    "before 'preloadResponse' settled. If you intend to use 'preloadResponse', "
+    "use waitUntil() or respondWith() to wait for the promise to settle.";
+const char kNavigationPreloadNetworkError[] =
+    "NetworkError: The service worker navigation preload request failed with "
+    "a network error.";
 
 }  // namespace
 
@@ -467,7 +472,8 @@ class ServiceWorkerBrowserTest : public ContentBrowserTest {
 
   void AssociateRendererProcessToPattern(const GURL& pattern) {
     wrapper_->process_manager()->AddProcessReferenceToPattern(
-        pattern, shell()->web_contents()->GetRenderProcessHost()->GetID());
+        pattern,
+        shell()->web_contents()->GetMainFrame()->GetProcess()->GetID());
   }
 
  private:
@@ -592,14 +598,12 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
     ASSERT_EQ(expected_status, status);
 
     // Stop the worker.
-    status = SERVICE_WORKER_ERROR_FAILED;
     base::RunLoop stop_run_loop;
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::BindOnce(&self::StopOnIOThread, base::Unretained(this),
-                       stop_run_loop.QuitClosure(), &status));
+                       stop_run_loop.QuitClosure()));
     stop_run_loop.Run();
-    ASSERT_EQ(SERVICE_WORKER_OK, status);
   }
 
   void ActivateTestHelper(
@@ -642,7 +646,7 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
     const GURL pattern = embedded_test_server()->GetURL("/service_worker/");
     registration_ = new ServiceWorkerRegistration(
-        ServiceWorkerRegistrationOptions(pattern),
+        blink::mojom::ServiceWorkerRegistrationOptions(pattern),
         wrapper()->context()->storage()->NewRegistrationId(),
         wrapper()->context()->AsWeakPtr());
     // Set the update check time to avoid triggering updates in the middle of
@@ -709,16 +713,14 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
     ASSERT_EQ(expected_status, status);
   }
 
-  void StopWorker(ServiceWorkerStatusCode expected_status) {
+  void StopWorker() {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_FAILED;
     base::RunLoop stop_run_loop;
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::BindOnce(&self::StopOnIOThread, base::Unretained(this),
-                       stop_run_loop.QuitClosure(), &status));
+                       stop_run_loop.QuitClosure()));
     stop_run_loop.Run();
-    ASSERT_EQ(expected_status, status);
   }
 
   void StoreRegistration(int64_t version_id,
@@ -785,7 +787,6 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
   void InstallOnIOThread(const base::Closure& done,
                          ServiceWorkerStatusCode* result) {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    version_->SetStatus(ServiceWorkerVersion::INSTALLING);
     version_->RunAfterStartWorker(
         ServiceWorkerMetrics::EventType::INSTALL,
         base::BindOnce(&self::DispatchInstallEventOnIOThread,
@@ -796,6 +797,7 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
   void DispatchInstallEventOnIOThread(const base::Closure& done,
                                       ServiceWorkerStatusCode* result) {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    version_->SetStatus(ServiceWorkerVersion::INSTALLING);
     int request_id =
         version_->StartRequest(ServiceWorkerMetrics::EventType::INSTALL,
                                CreateReceiver(BrowserThread::UI, done, result));
@@ -807,20 +809,22 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
                        base::Unretained(this), done, result, request_id));
   }
 
-  void ReceiveInstallEventOnIOThread(const base::Closure& done,
-                                     ServiceWorkerStatusCode* out_result,
-                                     int request_id,
-                                     ServiceWorkerStatusCode status,
-                                     bool has_fetch_handler,
-                                     base::Time dispatch_event_time) {
-    version_->FinishRequest(request_id, status == SERVICE_WORKER_OK,
-                            dispatch_event_time);
+  void ReceiveInstallEventOnIOThread(
+      const base::Closure& done,
+      ServiceWorkerStatusCode* out_result,
+      int request_id,
+      blink::mojom::ServiceWorkerEventStatus status,
+      bool has_fetch_handler,
+      base::Time dispatch_event_time) {
+    version_->FinishRequest(
+        request_id, status == blink::mojom::ServiceWorkerEventStatus::COMPLETED,
+        dispatch_event_time);
     version_->set_fetch_handler_existence(
         has_fetch_handler
             ? ServiceWorkerVersion::FetchHandlerExistence::EXISTS
             : ServiceWorkerVersion::FetchHandlerExistence::DOES_NOT_EXIST);
 
-    *out_result = status;
+    *out_result = mojo::ConvertTo<ServiceWorkerStatusCode>(status);
     if (!done.is_null())
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, done);
   }
@@ -839,8 +843,6 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
   void ActivateOnIOThread(const base::Closure& done,
                           ServiceWorkerStatusCode* result) {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    version_->SetStatus(ServiceWorkerVersion::ACTIVATING);
-    registration_->SetActiveVersion(version_.get());
     version_->RunAfterStartWorker(
         ServiceWorkerMetrics::EventType::ACTIVATE,
         base::BindOnce(&self::DispatchActivateEventOnIOThread,
@@ -851,6 +853,8 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
   void DispatchActivateEventOnIOThread(const base::Closure& done,
                                        ServiceWorkerStatusCode* result) {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    version_->SetStatus(ServiceWorkerVersion::ACTIVATING);
+    registration_->SetActiveVersion(version_.get());
     int request_id =
         version_->StartRequest(ServiceWorkerMetrics::EventType::INSTALL,
                                CreateReceiver(BrowserThread::UI, done, result));
@@ -886,7 +890,7 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
       ServiceWorkerFetchEventResult actual_result,
       const ServiceWorkerResponse& actual_response,
       blink::mojom::ServiceWorkerStreamHandlePtr /* stream */,
-      storage::mojom::BlobPtr /* blob */,
+      blink::mojom::BlobPtr /* blob */,
       const scoped_refptr<ServiceWorkerVersion>& worker) {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
     ASSERT_TRUE(fetch_dispatcher_);
@@ -912,10 +916,9 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
                       base::RetainedRef(blob_context), result);
   }
 
-  void StopOnIOThread(const base::Closure& done,
-                      ServiceWorkerStatusCode* result) {
+  void StopOnIOThread(const base::Closure& done) {
     ASSERT_TRUE(version_.get());
-    version_->StopWorker(CreateReceiver(BrowserThread::UI, done, result));
+    version_->StopWorker(done);
   }
 
  protected:
@@ -943,14 +946,12 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserTest, StartAndStop) {
   ASSERT_EQ(SERVICE_WORKER_OK, status);
 
   // Stop the worker.
-  status = SERVICE_WORKER_ERROR_FAILED;
   base::RunLoop stop_run_loop;
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::BindOnce(&self::StopOnIOThread, base::Unretained(this),
-                     stop_run_loop.QuitClosure(), &status));
+                     stop_run_loop.QuitClosure()));
   stop_run_loop.Run();
-  ASSERT_EQ(SERVICE_WORKER_OK, status);
 }
 
 IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserTest, StartNotFound) {
@@ -1030,7 +1031,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserTest,
 
   // Start the broken worker. We'll fail to read from disk and the worker should
   // be doomed.
-  StopWorker(SERVICE_WORKER_OK);  // in case it's already running
+  StopWorker();  // in case it's already running
   StartWorker(SERVICE_WORKER_ERROR_DISK_CACHE);
   EXPECT_EQ(ServiceWorkerVersion::REDUNDANT, version_->status());
 
@@ -1337,11 +1338,16 @@ class MockContentBrowserClient : public TestContentBrowserClient {
 class ServiceWorkerVersionOffMainThreadFetchTest
     : public ServiceWorkerVersionBrowserTest {
  public:
-  ~ServiceWorkerVersionOffMainThreadFetchTest() override {}
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitchASCII(switches::kEnableFeatures,
-                                    features::kOffMainThreadFetch.name);
+  ServiceWorkerVersionOffMainThreadFetchTest() {
+    scoped_feature_list_.InitAndEnableFeature(features::kOffMainThreadFetch);
   }
+
+  ~ServiceWorkerVersionOffMainThreadFetchTest() override {}
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+
+  DISALLOW_COPY_AND_ASSIGN(ServiceWorkerVersionOffMainThreadFetchTest);
 };
 
 IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserTest, FetchWithSaveData) {
@@ -1659,7 +1665,8 @@ class ServiceWorkerNavigationPreloadTest : public ServiceWorkerBrowserTest {
  private:
   class CustomResponse : public net::test_server::HttpResponse {
    public:
-    CustomResponse(const std::string& response) : response_(response) {}
+    explicit CustomResponse(const std::string& response)
+        : response_(response) {}
     ~CustomResponse() override {}
 
     void SendResponse(
@@ -1982,8 +1989,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest, NetworkError) {
   title_watcher.AlsoWaitForTitle(base::ASCIIToUTF16("RESOLVED"));
   NavigateToURL(shell(), page_url);
   EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
-  EXPECT_EQ("NetworkError: " + kNavigationPreloadNetworkError,
-            GetTextContent());
+  EXPECT_EQ(kNavigationPreloadNetworkError, GetTextContent());
 
   console_observer->WaitForConsoleMessages(1);
   const base::string16 expected =
@@ -2006,7 +2012,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest,
       kWorkerUrl, kEnableNavigationPreloadScript + kPreloadResponseTestScript,
       "text/javascript");
 
-  EXPECT_EQ("NetworkError: " + kNavigationPreloadAbortError,
+  EXPECT_EQ(kNavigationPreloadAbortError,
             LoadNavigationPreloadTestPage(page_url, worker_url, "REJECTED"));
 }
 
@@ -2130,7 +2136,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest,
   // According to the spec, multiple Location headers is not an error. So the
   // preloadResponse must be resolved with an opaque redirect response.
   // But Chrome treats multiple Location headers as an error (crbug.com/98895).
-  EXPECT_EQ("NetworkError: " + kNavigationPreloadNetworkError,
+  EXPECT_EQ(kNavigationPreloadNetworkError,
             LoadNavigationPreloadTestPage(page_url, worker_url, "REJECTED"));
 
   console_observer->WaitForConsoleMessages(1);
@@ -2167,7 +2173,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest,
   // preloadResponse must be resolve with an opaque redirect response. But
   // currently Chrome handles the invalid location URL in the browser process as
   // an error. crbug.com/707185
-  EXPECT_EQ("NetworkError: " + kNavigationPreloadNetworkError,
+  EXPECT_EQ(kNavigationPreloadNetworkError,
             LoadNavigationPreloadTestPage(page_url, worker_url, "REJECTED"));
 
   // The page request must be sent only once, since the worker responded with
@@ -2411,7 +2417,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserTest, RendererCrash) {
   StopObserver observer(run_loop.QuitClosure());
   RunOnIOThread(base::Bind(&ServiceWorkerVersion::AddListener,
                            base::Unretained(version_.get()), &observer));
-  shell()->web_contents()->GetRenderProcessHost()->Shutdown(
+  shell()->web_contents()->GetMainFrame()->GetProcess()->Shutdown(
       content::RESULT_CODE_KILLED, false /* wait */);
   run_loop.Run();
 
@@ -2611,11 +2617,11 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserV8CacheTest, Restart) {
   cached_metadata_run_loop.Run();
 
   // Stop the worker.
-  StopWorker(SERVICE_WORKER_OK);
+  StopWorker();
   // Restart the worker.
   StartWorker(SERVICE_WORKER_OK);
   // Stop the worker.
-  StopWorker(SERVICE_WORKER_OK);
+  StopWorker();
 }
 
 class CacheStorageSideDataSizeChecker
@@ -2798,9 +2804,9 @@ class ServiceWorkerV8CacheStrategiesTest : public ServiceWorkerBrowserTest {
   }
 
  private:
-  static const std::string kPageUrl;
-  static const std::string kWorkerUrl;
-  static const std::string kScriptUrl;
+  static const char kPageUrl[];
+  static const char kWorkerUrl[];
+  static const char kScriptUrl[];
   static const int kV8CacheTimeStampDataSize;
 
   void RegisterAndActivateServiceWorker() {
@@ -2849,11 +2855,11 @@ class ServiceWorkerV8CacheStrategiesTest : public ServiceWorkerBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerV8CacheStrategiesTest);
 };
 
-const std::string ServiceWorkerV8CacheStrategiesTest::kPageUrl =
+const char ServiceWorkerV8CacheStrategiesTest::kPageUrl[] =
     "/service_worker/v8_cache_test.html";
-const std::string ServiceWorkerV8CacheStrategiesTest::kWorkerUrl =
+const char ServiceWorkerV8CacheStrategiesTest::kWorkerUrl[] =
     "/service_worker/fetch_event_response_via_cache.js";
-const std::string ServiceWorkerV8CacheStrategiesTest::kScriptUrl =
+const char ServiceWorkerV8CacheStrategiesTest::kScriptUrl[] =
     "/service_worker/v8_cache_test.js";
 // V8ScriptRunner::setCacheTimeStamp() stores 12 byte data (tag + timestamp).
 const int ServiceWorkerV8CacheStrategiesTest::kV8CacheTimeStampDataSize =

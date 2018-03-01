@@ -72,7 +72,7 @@ class DocumentWebSocketChannel::BlobLoader final
     : public GarbageCollectedFinalized<DocumentWebSocketChannel::BlobLoader>,
       public FileReaderLoaderClient {
  public:
-  BlobLoader(PassRefPtr<BlobDataHandle>, DocumentWebSocketChannel*);
+  BlobLoader(scoped_refptr<BlobDataHandle>, DocumentWebSocketChannel*);
   ~BlobLoader() override {}
 
   void Cancel();
@@ -83,7 +83,7 @@ class DocumentWebSocketChannel::BlobLoader final
   void DidFinishLoading() override;
   void DidFail(FileError::ErrorCode) override;
 
-  DEFINE_INLINE_TRACE() { visitor->Trace(channel_); }
+  void Trace(blink::Visitor* visitor) { visitor->Trace(channel_); }
 
  private:
   Member<DocumentWebSocketChannel> channel_;
@@ -94,19 +94,19 @@ class DocumentWebSocketChannel::Message
     : public GarbageCollectedFinalized<DocumentWebSocketChannel::Message> {
  public:
   explicit Message(const CString&);
-  explicit Message(PassRefPtr<BlobDataHandle>);
+  explicit Message(scoped_refptr<BlobDataHandle>);
   explicit Message(DOMArrayBuffer*);
   // For WorkerWebSocketChannel
   explicit Message(std::unique_ptr<Vector<char>>, MessageType);
   // Close message
   Message(unsigned short code, const String& reason);
 
-  DEFINE_INLINE_TRACE() { visitor->Trace(array_buffer); }
+  void Trace(blink::Visitor* visitor) { visitor->Trace(array_buffer); }
 
   MessageType type;
 
   CString text;
-  RefPtr<BlobDataHandle> blob_data_handle;
+  scoped_refptr<BlobDataHandle> blob_data_handle;
   Member<DOMArrayBuffer> array_buffer;
   std::unique_ptr<Vector<char>> vector_data;
   unsigned short code;
@@ -114,7 +114,7 @@ class DocumentWebSocketChannel::Message
 };
 
 DocumentWebSocketChannel::BlobLoader::BlobLoader(
-    PassRefPtr<BlobDataHandle> blob_data_handle,
+    scoped_refptr<BlobDataHandle> blob_data_handle,
     DocumentWebSocketChannel* channel)
     : channel_(channel),
       loader_(FileReaderLoader::Create(FileReaderLoader::kReadAsArrayBuffer,
@@ -246,10 +246,13 @@ bool DocumentWebSocketChannel::Connect(const KURL& url,
   }
 
   handle_->Initialize(std::move(socket_ptr));
-  handle_->Connect(url, protocols,
-                   loading_context_->GetFetchContext()->GetSecurityOrigin(),
-                   loading_context_->GetFetchContext()->GetSiteForCookies(),
-                   loading_context_->GetExecutionContext()->UserAgent(), this);
+  handle_->Connect(
+      url, protocols, loading_context_->GetFetchContext()->GetSecurityOrigin(),
+      loading_context_->GetFetchContext()->GetSiteForCookies(),
+      loading_context_->GetExecutionContext()->UserAgent(), this,
+      TaskRunnerHelper::Get(TaskType::kNetworking,
+                            loading_context_->GetExecutionContext())
+          .get());
 
   // TODO(ricea): Maybe lookup GetDocument()->GetFrame() less often?
   if (handshake_throttle_ && GetDocument() && GetDocument()->GetFrame() &&
@@ -299,7 +302,7 @@ void DocumentWebSocketChannel::Send(const CString& message) {
 }
 
 void DocumentWebSocketChannel::Send(
-    PassRefPtr<BlobDataHandle> blob_data_handle) {
+    scoped_refptr<BlobDataHandle> blob_data_handle) {
   NETWORK_DVLOG(1) << this << " Send(" << blob_data_handle->Uuid() << ", "
                    << blob_data_handle->GetType() << ", "
                    << blob_data_handle->size() << ") "
@@ -409,7 +412,7 @@ DocumentWebSocketChannel::Message::Message(const CString& text)
     : type(kMessageTypeText), text(text) {}
 
 DocumentWebSocketChannel::Message::Message(
-    PassRefPtr<BlobDataHandle> blob_data_handle)
+    scoped_refptr<BlobDataHandle> blob_data_handle)
     : type(kMessageTypeBlob), blob_data_handle(std::move(blob_data_handle)) {}
 
 DocumentWebSocketChannel::Message::Message(DOMArrayBuffer* array_buffer)
@@ -571,7 +574,7 @@ void DocumentWebSocketChannel::DidConnect(WebSocketHandle* handle,
 
 void DocumentWebSocketChannel::DidStartOpeningHandshake(
     WebSocketHandle* handle,
-    PassRefPtr<WebSocketHandshakeRequest> request) {
+    scoped_refptr<WebSocketHandshakeRequest> request) {
   NETWORK_DVLOG(1) << this << " DidStartOpeningHandshake(" << handle << ")";
 
   DCHECK(handle_);
@@ -583,7 +586,7 @@ void DocumentWebSocketChannel::DidStartOpeningHandshake(
         TRACE_EVENT_SCOPE_THREAD, "data",
         InspectorWebSocketEvent::Data(GetDocument(), identifier_));
     probe::willSendWebSocketHandshakeRequest(GetDocument(), identifier_,
-                                             request.Get());
+                                             request.get());
   }
   handshake_request_ = std::move(request);
 }
@@ -602,9 +605,9 @@ void DocumentWebSocketChannel::DidFinishOpeningHandshake(
         TRACE_EVENT_SCOPE_THREAD, "data",
         InspectorWebSocketEvent::Data(GetDocument(), identifier_));
     probe::didReceiveWebSocketHandshakeResponse(
-        GetDocument(), identifier_, handshake_request_.Get(), response);
+        GetDocument(), identifier_, handshake_request_.get(), response);
   }
-  handshake_request_.Clear();
+  handshake_request_ = nullptr;
 }
 
 void DocumentWebSocketChannel::DidFail(WebSocketHandle* handle,
@@ -807,7 +810,7 @@ bool DocumentWebSocketChannel::ShouldDisallowConnection(const KURL& url) {
   return !subresource_filter->AllowWebSocketConnection(url);
 }
 
-DEFINE_TRACE(DocumentWebSocketChannel) {
+void DocumentWebSocketChannel::Trace(blink::Visitor* visitor) {
   visitor->Trace(blob_loader_);
   visitor->Trace(messages_);
   visitor->Trace(client_);

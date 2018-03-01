@@ -8,7 +8,7 @@ cr.define('extensions', function() {
   const DetailView = Polymer({
     is: 'extensions-detail-view',
 
-    behaviors: [I18nBehavior],
+    behaviors: [I18nBehavior, CrContainerShadowBehavior],
 
     properties: {
       /**
@@ -26,8 +26,7 @@ cr.define('extensions', function() {
 
     /** @private */
     onCloseButtonTap_: function() {
-      extensions.navigation.navigateTo(
-          {page: Page.LIST, type: extensions.getItemListType(this.data)});
+      extensions.navigation.navigateTo({page: Page.LIST});
     },
 
     /**
@@ -66,8 +65,18 @@ cr.define('extensions', function() {
      * @return {boolean}
      * @private
      */
-    hasPermissions_: function() {
-      return this.data.permissions.length > 0;
+    hasWarnings_: function() {
+      return this.data.disableReasons.corruptInstall ||
+          this.data.disableReasons.suspiciousInstall ||
+          this.data.disableReasons.updateRequired || !!this.data.blacklistText;
+    },
+
+    /**
+     * @return {string}
+     * @private
+     */
+    computeEnabledStyle_: function() {
+      return this.isEnabled_() ? 'enabled-text' : '';
     },
 
     /**
@@ -140,6 +149,11 @@ cr.define('extensions', function() {
     /** @private */
     onRemoveTap_: function() {
       this.delegate.deleteItem(this.data.id);
+    },
+
+    /** @private */
+    onRepairTap_: function() {
+      this.delegate.repairItem(this.data.id);
     },
 
     /** @private */

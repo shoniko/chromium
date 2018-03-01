@@ -37,10 +37,6 @@ class HeadersIterationSource final
     return true;
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
-    PairIterable<String, String>::IterationSource::Trace(visitor);
-  }
-
  private:
   Vector<std::pair<String, String>> headers_;
   size_t current_;
@@ -227,10 +223,10 @@ void Headers::FillWith(const Headers* object, ExceptionState& exception_state) {
 void Headers::FillWith(const HeadersInit& init,
                        ExceptionState& exception_state) {
   DCHECK_EQ(header_list_->size(), 0U);
-  if (init.isByteStringSequenceSequence()) {
-    FillWith(init.getAsByteStringSequenceSequence(), exception_state);
-  } else if (init.isByteStringByteStringRecord()) {
-    FillWith(init.getAsByteStringByteStringRecord(), exception_state);
+  if (init.IsByteStringSequenceSequence()) {
+    FillWith(init.GetAsByteStringSequenceSequence(), exception_state);
+  } else if (init.IsByteStringByteStringRecord()) {
+    FillWith(init.GetAsByteStringByteStringRecord(), exception_state);
   } else {
     NOTREACHED();
   }
@@ -273,8 +269,9 @@ Headers::Headers()
 Headers::Headers(FetchHeaderList* header_list)
     : header_list_(header_list), guard_(kNoneGuard) {}
 
-DEFINE_TRACE(Headers) {
+void Headers::Trace(blink::Visitor* visitor) {
   visitor->Trace(header_list_);
+  ScriptWrappable::Trace(visitor);
 }
 
 PairIterable<String, String>::IterationSource* Headers::StartIteration(

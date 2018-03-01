@@ -20,6 +20,7 @@
 #include "device/udev_linux/scoped_udev.h"
 #include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
+#include "ui/chromeos/events/modifier_key.h"
 #include "ui/chromeos/events/pref_names.h"
 #include "ui/events/devices/input_device_manager.h"
 #include "ui/events/event.h"
@@ -28,18 +29,6 @@
 #include "ui/events/keycodes/dom/dom_key.h"
 #include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/keycodes/keyboard_code_conversion.h"
-
-#if defined(USE_X11)
-#include <X11/Xlib.h>
-#include <X11/extensions/XInput2.h>
-
-// Get rid of macros from Xlib.h that conflicts with other parts of the code.
-#undef RootWindow
-#undef Status
-
-#include "ui/base/x/x11_util.h"
-#include "ui/events/keycodes/keyboard_code_conversion_x.h"
-#endif
 
 namespace ui {
 
@@ -70,51 +59,51 @@ const int kUnknownProductId = -1;
 // user preference target key, and replaces the flag accordingly.
 const struct ModifierRemapping {
   int flag;
-  int remap_to;
+  ui::chromeos::ModifierKey remap_to;
   const char* pref_name;
   EventRewriterChromeOS::MutableKeyState result;
 } kModifierRemappings[] = {
     {// kModifierRemappingCtrl references this entry by index.
      ui::EF_CONTROL_DOWN,
-     ::chromeos::input_method::kControlKey,
+     ui::chromeos::ModifierKey::kControlKey,
      prefs::kLanguageRemapControlKeyTo,
      {ui::EF_CONTROL_DOWN, ui::DomCode::CONTROL_LEFT, ui::DomKey::CONTROL,
       ui::VKEY_CONTROL}},
     {// kModifierRemappingNeoMod3 references this entry by index.
      ui::EF_MOD3_DOWN | ui::EF_ALTGR_DOWN,
-     ::chromeos::input_method::kNumModifierKeys,
+     ui::chromeos::ModifierKey::kNumModifierKeys,
      nullptr,
      {ui::EF_MOD3_DOWN | ui::EF_ALTGR_DOWN, ui::DomCode::CAPS_LOCK,
       ui::DomKey::ALT_GRAPH, ui::VKEY_ALTGR}},
     {ui::EF_COMMAND_DOWN,
-     ::chromeos::input_method::kSearchKey,
+     ui::chromeos::ModifierKey::kSearchKey,
      prefs::kLanguageRemapSearchKeyTo,
      {ui::EF_COMMAND_DOWN, ui::DomCode::META_LEFT, ui::DomKey::META,
       ui::VKEY_LWIN}},
     {ui::EF_ALT_DOWN,
-     ::chromeos::input_method::kAltKey,
+     ui::chromeos::ModifierKey::kAltKey,
      prefs::kLanguageRemapAltKeyTo,
      {ui::EF_ALT_DOWN, ui::DomCode::ALT_LEFT, ui::DomKey::ALT, ui::VKEY_MENU}},
     {ui::EF_NONE,
-     ::chromeos::input_method::kVoidKey,
+     ui::chromeos::ModifierKey::kVoidKey,
      nullptr,
      {ui::EF_NONE, ui::DomCode::NONE, ui::DomKey::NONE, ui::VKEY_UNKNOWN}},
     {ui::EF_MOD3_DOWN,
-     ::chromeos::input_method::kCapsLockKey,
+     ui::chromeos::ModifierKey::kCapsLockKey,
      prefs::kLanguageRemapCapsLockKeyTo,
      {ui::EF_MOD3_DOWN, ui::DomCode::CAPS_LOCK, ui::DomKey::CAPS_LOCK,
       ui::VKEY_CAPITAL}},
     {ui::EF_NONE,
-     ::chromeos::input_method::kEscapeKey,
+     ui::chromeos::ModifierKey::kEscapeKey,
      prefs::kLanguageRemapEscapeKeyTo,
      {ui::EF_NONE, ui::DomCode::ESCAPE, ui::DomKey::ESCAPE, ui::VKEY_ESCAPE}},
     {ui::EF_NONE,
-     ::chromeos::input_method::kBackspaceKey,
+     ui::chromeos::ModifierKey::kBackspaceKey,
      prefs::kLanguageRemapBackspaceKeyTo,
      {ui::EF_NONE, ui::DomCode::BACKSPACE, ui::DomKey::BACKSPACE,
       ui::VKEY_BACK}},
     {ui::EF_NONE,
-     ::chromeos::input_method::kNumModifierKeys,
+     ui::chromeos::ModifierKey::kNumModifierKeys,
      prefs::kLanguageRemapDiamondKeyTo,
      {ui::EF_NONE, ui::DomCode::F15, ui::DomKey::F15, ui::VKEY_F15}}};
 
@@ -135,7 +124,7 @@ const ModifierRemapping* GetRemappedKey(
     return nullptr;
 
   for (size_t i = 0; i < arraysize(kModifierRemappings); ++i) {
-    if (value == kModifierRemappings[i].remap_to)
+    if (value == static_cast<int>(kModifierRemappings[i].remap_to))
       return &kModifierRemappings[i];
   }
   return nullptr;
@@ -540,15 +529,6 @@ ui::EventRewriteStatus EventRewriterChromeOS::RewriteKeyEvent(
   }
   if ((key_event.flags() == state.flags) &&
       (key_event.key_code() == state.key_code) &&
-#if defined(USE_X11)
-      // TODO(kpschoedel): This test is present because several consumers of
-      // key events depend on having a native core X11 event, so we rewrite
-      // all XI2 key events (GenericEvent) into corresponding core X11 key
-      // events. Remove this when event consumers no longer care about
-      // native X11 event details (crbug.com/380349).
-      (!key_event.HasNativeEvent() ||
-       (key_event.native_event()->type != GenericEvent)) &&
-#endif
       (status == ui::EVENT_REWRITE_CONTINUE)) {
     return ui::EVENT_REWRITE_CONTINUE;
   }
@@ -591,15 +571,8 @@ ui::EventRewriteStatus EventRewriterChromeOS::RewriteMouseButtonEvent(
   ui::MouseEvent* rewritten_mouse_event = new ui::MouseEvent(mouse_event);
   rewritten_event->reset(rewritten_mouse_event);
   rewritten_mouse_event->set_flags(flags);
-#if defined(USE_X11)
-  ui::UpdateX11EventForFlags(rewritten_mouse_event);
-#endif
-  if (changed_button != ui::EF_NONE) {
+  if (changed_button != ui::EF_NONE)
     rewritten_mouse_event->set_changed_button_flags(changed_button);
-#if defined(USE_X11)
-    ui::UpdateX11EventForChangedButtonFlags(rewritten_mouse_event);
-#endif
-  }
   return status;
 }
 
@@ -619,18 +592,12 @@ ui::EventRewriteStatus EventRewriterChromeOS::RewriteMouseWheelEvent(
     case ui::EVENT_REWRITE_REWRITTEN:
     case ui::EVENT_REWRITE_DISPATCH_ANOTHER:
       // whell event has been rewritten and stored in |rewritten_event|.
-#if defined(USE_X11)
-      ui::UpdateX11EventForFlags(rewritten_event->get());
-#endif
       break;
     case ui::EVENT_REWRITE_CONTINUE:
       if (flags != wheel_event.flags()) {
-        *rewritten_event = base::MakeUnique<ui::MouseWheelEvent>(wheel_event);
+        *rewritten_event = std::make_unique<ui::MouseWheelEvent>(wheel_event);
         (*rewritten_event)->set_flags(flags);
         status = ui::EVENT_REWRITE_REWRITTEN;
-#if defined(USE_X11)
-        ui::UpdateX11EventForFlags(rewritten_event->get());
-#endif
       }
       break;
     case ui::EVENT_REWRITE_DISCARD:
@@ -651,9 +618,6 @@ ui::EventRewriteStatus EventRewriterChromeOS::RewriteTouchEvent(
   ui::TouchEvent* rewritten_touch_event = new ui::TouchEvent(touch_event);
   rewritten_event->reset(rewritten_touch_event);
   rewritten_touch_event->set_flags(flags);
-#if defined(USE_X11)
-  ui::UpdateX11EventForFlags(rewritten_touch_event);
-#endif
   return ui::EVENT_REWRITE_REWRITTEN;
 }
 
@@ -666,10 +630,6 @@ ui::EventRewriteStatus EventRewriterChromeOS::RewriteScrollEvent(
       sticky_keys_controller_->RewriteEvent(scroll_event, rewritten_event);
   // Scroll event shouldn't be discarded.
   DCHECK_NE(status, ui::EVENT_REWRITE_DISCARD);
-#if defined(USE_X11)
-  if (status != ui::EVENT_REWRITE_CONTINUE)
-    ui::UpdateX11EventForFlags(rewritten_event->get());
-#endif
   return status;
 }
 
@@ -728,7 +688,6 @@ bool EventRewriterChromeOS::RewriteModifierKeys(const ui::KeyEvent& key_event,
       if (remapped_key && remapped_key->result.key_code == ui::VKEY_CAPITAL)
         remapped_key = kModifierRemappingNeoMod3;
       break;
-#if !defined(USE_X11)
     case ui::DomKey::ALT_GRAPH_LATCH:
       if (key_event.type() == ui::ET_KEY_PRESSED) {
         pressed_modifier_latches_ |= ui::EF_ALTGR_DOWN;
@@ -748,7 +707,6 @@ bool EventRewriterChromeOS::RewriteModifierKeys(const ui::KeyEvent& key_event,
       state->key_code = ui::VKEY_ALTGR;
       exact_event = true;
       break;
-#endif
     default:
       break;
   }
@@ -809,7 +767,7 @@ bool EventRewriterChromeOS::RewriteModifierKeys(const ui::KeyEvent& key_event,
     state->key = remapped_key->result.key;
     incoming.flags |= characteristic_flag;
     characteristic_flag = remapped_key->flag;
-    if (remapped_key->remap_to == ::chromeos::input_method::kCapsLockKey)
+    if (remapped_key->remap_to == ui::chromeos::ModifierKey::kCapsLockKey)
       characteristic_flag |= ui::EF_CAPS_LOCK_ON;
     state->code = RelocateModifier(
         state->code, ui::KeycodeConverter::DomCodeToLocation(incoming.code));

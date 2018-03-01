@@ -105,8 +105,6 @@ class CC_ANIMATION_EXPORT AnimationHost : public MutatorHost,
   bool UpdateAnimationState(bool start_ready_animations,
                             MutatorEvents* events) override;
 
-  base::Closure TakeMutations() override;
-
   std::unique_ptr<MutatorEvents> CreateEvents() override;
   void SetAnimationEvents(std::unique_ptr<MutatorEvents> events) override;
 
@@ -177,7 +175,8 @@ class CC_ANIMATION_EXPORT AnimationHost : public MutatorHost,
   const ElementToAnimationsMap& element_animations_for_testing() const;
 
   // LayerTreeMutatorClient.
-  void SetNeedsMutate() override;
+  void SetMutationUpdate(
+      std::unique_ptr<MutatorOutputState> output_state) override;
 
  private:
   explicit AnimationHost(ThreadInstance thread_instance);
@@ -190,6 +189,10 @@ class CC_ANIMATION_EXPORT AnimationHost : public MutatorHost,
 
   bool NeedsTickAnimationPlayers() const;
   bool NeedsTickMutator() const;
+
+  // Return the animator state representing all ticking worklet animations.
+  std::unique_ptr<MutatorInputState> CollectAnimatorsState(
+      base::TimeTicks timeline_time);
 
   ElementToAnimationsMap element_to_animations_map_;
   PlayersList ticking_players_;
@@ -208,7 +211,6 @@ class CC_ANIMATION_EXPORT AnimationHost : public MutatorHost,
 
   bool supports_scroll_animations_;
   bool needs_push_properties_;
-  bool mutator_needs_mutate_;
 
   std::unique_ptr<LayerTreeMutator> mutator_;
 

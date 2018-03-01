@@ -75,6 +75,8 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
     out->enable_low_latency_dxva = prefs.enable_low_latency_dxva();
     out->enable_zero_copy_dxgi_video = prefs.enable_zero_copy_dxgi_video();
     out->enable_nv12_dxgi_video = prefs.enable_nv12_dxgi_video();
+    out->enable_media_foundation_vea_on_windows7 =
+        prefs.enable_media_foundation_vea_on_windows7();
 #endif
 
     out->compile_shader_always_succeeds =
@@ -101,7 +103,6 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
     out->emulate_shader_precision = prefs.emulate_shader_precision();
     out->enable_gpu_service_logging = prefs.enable_gpu_service_logging();
     out->enable_gpu_service_tracing = prefs.enable_gpu_service_tracing();
-    out->enable_es3_apis = prefs.enable_es3_apis();
     out->use_passthrough_cmd_decoder = prefs.use_passthrough_cmd_decoder();
     return true;
   }
@@ -169,6 +170,14 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
     return false;
 #endif
   }
+  static bool enable_media_foundation_vea_on_windows7(
+      const gpu::GpuPreferences& prefs) {
+#if defined(OS_WIN)
+    return prefs.enable_media_foundation_vea_on_windows7;
+#else
+    return false;
+#endif
+  }
   static bool compile_shader_always_succeeds(const gpu::GpuPreferences& prefs) {
     return prefs.compile_shader_always_succeeds;
   }
@@ -228,9 +237,6 @@ struct StructTraits<gpu::mojom::GpuPreferencesDataView, gpu::GpuPreferences> {
   }
   static bool enable_gpu_service_tracing(const gpu::GpuPreferences& prefs) {
     return prefs.enable_gpu_service_tracing;
-  }
-  static bool enable_es3_apis(const gpu::GpuPreferences& prefs) {
-    return prefs.enable_es3_apis;
   }
   static bool use_passthrough_cmd_decoder(const gpu::GpuPreferences& prefs) {
     return prefs.use_passthrough_cmd_decoder;

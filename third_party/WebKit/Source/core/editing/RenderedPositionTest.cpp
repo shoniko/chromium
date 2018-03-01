@@ -6,15 +6,15 @@
 
 #include "build/build_config.h"
 #include "core/css/CSSStyleDeclaration.h"
-#include "core/editing/EditingTestBase.h"
+#include "core/editing/VisiblePosition.h"
 #include "core/editing/VisibleUnits.h"
+#include "core/editing/testing/EditingTestBase.h"
 
 namespace blink {
 
 class RenderedPositionTest : public EditingTestBase {};
 
 #if defined(OS_ANDROID)
-// Failing on WebKit Android (Nexus4): https://crbug.com/752827
 #define MAYBE_IsVisible DISABLED_IsVisible
 #else
 #define MAYBE_IsVisible IsVisible
@@ -40,4 +40,12 @@ TEST_F(RenderedPositionTest, MAYBE_IsVisible) {
   EXPECT_FALSE(rendered_hidden_position.IsVisible(true));
 }
 
+TEST_F(RenderedPositionTest, GetSamplePointForVisibility) {
+  LayoutPoint top(-1, 10);
+  LayoutPoint bottom(20, 10);
+  EXPECT_EQ(LayoutPoint(19, 10),
+            RenderedPosition::GetSamplePointForVisibility(top, bottom));
+}
+
+#undef MAYBE_IsVisible
 }  // namespace blink

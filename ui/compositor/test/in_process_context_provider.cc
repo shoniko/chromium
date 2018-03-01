@@ -11,7 +11,6 @@
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
-#include "cc/output/managed_memory_policy.h"
 #include "components/viz/common/gpu/context_cache_controller.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
@@ -80,41 +79,49 @@ InProcessContextProvider::~InProcessContextProvider() {
          context_thread_checker_.CalledOnValidThread());
 }
 
-bool InProcessContextProvider::BindToCurrentThread() {
+gpu::ContextResult InProcessContextProvider::BindToCurrentThread() {
   // This is called on the thread the context will be used.
   DCHECK(context_thread_checker_.CalledOnValidThread());
 
-  if (!context_) {
-    context_.reset(gpu::GLInProcessContext::Create(
-        nullptr,  /* service */
-        nullptr,  /* surface */
-        !window_, /* is_offscreen */
-        window_, (shared_context_ ? shared_context_->context_.get() : nullptr),
-        attribs_, gpu::SharedMemoryLimits(), gpu_memory_buffer_manager_,
-        image_factory_, base::ThreadTaskRunnerHandle::Get()));
+  if (bind_tried_)
+    return bind_result_;
+  bind_tried_ = true;
 
-    if (!context_)
-      return false;
+  context_ = gpu::GLInProcessContext::CreateWithoutInit();
+  bind_result_ = context_->Initialize(
+      nullptr,  /* service */
+      nullptr,  /* surface */
+      !window_, /* is_offscreen */
+      window_, (shared_context_ ? shared_context_->context_.get() : nullptr),
+      attribs_, gpu::SharedMemoryLimits(), gpu_memory_buffer_manager_,
+      image_factory_, base::ThreadTaskRunnerHandle::Get());
 
-    cache_controller_.reset(new viz::ContextCacheController(
-        context_->GetImplementation(), base::ThreadTaskRunnerHandle::Get()));
-  }
+  if (bind_result_ != gpu::ContextResult::kSuccess)
+    return bind_result_;
+
+  cache_controller_ = std::make_unique<viz::ContextCacheController>(
+      context_->GetImplementation(), base::ThreadTaskRunnerHandle::Get());
 
   std::string unique_context_name =
       base::StringPrintf("%s-%p", debug_name_.c_str(), context_.get());
   context_->GetImplementation()->TraceBeginCHROMIUM(
       "gpu_toplevel", unique_context_name.c_str());
 
-  return true;
+  return bind_result_;
 }
 
 void InProcessContextProvider::DetachFromThread() {
   context_thread_checker_.DetachFromThread();
 }
 
-gpu::Capabilities InProcessContextProvider::ContextCapabilities() {
+const gpu::Capabilities& InProcessContextProvider::ContextCapabilities() const {
   DCHECK(context_thread_checker_.CalledOnValidThread());
   return context_->GetImplementation()->capabilities();
+}
+
+const gpu::GpuFeatureInfo& InProcessContextProvider::GetGpuFeatureInfo() const {
+  DCHECK(context_thread_checker_.CalledOnValidThread());
+  return context_->GetGpuFeatureInfo();
 }
 
 gpu::gles2::GLES2Interface* InProcessContextProvider::ContextGL() {

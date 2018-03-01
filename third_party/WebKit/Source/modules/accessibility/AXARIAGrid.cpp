@@ -49,8 +49,8 @@ bool AXARIAGrid::AddRow(AXObject* possible_row) {
   if (!possible_row || possible_row->RoleValue() != kRowRole)
     return false;
 
-  DCHECK(possible_row->IsARIARow());
-  AXARIAGridRow* row = ToAXARIAGridRow(possible_row);
+  DCHECK(possible_row->IsTableRow());
+  AXTableRow* row = ToAXTableRow(possible_row);
   row->SetRowIndex(static_cast<int>(rows_.size()));
   rows_.push_back(possible_row);
   return true;
@@ -75,8 +75,8 @@ unsigned AXARIAGrid::CalculateNumColumns() {
   unsigned num_cols = 0;
   for (const auto& row : rows_) {
     // Store the maximum number of columns.
-    // TODO do not assume that the children of the rows are the cells.
-    const unsigned num_cells_in_row = row->Children().size();
+    DCHECK(row->IsTableRow());
+    const unsigned num_cells_in_row = ToAXTableRow(row)->Cells().size();
     if (num_cells_in_row > num_cols)
       num_cols = num_cells_in_row;
   }

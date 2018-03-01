@@ -9,9 +9,9 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/timer/elapsed_timer.h"
-#include "content/public/child/worker_thread.h"
 #include "content/public/common/console_message_level.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/renderer/worker_thread.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/event_filtering_info.h"
 #include "extensions/common/extension_api.h"
@@ -401,6 +401,7 @@ NativeExtensionBindingsSystem::NativeExtensionBindingsSystem(
           base::Bind(&AddConsoleError),
           APILastError(base::Bind(&GetLastErrorParents),
                        base::Bind(&AddConsoleError))),
+      messaging_service_(this),
       weak_factory_(this) {
   api_system_.RegisterCustomType("storage.StorageArea",
                                  base::Bind(&StorageArea::CreateStorageArea));
@@ -591,6 +592,10 @@ RequestSender* NativeExtensionBindingsSystem::GetRequestSender() {
 
 IPCMessageSender* NativeExtensionBindingsSystem::GetIPCMessageSender() {
   return ipc_message_sender_.get();
+}
+
+RendererMessagingService* NativeExtensionBindingsSystem::GetMessagingService() {
+  return &messaging_service_;
 }
 
 void NativeExtensionBindingsSystem::OnExtensionPermissionsUpdated(

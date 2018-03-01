@@ -81,7 +81,7 @@ ScriptPromise PaymentRequestEvent::openWindow(ScriptState* script_state,
   }
 
   if (!context->GetSecurityOrigin()->IsSameSchemeHostPortAndSuborigin(
-          SecurityOrigin::Create(parsed_url_to_open).Get())) {
+          SecurityOrigin::Create(parsed_url_to_open).get())) {
     resolver->Resolve(v8::Null(script_state->GetIsolate()));
     return promise;
   }
@@ -107,7 +107,7 @@ void PaymentRequestEvent::respondWith(ScriptState* script_state,
   }
 }
 
-DEFINE_TRACE(PaymentRequestEvent) {
+void PaymentRequestEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(method_data_);
   visitor->Trace(modifiers_);
   visitor->Trace(observer_);

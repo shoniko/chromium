@@ -6,6 +6,7 @@ v8.compile Properties:
     data : {
         columnNumber : <number>
         lineNumber : <number>
+        streamed : <boolean>
         url : 
     }
     endTime : <number>
@@ -18,7 +19,8 @@ v8.compile Properties:
     data : {
         columnNumber : <number>
         lineNumber : <number>
-        url : http://127.0.0.1:8000/devtools/tracing/timeline-js/resources/timeline-script-tag-2.js
+        streamed : <boolean>
+        url : .../devtools/tracing/timeline-js/resources/timeline-script-tag-2.js
     }
     endTime : <number>
     startTime : <number>

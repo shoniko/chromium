@@ -20,7 +20,7 @@ void EllipsisBoxPainter::Paint(const PaintInfo& paint_info,
                                const LayoutPoint& paint_offset,
                                LayoutUnit line_top,
                                LayoutUnit line_bottom) {
-  if (paint_info.phase == kPaintPhaseSelection)
+  if (paint_info.phase == PaintPhase::kSelection)
     return;
 
   const ComputedStyle& style = ellipsis_box_.GetLineLayoutItem().StyleRef(
@@ -61,7 +61,7 @@ void EllipsisBoxPainter::PaintEllipsis(const PaintInfo& paint_info,
   if (!font_data)
     return;
 
-  TextPainter::Style text_style = TextPainter::TextPaintingStyle(
+  TextPaintStyle text_style = TextPainter::TextPaintingStyle(
       ellipsis_box_.GetLineLayoutItem().GetDocument(), style, paint_info);
   TextRun text_run = ConstructTextRun(font, ellipsis_box_.EllipsisStr(), style,
                                       TextRun::kAllowTrailingExpansion);

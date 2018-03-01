@@ -238,12 +238,6 @@ const char kDisableVolumeAdjustSound[] = "disable-volume-adjust-sound";
 // Disables wake on wifi features.
 const char kDisableWakeOnWifi[] = "disable-wake-on-wifi";
 
-// EAFE path to use for Easy bootstrapping.
-const char kEafePath[] = "eafe-path";
-
-// EAFE URL to use for Easy bootstrapping.
-const char kEafeUrl[] = "eafe-url";
-
 // Enables the Android Wallpapers App as the default app on Chrome OS.
 const char kEnableAndroidWallpapersApp[] = "enable-android-wallpapers-app";
 
@@ -328,9 +322,11 @@ const char kEnableVideoPlayerChromecastSupport[] =
 // Enables the VoiceInteraction support.
 const char kEnableVoiceInteraction[] = "enable-voice-interaction";
 
-// Enables zip archiver.
-const char kEnableZipArchiverOnFileManager[] =
-    "enable-zip-archiver-on-file-manager";
+// Enables zip archiver - packer.
+const char kEnableZipArchiverPacker[] = "enable-zip-archiver-packer";
+
+// Enables zip archiver - unpacker.
+const char kEnableZipArchiverUnpacker[] = "enable-zip-archiver-unpacker";
 
 // Disables ARC for managed accounts.
 const char kEnterpriseDisableArc[] = "enterprise-disable-arc";
@@ -479,9 +475,6 @@ const char kShillStub[] = "shill-stub";
 // This makes it easier to test layout logic.
 const char kShowLoginDevOverlay[] = "show-login-dev-overlay";
 
-// If true, the views-based md login and lock screens will be shown.
-const char kShowMdLogin[] = "show-md-login";
-
 // If true, the non-md login and lock screens will be shown.
 const char kShowNonMdLogin[] = "show-non-md-login";
 
@@ -521,9 +514,9 @@ const char kCrosGaiaApiV1[] = "cros-gaia-api-v1";
 // List of locales supported by voice interaction.
 const char kVoiceInteractionLocales[] = "voice-interaction-supported-locales";
 
-// Enables license type selection by user during enrollment.
-const char kEnterpriseEnableLicenseTypeSelection[] =
-    "enterprise-enable-license-type-selection";
+// Disable license type selection by user during enrollment.
+const char kEnterpriseDisableLicenseTypeSelection[] =
+    "enterprise-disable-license-type-selection";
 
 // Disables per-user timezone.
 const char kDisablePerUserTimezone[] = "disable-per-user-timezone";

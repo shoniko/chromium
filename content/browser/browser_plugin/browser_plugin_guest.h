@@ -22,20 +22,20 @@
 
 #include <map>
 #include <memory>
-#include <queue>
 
 #include "base/compiler_specific.h"
+#include "base/containers/circular_deque.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "components/viz/common/surfaces/local_surface_id.h"
 #include "content/common/edit_command.h"
-#include "content/common/input/input_event_ack_state.h"
 #include "content/public/browser/browser_plugin_guest_delegate.h"
 #include "content/public/browser/guest_host.h"
 #include "content/public/browser/readback_types.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/common/input_event_ack_state.h"
 #include "third_party/WebKit/public/platform/WebDragOperation.h"
 #include "third_party/WebKit/public/platform/WebFocusType.h"
 #include "third_party/WebKit/public/platform/WebInputEvent.h"
@@ -453,7 +453,7 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
 
   // This is a queue of messages that are destined to be sent to the embedder
   // once the guest is attached to a particular embedder.
-  std::deque<std::unique_ptr<IPC::Message>> pending_messages_;
+  base::circular_deque<std::unique_ptr<IPC::Message>> pending_messages_;
 
   BrowserPluginGuestDelegate* const delegate_;
 

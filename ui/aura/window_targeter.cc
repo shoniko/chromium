@@ -65,6 +65,14 @@ Window* WindowTargeter::GetPriorityTargetInRootWindow(
   if (capture_window)
     return capture_window;
 
+  if (event.IsPinchEvent()) {
+    DCHECK_EQ(event.AsGestureEvent()->details().device_type(),
+              ui::GestureDeviceType::DEVICE_TOUCHPAD);
+    WindowEventDispatcher* dispatcher = root_window->GetHost()->dispatcher();
+    if (dispatcher->touchpad_pinch_handler())
+      return dispatcher->touchpad_pinch_handler();
+  }
+
   if (event.IsTouchEvent()) {
     // Query the gesture-recognizer to find targets for touch events.
     const ui::TouchEvent& touch = *event.AsTouchEvent();
@@ -226,13 +234,19 @@ bool WindowTargeter::ShouldUseExtendedBounds(const aura::Window* window) const {
   return true;
 }
 
-void WindowTargeter::OnSetInsets() {}
+void WindowTargeter::OnSetInsets(const gfx::Insets& last_mouse_extend,
+                                 const gfx::Insets& last_touch_extend) {}
 
 void WindowTargeter::SetInsets(const gfx::Insets& mouse_extend,
                                const gfx::Insets& touch_extend) {
+  if (mouse_extend_ == mouse_extend && touch_extend_ == touch_extend)
+    return;
+
+  const gfx::Insets last_mouse_extend_ = mouse_extend_;
+  const gfx::Insets last_touch_extend_ = touch_extend_;
   mouse_extend_ = mouse_extend;
   touch_extend_ = touch_extend;
-  OnSetInsets();
+  OnSetInsets(last_mouse_extend_, last_touch_extend_);
 }
 
 Window* WindowTargeter::FindTargetForKeyEvent(Window* window,

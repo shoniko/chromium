@@ -58,7 +58,9 @@
 #include "components/viz/service/frame_sinks/frame_sink_manager_impl.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/child_process_security_policy_impl.h"
+#include "content/browser/compositor/gpu_process_transport_factory.h"
 #include "content/browser/compositor/surface_utils.h"
+#include "content/browser/compositor/viz_process_transport_factory.h"
 #include "content/browser/dom_storage/dom_storage_area.h"
 #include "content/browser/download/download_resource_handler.h"
 #include "content/browser/download/save_file_manager.h"
@@ -81,6 +83,8 @@
 #include "content/browser/service_manager/service_manager_context.h"
 #include "content/browser/speech/speech_recognition_manager_impl.h"
 #include "content/browser/startup_task_runner.h"
+#include "content/browser/tracing/background_tracing_manager_impl.h"
+#include "content/browser/tracing/tracing_controller_impl.h"
 #include "content/browser/utility_process_host_impl.h"
 #include "content/browser/webui/content_web_ui_controller_factory.h"
 #include "content/browser/webui/url_data_manager.h"
@@ -92,7 +96,6 @@
 #include "content/public/browser/gpu_data_manager_observer.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/swap_metrics_driver.h"
-#include "content/public/browser/tracing_controller.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
@@ -102,7 +105,7 @@
 #include "device/gamepad/gamepad_service.h"
 #include "gpu/vulkan/features.h"
 #include "media/audio/audio_manager.h"
-#include "media/audio/audio_system_impl.h"
+#include "media/audio/audio_system.h"
 #include "media/audio/audio_thread_impl.h"
 #include "media/base/media.h"
 #include "media/base/user_input_monitor.h"
@@ -115,14 +118,16 @@
 #include "net/socket/client_socket_factory.h"
 #include "net/ssl/ssl_config_service.h"
 #include "ppapi/features/features.h"
-#include "services/resource_coordinator/memory_instrumentation/coordinator_impl.h"
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/client_process_impl.h"
+#include "services/resource_coordinator/public/interfaces/memory_instrumentation/memory_instrumentation.mojom.h"
+#include "services/resource_coordinator/public/interfaces/service_constants.mojom.h"
 #include "services/service_manager/runner/common/client_util.h"
 #include "skia/ext/event_tracer_impl.h"
 #include "skia/ext/skia_memory_dump_provider.h"
 #include "sql/sql_memory_dump_provider.h"
 #include "third_party/boringssl/src/include/openssl/evp.h"
 #include "ui/base/clipboard/clipboard.h"
+#include "ui/display/display_switches.h"
 #include "ui/gfx/switches.h"
 
 #if defined(USE_AURA) || defined(OS_MACOSX)
@@ -152,7 +157,6 @@
 #if defined(OS_MACOSX)
 #include "base/allocator/allocator_interception_mac.h"
 #include "base/memory/memory_pressure_monitor_mac.h"
-#include "content/browser/bootstrap_sandbox_manager_mac.h"
 #include "content/browser/cocoa/system_hotkey_helper_mac.h"
 #include "content/browser/mach_broker_mac.h"
 #include "content/browser/renderer_host/browser_compositor_view_mac.h"
@@ -169,6 +173,7 @@
 #include "content/common/sandbox_win.h"
 #include "net/base/winsock_init.h"
 #include "ui/base/l10n/l10n_util_win.h"
+#include "ui/display/win/screen_win.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -189,14 +194,14 @@
 #endif
 
 #if defined(OS_FUCHSIA)
-#include <magenta/process.h>
-#include <magenta/syscalls.h>
+#include <zircon/process.h>
+#include <zircon/syscalls.h>
 
 #include "base/fuchsia/default_job.h"
 #endif  // defined(OS_FUCHSIA)
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-#include "content/browser/renderer_host/render_sandbox_host_linux.h"
+#include "content/browser/sandbox_host_linux.h"
 #include "content/browser/zygote_host/zygote_host_impl_linux.h"
 
 #if !defined(OS_ANDROID)
@@ -210,7 +215,7 @@
 #include "content/browser/plugin_service_impl.h"
 #endif
 
-#if BUILDFLAG(ENABLE_MOJO_CDM) && BUILDFLAG(ENABLE_LIBRARY_CDMS)
+#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
 #include "content/browser/media/cdm_registry_impl.h"
 #endif
 
@@ -249,9 +254,9 @@ bool IsUsingMus() {
     !defined(OS_FUCHSIA)
 void SetupSandbox(const base::CommandLine& parsed_command_line) {
   TRACE_EVENT0("startup", "SetupSandbox");
-  // RenderSandboxHostLinux needs to be initialized even if the sandbox and
-  // zygote are both disabled. It initializes the renderer socket.
-  RenderSandboxHostLinux::GetInstance()->Init();
+  // SandboxHostLinux needs to be initialized even if the sandbox and
+  // zygote are both disabled. It initializes the sandboxed process socket.
+  SandboxHostLinux::GetInstance()->Init();
 
   if (parsed_command_line.HasSwitch(switches::kNoZygote) &&
       !parsed_command_line.HasSwitch(switches::kNoSandbox)) {
@@ -469,10 +474,10 @@ constexpr base::TimeDelta kSwapMetricsInterval =
 // Create and register the job which will contain all child processes
 // of the browser process as well as their descendents.
 void InitDefaultJob() {
-  base::ScopedMxHandle handle;
-  mx_status_t result = mx_job_create(mx_job_default(), 0, handle.receive());
-  CHECK_EQ(MX_OK, result) << "mx_job_create(job): "
-                          << mx_status_get_string(result);
+  base::ScopedZxHandle handle;
+  zx_status_t result = zx_job_create(zx_job_default(), 0, handle.receive());
+  CHECK_EQ(ZX_OK, result) << "zx_job_create(job): "
+                          << zx_status_get_string(result);
   base::SetDefaultJob(std::move(handle));
 }
 #endif  // defined(OS_FUCHSIA)
@@ -517,6 +522,48 @@ class GpuDataManagerVisualProxy : public GpuDataManagerObserver {
 };
 
 }  // namespace internal
+#endif
+
+#if defined(OS_WIN)
+namespace {
+
+// Provides a bridge whereby display::win::ScreenWin can ask the GPU process
+// about the HDR status of the system.
+class HDRProxy {
+ public:
+  static void Initialize() {
+    display::win::ScreenWin::SetRequestHDRStatusCallback(
+        base::Bind(&HDRProxy::RequestHDRStatus));
+  }
+
+  static void RequestHDRStatus() {
+    // The request must be sent to the GPU process from the IO thread.
+    BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                            base::Bind(&HDRProxy::RequestOnIOThread));
+  }
+
+ private:
+  static void RequestOnIOThread() {
+    auto* gpu_process_host =
+        GpuProcessHost::Get(GpuProcessHost::GPU_PROCESS_KIND_SANDBOXED, false);
+    if (gpu_process_host) {
+      gpu_process_host->RequestHDRStatus(
+          base::Bind(&HDRProxy::GotResultOnIOThread));
+    } else {
+      bool hdr_enabled = false;
+      GotResultOnIOThread(hdr_enabled);
+    }
+  }
+  static void GotResultOnIOThread(bool hdr_enabled) {
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            base::Bind(&HDRProxy::GotResult, hdr_enabled));
+  }
+  static void GotResult(bool hdr_enabled) {
+    display::win::ScreenWin::SetHDREnabled(hdr_enabled);
+  }
+};
+
+}  // namespace
 #endif
 
 // The currently-running BrowserMainLoop.  There can be one or zero.
@@ -735,35 +782,6 @@ void BrowserMainLoop::PostMainMessageLoopStart() {
   if (parts_)
     parts_->PostMainMessageLoopStart();
 
-  // Start startup tracing through TracingController's interface. TraceLog has
-  // been enabled in content_main_runner where threads are not available. Now We
-  // need to start tracing for all other tracing agents, which require threads.
-  if (parsed_command_line_.HasSwitch(switches::kTraceStartup)) {
-    base::trace_event::TraceConfig trace_config(
-        parsed_command_line_.GetSwitchValueASCII(switches::kTraceStartup),
-        base::trace_event::RECORD_UNTIL_FULL);
-    TracingController::GetInstance()->StartTracing(
-        trace_config,
-        TracingController::StartTracingDoneCallback());
-  } else if (parsed_command_line_.HasSwitch(switches::kTraceToConsole)) {
-      TracingController::GetInstance()->StartTracing(
-          tracing::GetConfigForTraceToConsole(),
-          TracingController::StartTracingDoneCallback());
-  } else if (tracing::TraceConfigFile::GetInstance()->IsEnabled()) {
-    // This checks kTraceConfigFile switch.
-    TracingController::GetInstance()->StartTracing(
-        tracing::TraceConfigFile::GetInstance()->GetTraceConfig(),
-        TracingController::StartTracingDoneCallback());
-  }
-  // Start tracing to a file for certain duration if needed. Only do this after
-  // starting the main message loop to avoid calling
-  // MessagePumpForUI::ScheduleWork() before MessagePumpForUI::Start() as it
-  // will crash the browser.
-  if (is_tracing_startup_for_duration_) {
-    TRACE_EVENT0("startup", "BrowserMainLoop::InitStartupTracingForDuration");
-    InitStartupTracingForDuration(parsed_command_line_);
-  }
-
 #if defined(OS_ANDROID)
   {
     TRACE_EVENT0("startup",
@@ -780,14 +798,6 @@ void BrowserMainLoop::PostMainMessageLoopStart() {
                  "BrowserMainLoop::Subsystem:ScreenOrientationProvider");
     screen_orientation_delegate_.reset(
         new ScreenOrientationDelegateAndroid());
-  }
-#endif
-
-#if defined(OS_MACOSX)
-  if (BootstrapSandboxManager::ShouldEnable()) {
-    TRACE_EVENT0("startup",
-                 "BrowserMainLoop::Subsystem:BootstrapSandbox");
-    CHECK(BootstrapSandboxManager::GetInstance());
   }
 #endif
 
@@ -867,7 +877,7 @@ int BrowserMainLoop::PreCreateThreads() {
   }
 #endif
 
-#if BUILDFLAG(ENABLE_MOJO_CDM) && BUILDFLAG(ENABLE_LIBRARY_CDMS)
+#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
   // Prior to any processing happening on the IO thread, we create the
   // CDM service as it is predominantly used from the IO thread. This must
   // be called on the main thread since it involves file path checks.
@@ -1359,16 +1369,6 @@ void BrowserMainLoop::ShutdownThreadsAndCleanUp() {
       }
     }
 
-    // Close the blocking I/O pool after the other threads. Other threads such
-    // as the I/O thread may need to schedule work like closing files or
-    // flushing data during shutdown, so the blocking pool needs to be
-    // available. There may also be slow operations pending that will blcok
-    // shutdown, so closing it here (which will block until required operations
-    // are complete) gives more head start for those operations to finish.
-    {
-      TRACE_EVENT0("shutdown", "BrowserMainLoop::Subsystem:ThreadPool");
-      BrowserThreadImpl::ShutdownThreadPool();
-    }
     {
       TRACE_EVENT0("shutdown", "BrowserMainLoop::Subsystem:TaskScheduler");
       base::TaskScheduler::GetInstance()->Shutdown();
@@ -1439,26 +1439,13 @@ int BrowserMainLoop::BrowserThreadsStarted() {
   // so this cannot happen any earlier than now.
   InitializeMojo();
 
-  // Create the memory instrumentation service. It will initialize the memory
-  // dump manager, too. It makes sense that BrowserMainLoop owns the service;
-  // this way, the service is alive for the lifetime of Mojo. Mojo is shutdown
-  // in BrowserMainLoop::ShutdownThreadsAndCleanupIO.
-  service_manager::Connector* connector =
-      content::ServiceManagerConnection::GetForProcess()->GetConnector();
-  memory_instrumentation_coordinator_ =
-      base::MakeUnique<memory_instrumentation::CoordinatorImpl>(connector);
-
-  // Registers the browser process as a memory-instrumentation client, so
-  // that data for the browser process will be available in memory dumps.
-  memory_instrumentation::ClientProcessImpl::Config config(
-      connector, mojom::kBrowserServiceName,
-      memory_instrumentation::mojom::ProcessType::BROWSER);
-  memory_instrumentation::ClientProcessImpl::CreateInstance(config);
-
+  const bool is_mus = IsUsingMus();
 #if defined(USE_AURA)
-  if (IsUsingMus()) {
+  if (is_mus) {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kIsRunningInMash);
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kEnableSurfaceSynchronization);
   }
 #endif
 
@@ -1469,10 +1456,8 @@ int BrowserMainLoop::BrowserThreadsStarted() {
 #endif
 
 #if BUILDFLAG(ENABLE_VULKAN)
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableVulkan)) {
+  if (parsed_command_line_.HasSwitch(switches::kEnableVulkan))
     gpu::InitializeVulkan();
-  }
 #endif
 
   // Initialize the GPU shader cache. This needs to be initialized before
@@ -1492,39 +1477,38 @@ int BrowserMainLoop::BrowserThreadsStarted() {
   established_gpu_channel = true;
   if (!GpuDataManagerImpl::GetInstance()->CanUseGpuBrowserCompositor() ||
       parsed_command_line_.HasSwitch(switches::kDisableGpuEarlyInit) ||
-      IsUsingMus()) {
+      is_mus) {
     established_gpu_channel = always_uses_gpu = false;
   }
-  gpu::GpuChannelEstablishFactory* factory =
-      GetContentClient()->browser()->GetGpuChannelEstablishFactory();
-  if (!factory) {
-    BrowserGpuChannelHostFactory::Initialize(established_gpu_channel);
-    factory = BrowserGpuChannelHostFactory::instance();
-  }
-#if !defined(OS_ANDROID)
-  if (!IsUsingMus()) {
-    // TODO(kylechar): Remove flag along with surface sequences.
-    // See https://crbug.com/676384.
-    auto surface_lifetime_type =
-        base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kDisableSurfaceReferences)
-            ? viz::SurfaceManager::LifetimeType::SEQUENCES
-            : viz::SurfaceManager::LifetimeType::REFERENCES;
-    frame_sink_manager_impl_ =
-        std::make_unique<viz::FrameSinkManagerImpl>(surface_lifetime_type);
 
+  if (!is_mus) {
     host_frame_sink_manager_ = base::MakeUnique<viz::HostFrameSinkManager>();
 
-    // TODO(danakj): Don't make a FrameSinkManagerImpl when display is in the
-    // Gpu process, instead get the mojo pointer from the Gpu process.
-    surface_utils::ConnectWithLocalFrameSinkManager(
-        host_frame_sink_manager_.get(), frame_sink_manager_impl_.get());
-  }
-#endif
+    BrowserGpuChannelHostFactory::Initialize(established_gpu_channel);
 
-  DCHECK(factory);
-  ImageTransportFactory::Initialize(GetResizeTaskRunner());
-  ImageTransportFactory::GetInstance()->SetGpuChannelEstablishFactory(factory);
+    if (parsed_command_line_.HasSwitch(switches::kEnableViz)) {
+      auto transport_factory = std::make_unique<VizProcessTransportFactory>(
+          BrowserGpuChannelHostFactory::instance(), GetResizeTaskRunner());
+      transport_factory->ConnectHostFrameSinkManager();
+      ImageTransportFactory::SetFactory(std::move(transport_factory));
+    } else {
+      // TODO(crbug.com/676384): Remove flag along with surface sequences.
+      auto surface_lifetime_type =
+          parsed_command_line_.HasSwitch(switches::kDisableSurfaceReferences)
+              ? viz::SurfaceManager::LifetimeType::SEQUENCES
+              : viz::SurfaceManager::LifetimeType::REFERENCES;
+      frame_sink_manager_impl_ =
+          std::make_unique<viz::FrameSinkManagerImpl>(surface_lifetime_type);
+
+      surface_utils::ConnectWithLocalFrameSinkManager(
+          host_frame_sink_manager_.get(), frame_sink_manager_impl_.get());
+
+      ImageTransportFactory::SetFactory(
+          std::make_unique<GpuProcessTransportFactory>(
+              BrowserGpuChannelHostFactory::instance(), GetResizeTaskRunner()));
+    }
+  }
+
 #if defined(USE_AURA)
   if (env_->mode() == aura::Env::Mode::LOCAL) {
     env_->set_context_factory(GetContextFactory());
@@ -1550,6 +1534,8 @@ int BrowserMainLoop::BrowserThreadsStarted() {
   }
 
 #if defined(OS_WIN)
+  if (base::FeatureList::IsEnabled(features::kHighDynamicRange))
+    HDRProxy::Initialize();
   system_message_window_.reset(new media::SystemMessageWindowWin);
 #elif defined(OS_LINUX) && defined(USE_UDEV)
   device_monitor_linux_.reset(
@@ -1626,7 +1612,7 @@ int BrowserMainLoop::BrowserThreadsStarted() {
   // ChildProcess instance which is created by the renderer thread.
   if (GpuDataManagerImpl::GetInstance()->GpuAccessAllowed(NULL) &&
       !established_gpu_channel && always_uses_gpu && !UsingInProcessGpu() &&
-      !IsUsingMus()) {
+      !is_mus) {
     TRACE_EVENT_INSTANT0("gpu", "Post task to launch GPU process",
                          TRACE_EVENT_SCOPE_THREAD);
     BrowserThread::PostTask(
@@ -1761,6 +1747,48 @@ void BrowserMainLoop::InitializeMojo() {
 #endif  // defined(OS_MACOSX)
   GetContentClient()->OnServiceManagerConnected(
       ServiceManagerConnection::GetForProcess());
+
+  tracing_controller_ = base::MakeUnique<content::TracingControllerImpl>();
+  content::BackgroundTracingManagerImpl::GetInstance()
+      ->AddMetadataGeneratorFunction();
+
+  // Registers the browser process as a memory-instrumentation client, so
+  // that data for the browser process will be available in memory dumps.
+  service_manager::Connector* connector =
+      content::ServiceManagerConnection::GetForProcess()->GetConnector();
+  memory_instrumentation::ClientProcessImpl::Config config(
+      connector, resource_coordinator::mojom::kServiceName,
+      memory_instrumentation::mojom::ProcessType::BROWSER);
+  memory_instrumentation::ClientProcessImpl::CreateInstance(config);
+
+  // Start startup tracing through TracingController's interface. TraceLog has
+  // been enabled in content_main_runner where threads are not available. Now We
+  // need to start tracing for all other tracing agents, which require threads.
+  if (parsed_command_line_.HasSwitch(switches::kTraceStartup)) {
+    base::trace_event::TraceConfig trace_config(
+        parsed_command_line_.GetSwitchValueASCII(switches::kTraceStartup),
+        base::trace_event::RECORD_UNTIL_FULL);
+    TracingController::GetInstance()->StartTracing(
+        trace_config, TracingController::StartTracingDoneCallback());
+  } else if (parsed_command_line_.HasSwitch(switches::kTraceToConsole)) {
+    TracingController::GetInstance()->StartTracing(
+        tracing::GetConfigForTraceToConsole(),
+        TracingController::StartTracingDoneCallback());
+  } else if (tracing::TraceConfigFile::GetInstance()->IsEnabled()) {
+    // This checks kTraceConfigFile switch.
+    TracingController::GetInstance()->StartTracing(
+        tracing::TraceConfigFile::GetInstance()->GetTraceConfig(),
+        TracingController::StartTracingDoneCallback());
+  }
+  // Start tracing to a file for certain duration if needed. Only do this after
+  // starting the main message loop to avoid calling
+  // MessagePumpForUI::ScheduleWork() before MessagePumpForUI::Start() as it
+  // will crash the browser.
+  if (is_tracing_startup_for_duration_) {
+    TRACE_EVENT0("startup", "BrowserMainLoop::InitStartupTracingForDuration");
+    InitStartupTracingForDuration(parsed_command_line_);
+  }
+
   if (parts_) {
     parts_->ServiceManagerConnectionStarted(
         ServiceManagerConnection::GetForProcess());
@@ -1828,7 +1856,7 @@ void BrowserMainLoop::EndStartupTracing() {
 
   is_tracing_startup_for_duration_ = false;
   TracingController::GetInstance()->StopTracing(
-      TracingController::CreateFileSink(
+      TracingController::CreateFileEndpoint(
           startup_trace_file_,
           base::Bind(OnStoppedStartupTracing, startup_trace_file_)));
 }
@@ -1844,8 +1872,7 @@ void BrowserMainLoop::CreateAudioManager() {
         MediaInternals::GetInstance());
   }
   CHECK(audio_manager_);
-
-  audio_system_ = media::AudioSystemImpl::Create(audio_manager_.get());
+  audio_system_ = media::AudioSystem::CreateInstance();
   CHECK(audio_system_);
 }
 

@@ -31,7 +31,7 @@ const int kFeatureListForEntry3[1] = {
 };
 
 const int kFeatureListForEntry4[2] = {
-    GPU_FEATURE_TYPE_WEBGL2, GPU_FEATURE_TYPE_ACCELERATED_WEBGL,
+    GPU_FEATURE_TYPE_ACCELERATED_WEBGL2, GPU_FEATURE_TYPE_ACCELERATED_WEBGL,
 };
 
 const GpuControlList::GLStrings kGLStringsForEntry4 = {
@@ -94,7 +94,7 @@ const GpuControlList::DriverInfo kDriverInfoForEntry8 = {
      nullptr},  // driver_date
 };
 
-const int kFeatureListForEntry9[11] = {
+const int kFeatureListForEntry9[10] = {
     GPU_FEATURE_TYPE_FLASH_STAGE3D,
     GPU_FEATURE_TYPE_GPU_COMPOSITING,
     GPU_FEATURE_TYPE_PANEL_FITTING,
@@ -102,10 +102,9 @@ const int kFeatureListForEntry9[11] = {
     GPU_FEATURE_TYPE_GPU_RASTERIZATION,
     GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS,
     GPU_FEATURE_TYPE_ACCELERATED_VIDEO_DECODE,
-    GPU_FEATURE_TYPE_WEBGL2,
+    GPU_FEATURE_TYPE_ACCELERATED_WEBGL2,
     GPU_FEATURE_TYPE_ACCELERATED_WEBGL,
     GPU_FEATURE_TYPE_FLASH_STAGE3D_BASELINE,
-    GPU_FEATURE_TYPE_ACCELERATED_VIDEO_ENCODE,
 };
 
 const int kFeatureListForEntry10[1] = {

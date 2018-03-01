@@ -21,6 +21,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/scoped_task_environment.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -38,6 +39,7 @@
 #include "ui/gfx/range/range.h"
 #include "ui/gfx/range/range_f.h"
 #include "ui/gfx/render_text_harfbuzz.h"
+#include "ui/gfx/switches.h"
 #include "ui/gfx/text_utils.h"
 
 #if defined(OS_WIN)
@@ -437,11 +439,11 @@ class RenderTextTest : public testing::Test,
   std::unique_ptr<RenderText> CreateRenderTextInstance() const {
     switch (GetParam()) {
       case RENDER_TEXT_HARFBUZZ:
-        return base::MakeUnique<RenderTextHarfBuzz>();
+        return std::make_unique<RenderTextHarfBuzz>();
 
       case RENDER_TEXT_MAC:
 #if defined(OS_MACOSX)
-        return base::MakeUnique<RenderTextMac>();
+        return std::make_unique<RenderTextMac>();
 #else
         break;
 #endif
@@ -1075,7 +1077,10 @@ TEST_P(RenderTextTest, ElidedObscuredText) {
   std::unique_ptr<RenderText> expected_render_text(CreateRenderTextInstance());
   expected_render_text->SetFontList(FontList("serif, Sans serif, 12px"));
   expected_render_text->SetDisplayRect(Rect(0, 0, 9999, 100));
-  expected_render_text->SetText(UTF8ToUTF16("**\u2026"));
+  const base::char16 elided_obscured_text[] = {
+      RenderText::kPasswordReplacementChar,
+      RenderText::kPasswordReplacementChar, 0x2026, 0};
+  expected_render_text->SetText(elided_obscured_text);
 
   RenderText* render_text = GetRenderText();
   render_text->SetFontList(FontList("serif, Sans serif, 12px"));
@@ -1085,7 +1090,7 @@ TEST_P(RenderTextTest, ElidedObscuredText) {
   render_text->SetObscured(true);
   render_text->SetText(UTF8ToUTF16("abcdef"));
   EXPECT_EQ(UTF8ToUTF16("abcdef"), render_text->text());
-  EXPECT_EQ(UTF8ToUTF16("**\u2026"), render_text->GetDisplayText());
+  EXPECT_EQ(elided_obscured_text, render_text->GetDisplayText());
 }
 
 #endif  // !defined(OS_MACOSX)
@@ -1530,6 +1535,9 @@ TEST_P(RenderTextTest, GetDisplayTextDirection) {
       render_text->SetDirectionalityMode(DIRECTIONALITY_FORCE_RTL);
       EXPECT_EQ(render_text->GetDisplayTextDirection(),
                 base::i18n::RIGHT_TO_LEFT);
+      render_text->SetDirectionalityMode(DIRECTIONALITY_AS_URL);
+      EXPECT_EQ(render_text->GetDisplayTextDirection(),
+                base::i18n::LEFT_TO_RIGHT);
     }
   }
 
@@ -2086,22 +2094,22 @@ TEST_P(RenderTextTest, CenteredDisplayOffset) {
 void MoveLeftRightByWordVerifier(RenderText* render_text, const char* str) {
   render_text->SetText(UTF8ToUTF16(str));
 
-  // Test moving by word from left ro right.
+  // Test moving by word from left to right.
   render_text->MoveCursor(LINE_BREAK, CURSOR_LEFT, SELECTION_NONE);
   bool first_word = true;
   while (true) {
     // First, test moving by word from a word break position, such as from
     // "|abc def" to "abc| def".
-    SelectionModel start = render_text->selection_model();
+    const SelectionModel start = render_text->selection_model();
     render_text->MoveCursor(WORD_BREAK, CURSOR_RIGHT, SELECTION_NONE);
-    SelectionModel end = render_text->selection_model();
+    const SelectionModel end = render_text->selection_model();
     if (end == start)  // reach the end.
       break;
 
     // For testing simplicity, each word is a 3-character word.
     int num_of_character_moves = first_word ? 3 : 4;
     first_word = false;
-    render_text->MoveCursorTo(start);
+    render_text->SetSelection(start);
     for (int j = 0; j < num_of_character_moves; ++j)
       render_text->MoveCursor(CHARACTER_BREAK, CURSOR_RIGHT, SELECTION_NONE);
     EXPECT_EQ(end, render_text->selection_model());
@@ -2109,7 +2117,7 @@ void MoveLeftRightByWordVerifier(RenderText* render_text, const char* str) {
     // Then, test moving by word from positions inside the word, such as from
     // "a|bc def" to "abc| def", and from "ab|c def" to "abc| def".
     for (int j = 1; j < num_of_character_moves; ++j) {
-      render_text->MoveCursorTo(start);
+      render_text->SetSelection(start);
       for (int k = 0; k < j; ++k)
         render_text->MoveCursor(CHARACTER_BREAK, CURSOR_RIGHT, SELECTION_NONE);
       render_text->MoveCursor(WORD_BREAK, CURSOR_RIGHT, SELECTION_NONE);
@@ -2121,21 +2129,21 @@ void MoveLeftRightByWordVerifier(RenderText* render_text, const char* str) {
   render_text->MoveCursor(LINE_BREAK, CURSOR_RIGHT, SELECTION_NONE);
   first_word = true;
   while (true) {
-    SelectionModel start = render_text->selection_model();
+    const SelectionModel start = render_text->selection_model();
     render_text->MoveCursor(WORD_BREAK, CURSOR_LEFT, SELECTION_NONE);
-    SelectionModel end = render_text->selection_model();
+    const SelectionModel end = render_text->selection_model();
     if (end == start)  // reach the end.
       break;
 
     int num_of_character_moves = first_word ? 3 : 4;
     first_word = false;
-    render_text->MoveCursorTo(start);
+    render_text->SetSelection(start);
     for (int j = 0; j < num_of_character_moves; ++j)
       render_text->MoveCursor(CHARACTER_BREAK, CURSOR_LEFT, SELECTION_NONE);
     EXPECT_EQ(end, render_text->selection_model());
 
     for (int j = 1; j < num_of_character_moves; ++j) {
-      render_text->MoveCursorTo(start);
+      render_text->SetSelection(start);
       for (int k = 0; k < j; ++k)
         render_text->MoveCursor(CHARACTER_BREAK, CURSOR_LEFT, SELECTION_NONE);
       render_text->MoveCursor(WORD_BREAK, CURSOR_LEFT, SELECTION_NONE);
@@ -2224,11 +2232,11 @@ TEST_P(RenderTextHarfBuzzTest, MoveLeftRightByWordInBidiText_TestEndOfText) {
 TEST_P(RenderTextHarfBuzzTest, MoveLeftRightByWordInTextWithMultiSpaces) {
   RenderText* render_text = GetRenderText();
   render_text->SetText(UTF8ToUTF16("abc     def"));
-  render_text->MoveCursorTo(SelectionModel(5, CURSOR_FORWARD));
+  render_text->SetCursorPosition(5);
   render_text->MoveCursor(WORD_BREAK, CURSOR_RIGHT, SELECTION_NONE);
   EXPECT_EQ(11U, render_text->cursor_position());
 
-  render_text->MoveCursorTo(SelectionModel(5, CURSOR_FORWARD));
+  render_text->SetCursorPosition(5);
   render_text->MoveCursor(WORD_BREAK, CURSOR_LEFT, SELECTION_NONE);
   EXPECT_EQ(0U, render_text->cursor_position());
 }
@@ -2250,6 +2258,120 @@ TEST_P(RenderTextHarfBuzzTest, MoveLeftRightByWordInChineseText) {
   EXPECT_EQ(6U, render_text->cursor_position());
   render_text->MoveCursor(WORD_BREAK, CURSOR_RIGHT, SELECTION_NONE);
   EXPECT_EQ(6U, render_text->cursor_position());
+}
+
+// Test the correct behavior of undirected selections: selections where the
+// "end" of the selection that holds the cursor is only determined after the
+// first cursor movement.
+TEST_P(RenderTextHarfBuzzTest, DirectedSelections) {
+  RenderText* render_text = GetRenderText();
+
+  auto ResultAfter = [&](VisualCursorDirection direction) -> base::string16 {
+    render_text->MoveCursor(CHARACTER_BREAK, direction, SELECTION_RETAIN);
+    return GetSelectedText(render_text);
+  };
+
+  render_text->SetText(UTF8ToUTF16("01234"));
+
+  // Test Right, then Left. LTR.
+  // Undirected, or forward when kSelectionIsAlwaysDirected.
+  render_text->SelectRange({2, 4});
+  EXPECT_EQ(UTF8ToUTF16("23"), GetSelectedText(render_text));
+  EXPECT_EQ(UTF8ToUTF16("234"), ResultAfter(CURSOR_RIGHT));
+  EXPECT_EQ(UTF8ToUTF16("23"), ResultAfter(CURSOR_LEFT));
+
+  // Test collapsing the selection. This always ignores any existing direction.
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_LEFT, SELECTION_NONE);
+  EXPECT_EQ(Range(2, 2), render_text->selection());  // Collapse left.
+
+  // Undirected, or backward when kSelectionIsAlwaysDirected.
+  render_text->SelectRange({4, 2});
+  EXPECT_EQ(UTF8ToUTF16("23"), GetSelectedText(render_text));
+  if (RenderText::kSelectionIsAlwaysDirected)
+    EXPECT_EQ(UTF8ToUTF16("3"), ResultAfter(CURSOR_RIGHT));  // Keep left.
+  else
+    EXPECT_EQ(UTF8ToUTF16("234"), ResultAfter(CURSOR_RIGHT));  // Pick right.
+  EXPECT_EQ(UTF8ToUTF16("23"), ResultAfter(CURSOR_LEFT));
+
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_LEFT, SELECTION_NONE);
+  EXPECT_EQ(Range(2, 2), render_text->selection());  // Collapse left.
+
+  // Test Left, then Right. LTR.
+  // Undirected, or forward when kSelectionIsAlwaysDirected.
+  render_text->SelectRange({2, 4});
+  EXPECT_EQ(UTF8ToUTF16("23"), GetSelectedText(render_text));  // Sanity check,
+
+  if (RenderText::kSelectionIsAlwaysDirected)
+    EXPECT_EQ(UTF8ToUTF16("2"), ResultAfter(CURSOR_LEFT));  // Keep right.
+  else
+    EXPECT_EQ(UTF8ToUTF16("123"), ResultAfter(CURSOR_LEFT));  // Pick left.
+  EXPECT_EQ(UTF8ToUTF16("23"), ResultAfter(CURSOR_RIGHT));
+
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_RIGHT, SELECTION_NONE);
+  EXPECT_EQ(Range(4, 4), render_text->selection());  // Collapse right.
+
+  // Undirected, or backward when kSelectionIsAlwaysDirected.
+  render_text->SelectRange({4, 2});
+  EXPECT_EQ(UTF8ToUTF16("23"), GetSelectedText(render_text));
+  EXPECT_EQ(UTF8ToUTF16("123"), ResultAfter(CURSOR_LEFT));
+  EXPECT_EQ(UTF8ToUTF16("23"), ResultAfter(CURSOR_RIGHT));
+
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_RIGHT, SELECTION_NONE);
+  EXPECT_EQ(Range(4, 4), render_text->selection());  // Collapse right.
+
+  auto ToHebrew = [](const char* digits) -> base::string16 {
+    const base::string16 hebrew = UTF8ToUTF16("אבגדח");  // Roughly "abcde".
+    DCHECK_EQ(5u, hebrew.size());
+    base::string16 result;
+    for (const char* d = digits; *d; d++)
+      result += hebrew[*d - '0'];
+    return result;
+  };
+  render_text->SetText(ToHebrew("01234"));
+
+  // Test Left, then Right. RTL.
+  // Undirected, or forward (to the left) when kSelectionIsAlwaysDirected.
+  render_text->SelectRange({2, 4});
+  EXPECT_EQ(ToHebrew("23"), GetSelectedText(render_text));
+  EXPECT_EQ(ToHebrew("234"), ResultAfter(CURSOR_LEFT));
+  EXPECT_EQ(ToHebrew("23"), ResultAfter(CURSOR_RIGHT));
+
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_LEFT, SELECTION_NONE);
+  EXPECT_EQ(Range(4, 4), render_text->selection());  // Collapse left.
+
+  // Undirected, or backward (to the right) when kSelectionIsAlwaysDirected.
+  render_text->SelectRange({4, 2});
+  EXPECT_EQ(ToHebrew("23"), GetSelectedText(render_text));
+  if (RenderText::kSelectionIsAlwaysDirected)
+    EXPECT_EQ(ToHebrew("3"), ResultAfter(CURSOR_LEFT));  // Keep right.
+  else
+    EXPECT_EQ(ToHebrew("234"), ResultAfter(CURSOR_LEFT));  // Pick left.
+  EXPECT_EQ(ToHebrew("23"), ResultAfter(CURSOR_RIGHT));
+
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_LEFT, SELECTION_NONE);
+  EXPECT_EQ(Range(4, 4), render_text->selection());  // Collapse left.
+
+  // Test Right, then Left. RTL.
+  // Undirected, or forward (to the left) when kSelectionIsAlwaysDirected.
+  render_text->SelectRange({2, 4});
+  EXPECT_EQ(ToHebrew("23"), GetSelectedText(render_text));
+  if (RenderText::kSelectionIsAlwaysDirected)
+    EXPECT_EQ(ToHebrew("2"), ResultAfter(CURSOR_RIGHT));  // Keep left.
+  else
+    EXPECT_EQ(ToHebrew("123"), ResultAfter(CURSOR_RIGHT));  // Pick right.
+  EXPECT_EQ(ToHebrew("23"), ResultAfter(CURSOR_LEFT));
+
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_RIGHT, SELECTION_NONE);
+  EXPECT_EQ(Range(2, 2), render_text->selection());  // Collapse right.
+
+  // Undirected, or backward (to the right) when kSelectionIsAlwaysDirected.
+  render_text->SelectRange({4, 2});
+  EXPECT_EQ(ToHebrew("23"), GetSelectedText(render_text));
+  EXPECT_EQ(ToHebrew("123"), ResultAfter(CURSOR_RIGHT));
+  EXPECT_EQ(ToHebrew("23"), ResultAfter(CURSOR_LEFT));
+
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_RIGHT, SELECTION_NONE);
+  EXPECT_EQ(Range(2, 2), render_text->selection());  // Collapse right.
 }
 
 TEST_P(RenderTextTest, StringSizeSanity) {
@@ -2810,8 +2932,7 @@ TEST_P(RenderTextHarfBuzzTest, DisplayRectShowsCursorLTR) {
 
   RenderText* render_text = GetRenderText();
   render_text->SetText(UTF8ToUTF16("abcdefghijklmnopqrstuvwxzyabcdefg"));
-  render_text->MoveCursorTo(SelectionModel(render_text->text().length(),
-                                           CURSOR_FORWARD));
+  render_text->SetCursorPosition(render_text->text().length());
   int width = render_text->GetStringSize().width();
   ASSERT_GT(width, 10);
 
@@ -2837,7 +2958,7 @@ TEST_P(RenderTextHarfBuzzTest, DisplayRectShowsCursorLTR) {
   render_text->SetText(
       UTF8ToUTF16("\u05d0\u05d1\u05d2\u05d3\u05d4\u05d5\u05d6\u05d7"
                   "\u05d8\u05d9\u05da\u05db\u05dc\u05dd\u05de\u05df"));
-  render_text->MoveCursorTo(SelectionModel(0, CURSOR_FORWARD));
+  render_text->SetCursorPosition(0);
   width = render_text->GetStringSize().width();
   ASSERT_GT(width, 10);
 
@@ -2869,7 +2990,7 @@ TEST_P(RenderTextTest, DisplayRectShowsCursorRTL) {
   ResetRenderTextInstance();
   RenderText* render_text = GetRenderText();
   render_text->SetText(UTF8ToUTF16("abcdefghijklmnopqrstuvwxzyabcdefg"));
-  render_text->MoveCursorTo(SelectionModel(0, CURSOR_FORWARD));
+  render_text->SetCursorPosition(0);
   int width = render_text->GetStringSize().width();
   ASSERT_GT(width, 10);
 
@@ -2895,8 +3016,7 @@ TEST_P(RenderTextTest, DisplayRectShowsCursorRTL) {
   render_text->SetText(
       UTF8ToUTF16("\u05d0\u05d1\u05d2\u05d3\u05d4\u05d5\u05d6\u05d7"
                   "\u05d8\u05d9\u05da\u05db\u05dc\u05dd\u05de\u05df"));
-  render_text->MoveCursorTo(SelectionModel(render_text->text().length(),
-                                           CURSOR_FORWARD));
+  render_text->SetCursorPosition(render_text->text().length());
   width = render_text->GetStringSize().width();
   ASSERT_GT(width, 10);
 
@@ -2932,11 +3052,11 @@ TEST_P(RenderTextTest, SelectionKeepsLigatures) {
   for (size_t i = 0; i < arraysize(kTestStrings); ++i) {
     render_text->SetText(UTF8ToUTF16(kTestStrings[i]));
     const int expected_width = render_text->GetStringSize().width();
-    render_text->MoveCursorTo(SelectionModel(Range(0, 1), CURSOR_FORWARD));
+    render_text->SelectRange({0, 1});
     EXPECT_EQ(expected_width, render_text->GetStringSize().width());
     // Drawing the text should not DCHECK or crash; see http://crbug.com/262119
     render_text->Draw(canvas());
-    render_text->MoveCursorTo(SelectionModel(0, CURSOR_FORWARD));
+    render_text->SetCursorPosition(0);
   }
 }
 
@@ -3685,6 +3805,101 @@ TEST_P(RenderTextHarfBuzzTest, HarfBuzz_RunDirection) {
   EXPECT_EQ("[8->10][7<-6][2->5][1<-0]", GetRunListStructureString());
 }
 
+TEST_P(RenderTextHarfBuzzTest, HarfBuzz_RunDirection_URLs) {
+  RenderTextHarfBuzz* render_text = GetRenderTextHarfBuzz();
+  // This string, unescaped (logical order):
+  // ‭www.אב.גד/הוabc/def?זח=טי‬
+  const base::string16 mixed = UTF8ToUTF16(
+      "www.\u05D0\u05D1.\u05D2\u05D3/\u05D4\u05D5"
+      "abc/def?\u05D6\u05D7=\u05D8\u05D9");
+  render_text->SetText(mixed);
+
+  // Normal LTR text should treat URL syntax as weak (as per the normal Bidi
+  // algorithm).
+  render_text->SetDirectionalityMode(DIRECTIONALITY_FORCE_LTR);
+  test_api()->EnsureLayout();
+
+  // This is complex because a new run is created for each punctuation mark, but
+  // it simplifies down to: [0->3][11<-4][12->19][24<-20]
+  // Should render as: ‭www.וה/דג.באabc/def?יט=חז‬
+  const char kExpectedRunListNormalBidi[] =
+      "[0->2][3][11<-10][9][8<-7][6][5<-4][12->14][15][16->18][19][24<-23][22]"
+      "[21<-20]";
+  EXPECT_EQ(kExpectedRunListNormalBidi, GetRunListStructureString());
+
+  // DIRECTIONALITY_AS_URL should be exactly the same as
+  // DIRECTIONALITY_FORCE_LTR by default.
+  render_text->SetDirectionalityMode(DIRECTIONALITY_AS_URL);
+  test_api()->EnsureLayout();
+  EXPECT_EQ(kExpectedRunListNormalBidi, GetRunListStructureString());
+
+  // Test the above again, but with LeftToRightUrls feature enabled.
+  base::test::ScopedFeatureList scoped_list;
+  scoped_list.InitAndEnableFeature(features::kLeftToRightUrls);
+
+  // DIRECTIONALITY_FORCE_LTR should be the same as above.
+  render_text->SetDirectionalityMode(DIRECTIONALITY_FORCE_LTR);
+  test_api()->EnsureLayout();
+  EXPECT_EQ(kExpectedRunListNormalBidi, GetRunListStructureString());
+
+  // DIRECTIONALITY_AS_URL should treat URL syntax as strong LTR, to ensure
+  // isolation between RTL characters in different components of the URL.
+  render_text->SetDirectionalityMode(DIRECTIONALITY_AS_URL);
+  test_api()->EnsureLayout();
+  // TODO(mgiuca): Consider whether the rule should instead be "treat URL syntax
+  // as delimiters for FIRST STRONG ISOLATEs", which would result in [12->14]
+  // appearing to the left of [11<-10] (because the first strong character in
+  // the range 10-14 is RTL).
+  // Should render as: ‭www.בא.דג/והabc/def?חז=יט‬
+  const char kExpectedRunListURLLayout[] =
+      "[0->2][3][5<-4][6][8<-7][9][11<-10][12->14][15][16->18][19][21<-20][22]"
+      "[24<-23]";
+  EXPECT_EQ(kExpectedRunListURLLayout, GetRunListStructureString());
+}
+
+// More detailed tests of the LeftToRightUrls flag.
+TEST_P(RenderTextHarfBuzzTest, HarfBuzz_RunDirection_URLs_LeftToRight) {
+  base::test::ScopedFeatureList scoped_list;
+  scoped_list.InitAndEnableFeature(features::kLeftToRightUrls);
+
+  RenderTextHarfBuzz* render_text = GetRenderTextHarfBuzz();
+  render_text->SetDirectionalityMode(DIRECTIONALITY_AS_URL);
+
+  // Systematic test of all ASCII punctuation marks, interleaved with the Hebrew
+  // alphabet. Those that count as delimiters (#&./:=?@) should break up the RTL
+  // run, while those that don't should be treated as RTL characters.
+  render_text->SetText(UTF8ToUTF16(
+      "\u05d0!\u05d1\"\u05d2#\u05d3$\u05d4%\u05d5&\u05d6'\u05d7(\u05d8)\u05d9*"
+      "\u05da+\u05db,\u05dc-\u05dd.\u05de/\u05df:\u05e0;\u05e1<\u05e2=\u05e3>"
+      "\u05e4?\u05e5@\u05e6[\u05e7\\\u05e8]\u05e9^\u05ea_\u05d0`\u05d1{\u05d2|"
+      "\u05d3}\u05d4~\u05d5"));
+  test_api()->EnsureLayout();
+
+  // This simplifies as:
+  // "[4<-0][5][10<-6][11][26<-12][27->31][36<-32][37][40<-38][41->43][64<-44]";
+  const char kExpectedRunListAllPunctuation[] =
+      "[4][3][2][1][0][5][10][9][8][7][6][11][26][25][24][23][22][21][20][19]"
+      "[18][17][16][15][14][13][12][27][28][29][30][31][36][35][34][33][32][37]"
+      "[40][39][38][41][42][43][64][63][62][61][60][59][58][57][56][55][54][53]"
+      "[52][51][50][49][48][47][46][45][44]";
+  EXPECT_EQ(kExpectedRunListAllPunctuation, GetRunListStructureString());
+
+  // Test Arabic instead of Hebrew.
+  // This string, unescaped (logical order):
+  // ‭www.ؠء.آأ/ؤإabc/def?ئا=بة‬
+  render_text->SetText(
+      UTF8ToUTF16("www.\u0620\u0621.\u0622\u0623/\u0624\u0625"
+                  "abc/def?\u0626\u0627=\u0628\u0629"));
+  test_api()->EnsureLayout();
+
+  // Should render as: ‭www.ءؠ.أآ/إؤabc/def?ائ=ةب‬
+  // Same expected run list as in HarfBuzz_RunDirection_URLs.
+  const char kExpectedRunListArabic[] =
+      "[0->2][3][5<-4][6][8<-7][9][11<-10][12->14][15][16->18][19][21<-20][22]"
+      "[24<-23]";
+  EXPECT_EQ(kExpectedRunListArabic, GetRunListStructureString());
+}
+
 TEST_P(RenderTextHarfBuzzTest, HarfBuzz_BreakRunsByUnicodeBlocks) {
   RenderTextHarfBuzz* render_text = GetRenderTextHarfBuzz();
 
@@ -3723,6 +3938,30 @@ TEST_P(RenderTextHarfBuzzTest, HarfBuzz_BreakRunsByAscii) {
   EXPECT_EQ(ToString16Vec({"🐱", "."}), GetRunListStrings());
   // U+1F431 is represented as a surrogate pair in UTF-16.
   EXPECT_EQ("[0->1][2]", GetRunListStructureString());
+}
+
+// Test that, on Mac, font fallback mechanisms and Harfbuzz configuration cause
+// the correct glyphs to be chosen for unicode regional indicators.
+TEST_P(RenderTextHarfBuzzTest, EmojiFlagGlyphCount) {
+  RenderText* render_text = GetRenderText();
+  render_text->SetDisplayRect(Rect(1000, 1000));
+  // Two flags: UK and Japan. Note macOS 10.9 only has flags for 10 countries.
+  base::string16 text(UTF8ToUTF16("🇬🇧🇯🇵"));
+  // Each flag is 4 UTF16 characters (2 surrogate pair code points).
+  EXPECT_EQ(8u, text.length());
+  render_text->SetText(text);
+  test_api()->EnsureLayout();
+
+  const internal::TextRunList* run_list = GetHarfBuzzRunList();
+  ASSERT_EQ(1U, run_list->runs().size());
+#if defined(OS_MACOSX)
+  // On Mac, the flags should be found, so two glyphs result.
+  EXPECT_EQ(2u, run_list->runs()[0]->glyph_count);
+#else
+  // Elsewhere, the flags are not found, so each surrogate pair gets a
+  // placeholder glyph. Eventually, all platforms should have 2 glyphs.
+  EXPECT_EQ(4u, run_list->runs()[0]->glyph_count);
+#endif
 }
 
 TEST_P(RenderTextHarfBuzzTest, GlyphBounds) {
@@ -4445,7 +4684,7 @@ TEST_P(RenderTextHarfBuzzTest, LineEndSelections) {
     // Position the cursor at the logical beginning of text.
     render_text->SelectRange(Range(0));
 
-    render_text->MoveCursorTo(
+    render_text->MoveCursorToPoint(
         Point(cases[i].x, GetCursorYForTesting(cases[i].line_num)), true);
     EXPECT_EQ(UTF8ToUTF16(cases[i].selected_text),
               GetSelectedText(render_text));
@@ -4600,6 +4839,49 @@ TEST_P(RenderTextHarfBuzzTest, BaselineWithLineHeight) {
   EXPECT_EQ(font_height + kDelta, current_selection_bounds.height());
   EXPECT_EQ(normal_selection_bounds.width(), current_selection_bounds.width());
   EXPECT_EQ(gfx::Vector2d(), current_selection_bounds.OffsetFromOrigin());
+}
+
+TEST_P(RenderTextHarfBuzzTest, TeluguGraphemeBoundaries) {
+  RenderText* render_text = GetRenderText();
+  render_text->SetDisplayRect(Rect(50, 1000));
+  // This is first syllable of the Telugu word for "New" in Chrome. It's a
+  // string of 4 UTF-8 characters: [క,్,ర,ొ]. When typeset with a supporting
+  // font, the second and fourth characters become diacritical marks for the
+  // first and third characters to form two graphemes. Then, these graphemes
+  // combine into a ligature "cluster". But, unlike ligatures in English (e.g.
+  // the "ffl" in "waffle"), this Telugu ligature is laid out vertically, with
+  // both graphemes occupying the same horizontal space.
+  render_text->SetText(UTF8ToUTF16("క్రొ"));
+
+  const int whole_width = render_text->GetStringSize().width();
+  const int half_width = whole_width / 2;
+  // Sanity check. A typical width is 8 pixels. Anything less than 6 could screw
+  // up the checks below with rounding.
+  EXPECT_LE(6, whole_width);
+
+  // Go to the end and perform Shift+Left. The selection should jump to a
+  // grapheme boundary and enclose the second grapheme in the ligature.
+  render_text->SetCursorPosition(4);
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_LEFT, SELECTION_RETAIN);
+  EXPECT_EQ(Range(4, 2), render_text->selection());
+  test_api()->EnsureLayout();
+
+  // The selection should start before the string end, and cover about half the
+  // width. Note this requires the RenderText implementation to return a
+  // sensible selection bounds for the diacritical at the end of the ligature.
+  Rect selection_bounds = GetSelectionBoundsUnion();
+  // The selection width rounds up, and half_width may already be rounded down.
+  EXPECT_GE(1, selection_bounds.width() - half_width);
+  EXPECT_GE(1, selection_bounds.x() - half_width);
+
+  render_text->MoveCursor(CHARACTER_BREAK, CURSOR_LEFT, SELECTION_RETAIN);
+  EXPECT_EQ(Range(4, 0), render_text->selection());
+  test_api()->EnsureLayout();
+
+  // The selection should cover the entire width.
+  selection_bounds = GetSelectionBoundsUnion();
+  EXPECT_EQ(0, selection_bounds.x());
+  EXPECT_EQ(whole_width, selection_bounds.width());
 }
 
 // Prefix for test instantiations intentionally left blank since each test

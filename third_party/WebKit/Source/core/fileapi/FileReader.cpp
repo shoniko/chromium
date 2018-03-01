@@ -38,6 +38,7 @@
 #include "core/dom/TaskRunnerHelper.h"
 #include "core/events/ProgressEvent.h"
 #include "core/fileapi/File.h"
+#include "core/frame/UseCounter.h"
 #include "core/probe/CoreProbes.h"
 #include "core/typed_arrays/DOMArrayBuffer.h"
 #include "platform/Supplementable.h"
@@ -75,7 +76,7 @@ class FileReader::ThrottlingController final
  public:
   static ThrottlingController* From(ExecutionContext* context) {
     if (!context)
-      return 0;
+      return nullptr;
 
     ThrottlingController* controller = static_cast<ThrottlingController*>(
         Supplement<ExecutionContext>::From(*context, SupplementName()));
@@ -117,7 +118,7 @@ class FileReader::ThrottlingController final
     probe::AsyncTaskCanceled(context, reader);
   }
 
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) {
     visitor->Trace(pending_readers_);
     visitor->Trace(running_readers_);
     Supplement<ExecutionContext>::Trace(visitor);
@@ -350,14 +351,20 @@ void FileReader::abort() {
                  WTF::Bind(&FileReader::Terminate, WrapPersistent(this)));
 }
 
-void FileReader::result(StringOrArrayBuffer& result_attribute) const {
+void FileReader::result(ScriptState* state,
+                        StringOrArrayBuffer& result_attribute) const {
   if (error_ || !loader_)
     return;
 
+  if (!loader_->HasFinishedLoading()) {
+    UseCounter::Count(ExecutionContext::From(state),
+                      WebFeature::kFileReaderResultBeforeCompletion);
+  }
+
   if (read_type_ == FileReaderLoader::kReadAsArrayBuffer)
-    result_attribute.setArrayBuffer(loader_->ArrayBufferResult());
+    result_attribute.SetArrayBuffer(loader_->ArrayBufferResult());
   else
-    result_attribute.setString(loader_->StringResult());
+    result_attribute.SetString(loader_->StringResult());
 }
 
 void FileReader::Terminate() {
@@ -460,7 +467,7 @@ void FileReader::FireEvent(const AtomicString& type) {
         ProgressEvent::Create(type, false, loader_->BytesLoaded(), 0));
 }
 
-DEFINE_TRACE(FileReader) {
+void FileReader::Trace(blink::Visitor* visitor) {
   visitor->Trace(error_);
   EventTargetWithInlineData::Trace(visitor);
   ContextLifecycleObserver::Trace(visitor);

@@ -4,14 +4,23 @@
 
 #include "ash/system/bluetooth/bluetooth_power_controller.h"
 
+#include <memory>
+
 #include "ash/public/cpp/ash_pref_names.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "components/device_event_log/device_event_log.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 
 namespace ash {
+
+// The delay between bluez started and bluez power initialized. This number is
+// determined empirically: most of the time bluez takes less than 200 ms to
+// initialize power, so taking 1000 ms has enough time buffer for worst cases.
+const int kBluetoothInitializationDelay = 1000;
 
 BluetoothPowerController::BluetoothPowerController() : weak_ptr_factory_(this) {
   device::BluetoothAdapterFactory::GetAdapter(
@@ -62,7 +71,7 @@ void BluetoothPowerController::StartWatchingActiveUserPrefsChanges() {
   DCHECK(active_user_pref_service_);
   DCHECK(Shell::Get()->session_controller()->IsUserPrimary());
 
-  active_user_pref_change_registrar_ = base::MakeUnique<PrefChangeRegistrar>();
+  active_user_pref_change_registrar_ = std::make_unique<PrefChangeRegistrar>();
   active_user_pref_change_registrar_->Init(active_user_pref_service_);
   active_user_pref_change_registrar_->Add(
       prefs::kUserBluetoothAdapterEnabled,
@@ -74,7 +83,7 @@ void BluetoothPowerController::StartWatchingActiveUserPrefsChanges() {
 void BluetoothPowerController::StartWatchingLocalStatePrefsChanges() {
   DCHECK(local_state_pref_service_);
 
-  local_state_pref_change_registrar_ = base::MakeUnique<PrefChangeRegistrar>();
+  local_state_pref_change_registrar_ = std::make_unique<PrefChangeRegistrar>();
   local_state_pref_change_registrar_->Init(local_state_pref_service_);
   local_state_pref_change_registrar_->Add(
       prefs::kSystemBluetoothAdapterEnabled,
@@ -89,12 +98,14 @@ void BluetoothPowerController::StopWatchingActiveUserPrefsChanges() {
 
 void BluetoothPowerController::OnBluetoothPowerActiveUserPrefChanged() {
   DCHECK(active_user_pref_service_);
+  BLUETOOTH_LOG(EVENT) << "Active user bluetooth power pref changed";
   SetBluetoothPower(active_user_pref_service_->GetBoolean(
       prefs::kUserBluetoothAdapterEnabled));
 }
 
 void BluetoothPowerController::OnBluetoothPowerLocalStatePrefChanged() {
   DCHECK(local_state_pref_service_);
+  BLUETOOTH_LOG(EVENT) << "Local state bluetooth power pref changed";
   SetBluetoothPower(local_state_pref_service_->GetBoolean(
       prefs::kSystemBluetoothAdapterEnabled));
 }
@@ -112,9 +123,11 @@ void BluetoothPowerController::InitializeOnAdapterReady(
     scoped_refptr<device::BluetoothAdapter> adapter) {
   bluetooth_adapter_ = std::move(adapter);
   bluetooth_adapter_->AddObserver(this);
-  if (bluetooth_adapter_->IsPresent()) {
+  bool adapter_present = bluetooth_adapter_->IsPresent();
+  BLUETOOTH_LOG(EVENT) << "Bluetooth adapter ready, IsPresent = "
+                       << adapter_present;
+  if (adapter_present)
     TriggerRunPendingBluetoothTasks();
-  }
 }
 
 void BluetoothPowerController::OnActiveUserPrefServiceChanged(
@@ -160,8 +173,22 @@ void BluetoothPowerController::OnLocalStatePrefServiceInitialized(
 void BluetoothPowerController::AdapterPresentChanged(
     device::BluetoothAdapter* adapter,
     bool present) {
-  if (present)
-    TriggerRunPendingBluetoothTasks();
+  BLUETOOTH_LOG(EVENT) << "Bluetooth adapter present changed = " << present;
+  if (present) {
+    // If adapter->IsPresent() has just changed from false to true, this means
+    // that bluez has just started but not yet finished power initialization,
+    // so we should not start any bluetooth tasks until bluez power
+    // initialization is done. Since there is no signal from bluez when that
+    // happens, this adds a bit delay before triggering pending bluetooth tasks.
+    //
+    // TODO(sonnysasaka): Replace this delay hack with a signal from bluez when
+    // it has "initialized" signal in the future (http://crbug.com/765390).
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&BluetoothPowerController::TriggerRunPendingBluetoothTasks,
+                   weak_ptr_factory_.GetWeakPtr()),
+        base::TimeDelta::FromMilliseconds(kBluetoothInitializationDelay));
+  }
 }
 
 void BluetoothPowerController::ApplyBluetoothPrimaryUserPref() {
@@ -178,7 +205,10 @@ void BluetoothPowerController::ApplyBluetoothPrimaryUserPref() {
 
   if (!prefs->FindPreference(prefs::kUserBluetoothAdapterEnabled)
            ->IsDefaultValue()) {
-    SetBluetoothPower(prefs->GetBoolean(prefs::kUserBluetoothAdapterEnabled));
+    bool enabled = prefs->GetBoolean(prefs::kUserBluetoothAdapterEnabled);
+    BLUETOOTH_LOG(EVENT) << "Applying primary user pref bluetooth power: "
+                         << enabled;
+    SetBluetoothPower(enabled);
     return;
   }
 
@@ -201,7 +231,10 @@ void BluetoothPowerController::ApplyBluetoothLocalStatePref() {
     // according to whatever the current bluetooth power is.
     SavePrefValue(prefs, prefs::kSystemBluetoothAdapterEnabled);
   } else {
-    SetBluetoothPower(prefs->GetBoolean(prefs::kSystemBluetoothAdapterEnabled));
+    bool enabled = prefs->GetBoolean(prefs::kSystemBluetoothAdapterEnabled);
+    BLUETOOTH_LOG(EVENT) << "Applying local state pref bluetooth power: "
+                         << enabled;
+    SetBluetoothPower(enabled);
   }
 }
 

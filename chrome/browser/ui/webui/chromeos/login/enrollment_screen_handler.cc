@@ -19,6 +19,7 @@
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/oobe_screen.h"
 #include "chrome/browser/chromeos/login/screens/network_error.h"
+#include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/policy/enrollment_status_chromeos.h"
@@ -515,7 +516,6 @@ void EnrollmentScreenHandler::SetupAndShowOfflineMessage(
   }
 
   if (GetCurrentScreen() != OobeScreen::SCREEN_ERROR_MESSAGE) {
-    const std::string network_type = network_state_informer_->network_type();
     error_screen_->SetUIState(NetworkError::UI_STATE_SIGNIN);
     error_screen_->SetParentScreen(kScreenId);
     error_screen_->SetHideCallback(base::Bind(&EnrollmentScreenHandler::DoShow,
@@ -535,7 +535,9 @@ void EnrollmentScreenHandler::HideOfflineMessage(
 
 // EnrollmentScreenHandler, private -----------------------------
 void EnrollmentScreenHandler::HandleToggleFakeEnrollment() {
+  VLOG(1) << "HandleToggleFakeEnrollment";
   policy::PolicyOAuth2TokenFetcher::UseFakeTokensForTesting();
+  WizardController::SkipEnrollmentPromptsForTesting();
 }
 
 void EnrollmentScreenHandler::HandleClose(const std::string& reason) {
@@ -555,6 +557,7 @@ void EnrollmentScreenHandler::HandleClose(const std::string& reason) {
 void EnrollmentScreenHandler::HandleCompleteLogin(
     const std::string& user,
     const std::string& auth_code) {
+  VLOG(1) << "HandleCompleteLogin";
   observe_network_failure_ = false;
   DCHECK(controller_);
   controller_->OnLoginDone(gaia::SanitizeEmail(user), auth_code);

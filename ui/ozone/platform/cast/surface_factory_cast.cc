@@ -90,10 +90,10 @@ SurfaceFactoryCast::SurfaceFactoryCast() : SurfaceFactoryCast(nullptr) {}
 
 SurfaceFactoryCast::SurfaceFactoryCast(
     std::unique_ptr<chromecast::CastEglPlatform> egl_platform)
-    : osmesa_implementation_(base::MakeUnique<GLOzoneOSMesa>()) {
+    : osmesa_implementation_(std::make_unique<GLOzoneOSMesa>()) {
   if (egl_platform) {
     egl_implementation_ =
-        base::MakeUnique<GLOzoneEglCast>(std::move(egl_platform));
+        std::make_unique<GLOzoneEglCast>(std::move(egl_platform));
   }
 }
 
@@ -132,7 +132,7 @@ scoped_refptr<gfx::NativePixmap> SurfaceFactoryCast::CreateNativePixmap(
     gfx::Size size,
     gfx::BufferFormat format,
     gfx::BufferUsage usage) {
-  return make_scoped_refptr(new CastPixmap(egl_implementation_.get()));
+  return base::MakeRefCounted<CastPixmap>(egl_implementation_.get());
 }
 
 }  // namespace ui

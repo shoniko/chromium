@@ -5,13 +5,11 @@
 #include "net/spdy/chromium/spdy_session.h"
 
 #include <algorithm>
-#include <memory>
 #include <utility>
 
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/test/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
@@ -3414,8 +3412,7 @@ TEST_F(SpdySessionTest, CloseOneIdleConnectionWithAlias) {
   // Get a session for |key2|, which should return the session created earlier.
   base::WeakPtr<SpdySession> session2 =
       spdy_session_pool_->FindAvailableSession(
-          key2, GURL(),
-          /* enable_ip_based_pooling = */ true, NetLogWithSource());
+          key2, /* enable_ip_based_pooling = */ true, NetLogWithSource());
   ASSERT_EQ(session1.get(), session2.get());
   EXPECT_FALSE(pool->IsStalled());
 
@@ -4563,6 +4560,120 @@ TEST_F(SpdySessionTest, ResumeByPriorityAfterSendWindowSizeIncrease) {
   EXPECT_TRUE(data.AllReadDataConsumed());
 }
 
+// An upload stream is stalled when the session gets unstalled, then the session
+// is stalled again when the stream gets unstalled.  The stream should not fail.
+// Regression test for https://crbug.com/761919.
+TEST_F(SpdySessionTest, ResumeSessionWithStalledStream) {
+  SpdySerializedFrame req1(spdy_util_.ConstructSpdyPost(
+      kDefaultUrl, 1, kBodyDataSize, LOWEST, nullptr, 0));
+  SpdySerializedFrame req2(spdy_util_.ConstructSpdyPost(
+      kDefaultUrl, 3, kBodyDataSize, LOWEST, nullptr, 0));
+  SpdySerializedFrame body1(
+      spdy_util_.ConstructSpdyDataFrame(3, kBodyData, kBodyDataSize, true));
+  SpdySerializedFrame body2(
+      spdy_util_.ConstructSpdyDataFrame(1, kBodyData, kBodyDataSize, true));
+  MockWrite writes[] = {CreateMockWrite(req1, 0), CreateMockWrite(req2, 1),
+                        CreateMockWrite(body1, 2), CreateMockWrite(body2, 3)};
+
+  SpdySerializedFrame resp1(spdy_util_.ConstructSpdyGetReply(nullptr, 0, 1));
+  SpdySerializedFrame resp2(spdy_util_.ConstructSpdyGetReply(nullptr, 0, 3));
+  MockRead reads[] = {CreateMockRead(resp1, 4), CreateMockRead(resp2, 5),
+                      MockRead(ASYNC, 0, 6)};
+
+  SequencedSocketData data(reads, arraysize(reads), writes, arraysize(writes));
+  session_deps_.socket_factory->AddSocketDataProvider(&data);
+
+  AddSSLSocketData();
+
+  CreateNetworkSession();
+  CreateSpdySession();
+
+  base::WeakPtr<SpdyStream> stream1 =
+      CreateStreamSynchronously(SPDY_REQUEST_RESPONSE_STREAM, session_,
+                                test_url_, LOWEST, NetLogWithSource());
+  ASSERT_TRUE(stream1);
+
+  test::StreamDelegateWithBody delegate1(stream1, kBodyDataStringPiece);
+  stream1->SetDelegate(&delegate1);
+
+  base::WeakPtr<SpdyStream> stream2 =
+      CreateStreamSynchronously(SPDY_REQUEST_RESPONSE_STREAM, session_,
+                                test_url_, LOWEST, NetLogWithSource());
+  ASSERT_TRUE(stream2);
+
+  test::StreamDelegateWithBody delegate2(stream2, kBodyDataStringPiece);
+  stream2->SetDelegate(&delegate2);
+
+  EXPECT_FALSE(stream1->send_stalled_by_flow_control());
+  EXPECT_FALSE(stream2->send_stalled_by_flow_control());
+
+  StallSessionSend();
+
+  SpdyHeaderBlock headers1(
+      spdy_util_.ConstructPostHeaderBlock(kDefaultUrl, kBodyDataSize));
+  EXPECT_EQ(ERR_IO_PENDING, stream1->SendRequestHeaders(std::move(headers1),
+                                                        MORE_DATA_TO_SEND));
+  EXPECT_EQ(kDefaultUrl, stream1->GetUrlFromHeaders().spec());
+
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(1u, stream1->stream_id());
+  EXPECT_TRUE(stream1->send_stalled_by_flow_control());
+
+  SpdyHeaderBlock headers2(
+      spdy_util_.ConstructPostHeaderBlock(kDefaultUrl, kBodyDataSize));
+  EXPECT_EQ(ERR_IO_PENDING, stream2->SendRequestHeaders(std::move(headers2),
+                                                        MORE_DATA_TO_SEND));
+  EXPECT_EQ(kDefaultUrl, stream2->GetUrlFromHeaders().spec());
+
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(3u, stream2->stream_id());
+  EXPECT_TRUE(stream2->send_stalled_by_flow_control());
+
+  StallStreamSend(stream1.get());
+
+  // At this point, both |session| and |stream1| are stalled
+  // by their respective flow control mechanisms.  Now unstall the session.
+  // This calls session->ResumeSendStalledStreams(), which calls
+  // stream1->PossiblyResumeIfSendStalled().  However, |stream1| is stalled, so
+  // no data are sent on that stream.  At this point, |stream1| should not be
+  // removed from session_->stream_send_unstall_queue_.
+  // Then stream2->PossiblyResumeIfSendStalled() is called,
+  // data are sent on |stream2|, and |session_| stalls again.
+  UnstallSessionSend(kBodyDataSize);
+
+  EXPECT_TRUE(stream1->send_stalled_by_flow_control());
+  EXPECT_FALSE(stream2->send_stalled_by_flow_control());
+
+  // Make sure that the session is stalled.  Otherwise
+  // stream1->PossiblyResumeIfSendStalled() would resume the stream as soon as
+  // the stream is unstalled, hiding the bug.
+  EXPECT_TRUE(session_->IsSendStalled());
+  UnstallStreamSend(stream1.get(), kBodyDataSize);
+
+  // Finally, unstall session.
+  UnstallSessionSend(kBodyDataSize);
+
+  EXPECT_FALSE(stream1->send_stalled_by_flow_control());
+  EXPECT_FALSE(stream2->send_stalled_by_flow_control());
+
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_THAT(delegate1.WaitForClose(), IsError(ERR_CONNECTION_CLOSED));
+  EXPECT_THAT(delegate2.WaitForClose(), IsError(ERR_CONNECTION_CLOSED));
+
+  EXPECT_TRUE(delegate1.send_headers_completed());
+  EXPECT_EQ("200", delegate1.GetResponseHeaderValue(":status"));
+  EXPECT_EQ(SpdyString(), delegate1.TakeReceivedData());
+
+  EXPECT_TRUE(delegate2.send_headers_completed());
+  EXPECT_EQ("200", delegate2.GetResponseHeaderValue(":status"));
+  EXPECT_EQ(SpdyString(), delegate2.TakeReceivedData());
+
+  EXPECT_FALSE(session_);
+  EXPECT_TRUE(data.AllWriteDataConsumed());
+  EXPECT_TRUE(data.AllReadDataConsumed());
+}
+
 // Delegate that closes a given stream after sending its body.
 class StreamClosingDelegate : public test::StreamDelegateWithBody {
  public:
@@ -5429,10 +5540,12 @@ class SpdySessionReadIfReadyTest
       public testing::WithParamInterface<ReadIfReadySupport> {
  public:
   void SetUp() override {
-    if (GetParam() != READ_IF_READY_DISABLED)
-      scoped_feature_list_.InitAndEnableFeature(Socket::kReadIfReadyExperiment);
-    if (GetParam() == READ_IF_READY_ENABLED_SUPPORTED)
+    if (GetParam() == READ_IF_READY_DISABLED) {
+      scoped_feature_list_.InitAndDisableFeature(
+          Socket::kReadIfReadyExperiment);
+    } else if (GetParam() == READ_IF_READY_ENABLED_SUPPORTED) {
       session_deps_.socket_factory->set_enable_read_if_ready(true);
+    }
     SpdySessionTest::SetUp();
   }
 
@@ -5531,7 +5644,6 @@ TEST_F(SendInitialSettingsOnNewSpdySessionTest, Empty) {
   expected_settings[SETTINGS_HEADER_TABLE_SIZE] = kSpdyMaxHeaderTableSize;
   expected_settings[SETTINGS_MAX_CONCURRENT_STREAMS] =
       kSpdyMaxConcurrentPushedStreams;
-  expected_settings[SETTINGS_MAX_HEADER_LIST_SIZE] = kSpdyMaxHeaderListSize;
   RunInitialSettingsTest(expected_settings);
 }
 
@@ -5546,7 +5658,6 @@ TEST_F(SendInitialSettingsOnNewSpdySessionTest, ProtocolDefault) {
   SettingsMap expected_settings;
   expected_settings[SETTINGS_MAX_CONCURRENT_STREAMS] =
       kSpdyMaxConcurrentPushedStreams;
-  expected_settings[SETTINGS_MAX_HEADER_LIST_SIZE] = kSpdyMaxHeaderListSize;
   RunInitialSettingsTest(expected_settings);
 }
 
@@ -5577,7 +5688,6 @@ TEST_F(SendInitialSettingsOnNewSpdySessionTest, UnknownSettings) {
   expected_settings[SETTINGS_HEADER_TABLE_SIZE] = kSpdyMaxHeaderTableSize;
   expected_settings[SETTINGS_MAX_CONCURRENT_STREAMS] =
       kSpdyMaxConcurrentPushedStreams;
-  expected_settings[SETTINGS_MAX_HEADER_LIST_SIZE] = kSpdyMaxHeaderListSize;
   expected_settings[static_cast<SpdySettingsIds>(7)] = 1234;
   expected_settings[static_cast<SpdySettingsIds>(25)] = 5678;
   RunInitialSettingsTest(expected_settings);

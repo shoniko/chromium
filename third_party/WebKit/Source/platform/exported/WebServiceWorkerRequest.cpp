@@ -20,7 +20,7 @@ class WebServiceWorkerRequestPrivate
       : mode_(WebURLRequest::kFetchRequestModeNoCORS),
         is_main_resource_load_(false),
         credentials_mode_(WebURLRequest::kFetchCredentialsModeOmit),
-        cache_mode_(WebURLRequest::kFetchRequestCacheModeDefault),
+        cache_mode_(mojom::FetchCacheMode::kDefault),
         redirect_mode_(WebURLRequest::kFetchRedirectModeFollow),
         request_context_(WebURLRequest::kRequestContextUnspecified),
         frame_type_(WebURLRequest::kFrameTypeNone),
@@ -34,7 +34,7 @@ class WebServiceWorkerRequestPrivate
   WebURLRequest::FetchRequestMode mode_;
   bool is_main_resource_load_;
   WebURLRequest::FetchCredentialsMode credentials_mode_;
-  WebURLRequest::FetchRequestCacheMode cache_mode_;
+  mojom::FetchCacheMode cache_mode_;
   WebURLRequest::FetchRedirectMode redirect_mode_;
   WebURLRequest::RequestContext request_context_;
   WebURLRequest::FrameType frame_type_;
@@ -44,7 +44,7 @@ class WebServiceWorkerRequestPrivate
 };
 
 WebServiceWorkerRequest::WebServiceWorkerRequest()
-    : private_(AdoptRef(new WebServiceWorkerRequestPrivate)) {}
+    : private_(WTF::AdoptRef(new WebServiceWorkerRequestPrivate)) {}
 
 void WebServiceWorkerRequest::Reset() {
   private_.Reset();
@@ -107,19 +107,18 @@ void WebServiceWorkerRequest::SetBlob(const WebString& uuid,
                                       long long size,
                                       mojo::ScopedMessagePipeHandle blob_pipe) {
   SetBlob(uuid, size,
-          storage::mojom::blink::BlobPtrInfo(
-              std::move(blob_pipe), storage::mojom::blink::Blob::Version_));
+          mojom::blink::BlobPtrInfo(std::move(blob_pipe),
+                                    mojom::blink::Blob::Version_));
 }
 
-void WebServiceWorkerRequest::SetBlob(
-    const WebString& uuid,
-    long long size,
-    storage::mojom::blink::BlobPtrInfo blob_info) {
+void WebServiceWorkerRequest::SetBlob(const WebString& uuid,
+                                      long long size,
+                                      mojom::blink::BlobPtrInfo blob_info) {
   private_->blob_data_handle =
       BlobDataHandle::Create(uuid, String(), size, std::move(blob_info));
 }
 
-PassRefPtr<BlobDataHandle> WebServiceWorkerRequest::GetBlobDataHandle() const {
+RefPtr<BlobDataHandle> WebServiceWorkerRequest::GetBlobDataHandle() const {
   return private_->blob_data_handle;
 }
 
@@ -135,7 +134,7 @@ void WebServiceWorkerRequest::SetReferrer(const WebString& web_referrer,
 }
 
 WebURL WebServiceWorkerRequest::ReferrerUrl() const {
-  return KURL(kParsedURLString, private_->referrer_.referrer);
+  return KURL(private_->referrer_.referrer);
 }
 
 WebReferrerPolicy WebServiceWorkerRequest::GetReferrerPolicy() const {
@@ -177,13 +176,11 @@ WebURLRequest::FetchCredentialsMode WebServiceWorkerRequest::CredentialsMode()
   return private_->credentials_mode_;
 }
 
-void WebServiceWorkerRequest::SetCacheMode(
-    WebURLRequest::FetchRequestCacheMode cache_mode) {
+void WebServiceWorkerRequest::SetCacheMode(mojom::FetchCacheMode cache_mode) {
   private_->cache_mode_ = cache_mode;
 }
 
-WebURLRequest::FetchRequestCacheMode WebServiceWorkerRequest::CacheMode()
-    const {
+mojom::FetchCacheMode WebServiceWorkerRequest::CacheMode() const {
   return private_->cache_mode_;
 }
 

@@ -22,10 +22,12 @@
 #include "content/browser/renderer_host/input/touch_action_filter.h"
 #include "content/browser/renderer_host/input/touch_event_queue.h"
 #include "content/browser/renderer_host/input/touchpad_tap_suppression_controller.h"
-#include "content/common/input/input_event_ack_source.h"
 #include "content/common/input/input_event_stream_validator.h"
 #include "content/common/input/input_handler.mojom.h"
+#include "content/common/widget.mojom.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/common/input_event_ack_source.h"
+#include "mojo/public/cpp/bindings/binding.h"
 
 namespace ui {
 class LatencyInfo;
@@ -39,6 +41,10 @@ class InputDispositionHandler;
 class CONTENT_EXPORT InputRouterImplClient : public InputRouterClient {
  public:
   virtual mojom::WidgetInputHandler* GetWidgetInputHandler() = 0;
+  virtual void OnImeCancelComposition() = 0;
+  virtual void OnImeCompositionRangeChanged(
+      const gfx::Range& range,
+      const std::vector<gfx::Rect>& bounds) = 0;
 };
 
 // A default implementation for browser input event routing.
@@ -47,7 +53,8 @@ class CONTENT_EXPORT InputRouterImpl
       public GestureEventQueueClient,
       public MouseWheelEventQueueClient,
       public TouchEventQueueClient,
-      public TouchpadTapSuppressionControllerClient {
+      public TouchpadTapSuppressionControllerClient,
+      public mojom::WidgetInputHandlerHost {
  public:
   InputRouterImpl(InputRouterImplClient* client,
                   InputDispositionHandler* disposition_handler,
@@ -69,6 +76,19 @@ class CONTENT_EXPORT InputRouterImpl
   void SetFrameTreeNodeId(int frame_tree_node_id) override;
   void SetForceEnableZoom(bool enabled) override;
   cc::TouchAction AllowedTouchAction() override;
+  void BindHost(mojom::WidgetInputHandlerHostRequest request) override;
+
+  // InputHandlerHost impl
+  void CancelTouchTimeout() override;
+  void SetWhiteListedTouchAction(cc::TouchAction touch_action,
+                                 uint32_t unique_touch_event_id,
+                                 InputEventAckState state) override;
+  void DidOverscroll(const ui::DidOverscrollParams& params) override;
+  void DidStopFlinging() override;
+  void ImeCancelComposition() override;
+  void ImeCompositionRangeChanged(
+      const gfx::Range& range,
+      const std::vector<gfx::Rect>& bounds) override;
 
   // IPC::Listener
   bool OnMessageReceived(const IPC::Message& message) override;
@@ -87,6 +107,7 @@ class CONTENT_EXPORT InputRouterImpl
   void SendTouchEventImmediately(
       const TouchEventWithLatencyInfo& touch_event) override;
   void OnTouchEventAck(const TouchEventWithLatencyInfo& event,
+                       InputEventAckSource ack_source,
                        InputEventAckState ack_result) override;
   void OnFilteringTouchEvent(const blink::WebTouchEvent& touch_event) override;
 
@@ -94,12 +115,14 @@ class CONTENT_EXPORT InputRouterImpl
   void SendGestureEventImmediately(
       const GestureEventWithLatencyInfo& gesture_event) override;
   void OnGestureEventAck(const GestureEventWithLatencyInfo& event,
+                         InputEventAckSource ack_source,
                          InputEventAckState ack_result) override;
 
   // MouseWheelEventQueueClient
   void SendMouseWheelEventImmediately(
       const MouseWheelEventWithLatencyInfo& touch_event) override;
   void OnMouseWheelEventAck(const MouseWheelEventWithLatencyInfo& event,
+                            InputEventAckSource ack_source,
                             InputEventAckState ack_result) override;
   void ForwardGestureEventWithLatencyInfo(
       const blink::WebGestureEvent& gesture_event,
@@ -147,13 +170,8 @@ class CONTENT_EXPORT InputRouterImpl
       const base::Optional<cc::TouchAction>& touch_action);
 
   // IPC message handlers
-  void OnDidOverscroll(const ui::DidOverscrollParams& params);
   void OnHasTouchEventHandlers(bool has_handlers);
   void OnSetTouchAction(cc::TouchAction touch_action);
-  void OnSetWhiteListedTouchAction(cc::TouchAction white_listed_touch_action,
-                                   uint32_t unique_touch_event_id,
-                                   InputEventAckState ack_result);
-  void OnDidStopFlinging();
 
   // Called when a touch timeout-affecting bit has changed, in turn toggling the
   // touch ack timeout feature of the |touch_event_queue_| as appropriate. Input
@@ -176,7 +194,6 @@ class CONTENT_EXPORT InputRouterImpl
   bool touch_scroll_started_sent_;
 
   bool wheel_scroll_latching_enabled_;
-  bool raf_aligned_touch_enabled_;
   MouseWheelEventQueue wheel_event_queue_;
   std::unique_ptr<TouchEventQueue> touch_event_queue_;
   GestureEventQueue gesture_event_queue_;
@@ -188,6 +205,8 @@ class CONTENT_EXPORT InputRouterImpl
 
   // Last touch position relative to screen. Used to compute movementX/Y.
   base::flat_map<int, gfx::Point> global_touch_position_;
+
+  mojo::Binding<mojom::WidgetInputHandlerHost> host_binding_;
 
   base::WeakPtr<InputRouterImpl> weak_this_;
   base::WeakPtrFactory<InputRouterImpl> weak_ptr_factory_;

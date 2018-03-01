@@ -52,8 +52,8 @@ namespace blink {
 
 namespace {
 
-bool CompareKeyframes(const RefPtr<StringKeyframe>& a,
-                      const RefPtr<StringKeyframe>& b) {
+bool CompareKeyframes(const scoped_refptr<StringKeyframe>& a,
+                      const scoped_refptr<StringKeyframe>& b) {
   return a->Offset() < b->Offset();
 }
 
@@ -180,15 +180,15 @@ EffectModel* EffectInput::Convert(
     const DictionarySequenceOrDictionary& effect_input,
     ExecutionContext* execution_context,
     ExceptionState& exception_state) {
-  if (effect_input.isNull() || !element)
+  if (effect_input.IsNull() || !element)
     return nullptr;
 
-  if (effect_input.isDictionarySequence()) {
-    return ConvertArrayForm(*element, effect_input.getAsDictionarySequence(),
+  if (effect_input.IsDictionarySequence()) {
+    return ConvertArrayForm(*element, effect_input.GetAsDictionarySequence(),
                             execution_context, exception_state);
   }
 
-  const Dictionary& dictionary = effect_input.getAsDictionary();
+  const Dictionary& dictionary = effect_input.GetAsDictionary();
   DictionaryIterator iterator = dictionary.GetIterator(execution_context);
   if (!iterator.IsNull()) {
     // TODO(alancutter): Convert keyframes during iteration rather than after to
@@ -215,7 +215,7 @@ EffectModel* EffectInput::ConvertArrayForm(
   double last_offset = 0;
 
   for (const Dictionary& keyframe_dictionary : keyframe_dictionaries) {
-    RefPtr<StringKeyframe> keyframe = StringKeyframe::Create();
+    scoped_refptr<StringKeyframe> keyframe = StringKeyframe::Create();
 
     Nullable<double> offset;
     if (DictionaryHelper::Get(keyframe_dictionary, "offset", offset) &&
@@ -236,7 +236,7 @@ EffectModel* EffectInput::ConvertArrayForm(
     String timing_function_string;
     if (DictionaryHelper::Get(keyframe_dictionary, "easing",
                               timing_function_string)) {
-      RefPtr<TimingFunction> timing_function =
+      scoped_refptr<TimingFunction> timing_function =
           AnimationInputHelpers::ParseTimingFunction(
               timing_function_string, &element.GetDocument(), exception_state);
       if (!timing_function)
@@ -264,7 +264,7 @@ EffectModel* EffectInput::ConvertArrayForm(
       String value;
       DictionaryHelper::Get(keyframe_dictionary, property, value);
 
-      SetKeyframeValue(element, *keyframe.Get(), property, value,
+      SetKeyframeValue(element, *keyframe.get(), property, value,
                        execution_context);
     }
     keyframes.push_back(keyframe);
@@ -328,7 +328,7 @@ EffectModel* EffectInput::ConvertObjectForm(
   StringKeyframeVector keyframes;
 
   String timing_function_string;
-  RefPtr<TimingFunction> timing_function = nullptr;
+  scoped_refptr<TimingFunction> timing_function = nullptr;
   if (DictionaryHelper::Get(keyframe_dictionary, "easing",
                             timing_function_string)) {
     timing_function = AnimationInputHelpers::ParseTimingFunction(
@@ -365,7 +365,7 @@ EffectModel* EffectInput::ConvertObjectForm(
 
     size_t num_keyframes = values.size();
     for (size_t i = 0; i < num_keyframes; ++i) {
-      RefPtr<StringKeyframe> keyframe = StringKeyframe::Create();
+      scoped_refptr<StringKeyframe> keyframe = StringKeyframe::Create();
 
       if (!offset.IsNull())
         keyframe->SetOffset(offset.Get());
@@ -381,7 +381,7 @@ EffectModel* EffectInput::ConvertObjectForm(
         keyframe->SetComposite(EffectModel::kCompositeAdd);
       // TODO(alancutter): Support "accumulate" keyframe composition.
 
-      SetKeyframeValue(element, *keyframe.Get(), property, values[i],
+      SetKeyframeValue(element, *keyframe.get(), property, values[i],
                        execution_context);
       keyframes.push_back(keyframe);
     }

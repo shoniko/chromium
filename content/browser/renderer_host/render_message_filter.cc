@@ -89,7 +89,7 @@
 namespace content {
 namespace {
 
-const uint32_t kFilteredMessageClasses[] = {
+const uint32_t kRenderFilteredMessageClasses[] = {
     ChildProcessMsgStart, RenderProcessMsgStart, ViewMsgStart,
 };
 
@@ -124,8 +124,8 @@ RenderMessageFilter::RenderMessageFilter(
     MediaInternals* media_internals,
     DOMStorageContextWrapper* dom_storage_context,
     CacheStorageContextImpl* cache_storage_context)
-    : BrowserMessageFilter(kFilteredMessageClasses,
-                           arraysize(kFilteredMessageClasses)),
+    : BrowserMessageFilter(kRenderFilteredMessageClasses,
+                           arraysize(kRenderFilteredMessageClasses)),
       BrowserAssociatedInterface<mojom::RenderMessageFilter>(this, this),
       resource_dispatcher_host_(ResourceDispatcherHostImpl::Get()),
       request_context_(request_context),
@@ -151,10 +151,10 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(RenderMessageFilter, message)
 #if defined(OS_MACOSX)
-    // On Mac, ViewHostMsg_UpdateRect needs to be handled in a nested message
-    // loop during resize.
+    // On Mac, ViewHostMsg_ResizeOrRepaint_ACK needs to be handled in a nested
+    // message loop during resize.
     IPC_MESSAGE_HANDLER_GENERIC(
-        ViewHostMsg_UpdateRect,
+        ViewHostMsg_ResizeOrRepaint_ACK,
         ResizeHelperPostMsgToUIThread(render_process_id_, message))
 #endif
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ChildProcessHostMsg_HasGpuProcess,

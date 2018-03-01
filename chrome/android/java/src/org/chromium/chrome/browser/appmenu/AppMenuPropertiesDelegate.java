@@ -78,7 +78,7 @@ public class AppMenuPropertiesDelegate {
         } else {
             boolean isBottomSheetNtpMenu = mActivity.getBottomSheet() != null
                     && mActivity.getBottomSheet().isShowingNewTab();
-            return !isBottomSheetNtpMenu && !isOverview;
+            return !isBottomSheetNtpMenu && !isOverview && mActivity.getActivityTab() != null;
         }
     }
 
@@ -328,6 +328,7 @@ public class AppMenuPropertiesDelegate {
      */
     public void onMenuDismissed() {
         mReloadMenuItem = null;
+        mAppMenuIconRowFooter = null;
     }
 
     // Set enabled to be |enable| for all MenuItems with |id| in |menu|.
@@ -358,12 +359,12 @@ public class AppMenuPropertiesDelegate {
     }
 
     /**
-     * @return Resource layout id for the header if there should be one. O otherwise. The header
-     *         will be displayed as the first item in the app menu. It will be scrolled off as the
-     *         menu scrolls.
+     * @return The View to use as the app menu header if there should be one. null otherwise. The
+     *         header will be displayed as the first item in the app menu. It will be scrolled off
+     *         as the menu scrolls.
      */
-    public int getHeaderResourceId() {
-        return 0;
+    public View getHeaderView() {
+        return null;
     }
 
     /**

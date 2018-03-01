@@ -14,6 +14,7 @@
 #include "core/testing/sim/SimDisplayItemList.h"
 #include "core/testing/sim/SimRequest.h"
 #include "core/testing/sim/SimTest.h"
+#include "platform/loader/fetch/ScriptFetchOptions.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "platform/wtf/CurrentTime.h"
 #include "public/web/WebHeap.h"
@@ -33,7 +34,7 @@ class TestResizeObserverDelegate : public ResizeObserver::Delegate {
   ExecutionContext* GetExecutionContext() const { return document_; }
   int CallCount() const { return call_count_; }
 
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) {
     ResizeObserver::Delegate::Trace(visitor);
     visitor->Trace(document_);
   }
@@ -115,10 +116,11 @@ TEST_F(ResizeObserverUnitTest, TestMemoryLeaks) {
   //
   script_controller.ExecuteScriptInMainWorldAndReturnValue(
       ScriptSourceCode("var ro = new ResizeObserver( entries => {});"),
+      ScriptFetchOptions(),
       ScriptController::kExecuteScriptWhenScriptsDisabled);
   ASSERT_EQ(observers.size(), 1U);
   script_controller.ExecuteScriptInMainWorldAndReturnValue(
-      ScriptSourceCode("ro = undefined;"),
+      ScriptSourceCode("ro = undefined;"), ScriptFetchOptions(),
       ScriptController::kExecuteScriptWhenScriptsDisabled);
   V8GCController::CollectAllGarbageForTesting(v8::Isolate::GetCurrent());
   WebHeap::CollectAllGarbageForTesting();
@@ -132,13 +134,14 @@ TEST_F(ResizeObserverUnitTest, TestMemoryLeaks) {
                        "var el = document.createElement('div');"
                        "ro.observe(el);"
                        "ro = undefined;"),
+      ScriptFetchOptions(),
       ScriptController::kExecuteScriptWhenScriptsDisabled);
   ASSERT_EQ(observers.size(), 1U);
   V8GCController::CollectAllGarbageForTesting(v8::Isolate::GetCurrent());
   WebHeap::CollectAllGarbageForTesting();
   ASSERT_EQ(observers.size(), 1U);
   script_controller.ExecuteScriptInMainWorldAndReturnValue(
-      ScriptSourceCode("el = undefined;"),
+      ScriptSourceCode("el = undefined;"), ScriptFetchOptions(),
       ScriptController::kExecuteScriptWhenScriptsDisabled);
   V8GCController::CollectAllGarbageForTesting(v8::Isolate::GetCurrent());
   WebHeap::CollectAllGarbageForTesting();

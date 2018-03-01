@@ -31,6 +31,7 @@ static const char kMaxTouchPoints[] = "maxTouchPoints";
 static const char kEmulatedMedia[] = "emulatedMedia";
 static const char kDefaultBackgroundColorOverrideRGBA[] =
     "defaultBackgroundColorOverrideRGBA";
+static const char kNavigatorPlatform[] = "navigatorPlatform";
 }
 
 InspectorEmulationAgent* InspectorEmulationAgent::Create(
@@ -62,7 +63,7 @@ void InspectorEmulationAgent::Restore() {
   String emulated_media;
   state_->getString(EmulationAgentState::kEmulatedMedia, &emulated_media);
   setEmulatedMedia(emulated_media);
-  auto rgba_value =
+  auto* rgba_value =
       state_->get(EmulationAgentState::kDefaultBackgroundColorOverrideRGBA);
   if (rgba_value) {
     blink::protocol::ErrorSupport errors;
@@ -72,6 +73,10 @@ void InspectorEmulationAgent::Restore() {
           Maybe<protocol::DOM::RGBA>(std::move(rgba)));
     }
   }
+  String navigator_platform;
+  state_->getString(EmulationAgentState::kNavigatorPlatform,
+                    &navigator_platform);
+  setNavigatorOverrides(navigator_platform);
 }
 
 Response InspectorEmulationAgent::disable() {
@@ -84,6 +89,7 @@ Response InspectorEmulationAgent::disable() {
     web_local_frame_->View()->Scheduler()->RemoveVirtualTimeObserver(this);
     virtual_time_observer_registered_ = false;
   }
+  setNavigatorOverrides(String());
   return Response::OK();
 }
 
@@ -130,8 +136,10 @@ Response InspectorEmulationAgent::setCPUThrottlingRate(double throttling_rate) {
   return Response::OK();
 }
 
-Response InspectorEmulationAgent::setVirtualTimePolicy(const String& policy,
-                                                       Maybe<int> budget) {
+Response InspectorEmulationAgent::setVirtualTimePolicy(
+    const String& policy,
+    Maybe<int> budget,
+    protocol::Maybe<int> max_virtual_time_task_starvation_count) {
   if (protocol::Emulation::VirtualTimePolicyEnum::Advance == policy) {
     web_local_frame_->View()->Scheduler()->SetVirtualTimePolicy(
         WebViewScheduler::VirtualTimePolicy::ADVANCE);
@@ -157,6 +165,18 @@ Response InspectorEmulationAgent::setVirtualTimePolicy(const String& policy,
         WTF::Bind(&InspectorEmulationAgent::VirtualTimeBudgetExpired,
                   WrapWeakPersistent(this)));
   }
+  if (max_virtual_time_task_starvation_count.isJust()) {
+    web_local_frame_->View()->Scheduler()->SetMaxVirtualTimeTaskStarvationCount(
+        max_virtual_time_task_starvation_count.fromJust());
+  }
+  return Response::OK();
+}
+
+Response InspectorEmulationAgent::setNavigatorOverrides(
+    const String& platform) {
+  state_->setString(EmulationAgentState::kNavigatorPlatform, platform);
+  GetWebViewImpl()->GetPage()->GetSettings().SetNavigatorPlatformOverride(
+      platform);
   return Response::OK();
 }
 
@@ -164,6 +184,11 @@ void InspectorEmulationAgent::VirtualTimeBudgetExpired() {
   web_local_frame_->View()->Scheduler()->SetVirtualTimePolicy(
       WebViewScheduler::VirtualTimePolicy::PAUSE);
   GetFrontend()->virtualTimeBudgetExpired();
+}
+
+void InspectorEmulationAgent::OnVirtualTimeAdvanced(
+    WTF::TimeDelta virtual_time_offset) {
+  GetFrontend()->virtualTimeAdvanced(virtual_time_offset.InMilliseconds());
 }
 
 void InspectorEmulationAgent::OnVirtualTimePaused(
@@ -190,7 +215,7 @@ Response InspectorEmulationAgent::setDefaultBackgroundColorOverride(
   return Response::OK();
 }
 
-DEFINE_TRACE(InspectorEmulationAgent) {
+void InspectorEmulationAgent::Trace(blink::Visitor* visitor) {
   visitor->Trace(web_local_frame_);
   InspectorBaseAgent::Trace(visitor);
 }

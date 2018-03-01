@@ -13,27 +13,41 @@
   <link rel="import" href="chrome://resources/polymer/v1_0/paper-checkbox/paper-checkbox.html">
   <style is="custom-style" include="iron-flex iron-flex-alignment">
     paper-button {
-      border-radius: 2px;
+      border-radius: 4px;
       border-style: solid;
       border-width: 2px;
-      font: Roboto, sans-serif;
-      font-size: 12px;
-      font-weight: 500;
       height: 32px; /* = 28px + 2 * 2px border */
-      padding: 0 16px;
-      text-transform: none;
+      margin: 0;
+      padding: 0;
     }
     paper-button.blue {
-      background: rgb(66, 133, 244);
-      color: white;
+      border-color: transparent;
     }
     paper-button.white {
-      background: white;
       border-color: rgba(0, 0, 0, 0.1);
-      color: rgba(0, 0, 0, 0.54);
     }
     paper-button[focused] {
       border-color: rgba(66, 133, 244, 0.4); /* #4284f4 */
+    }
+    paper-button .container {
+      align-items: center;
+      align-self: stretch;
+      border-radius: 2px;
+      display: flex;
+      font: Roboto, sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      justify-content: center;
+      padding: 0 16px;
+      text-transform: none;
+    }
+    paper-button.white .container {
+      background-color: white;
+      color: rgba(0, 0, 0, 0.54);
+    }
+    paper-button.blue .container {
+      background-color: rgb(66, 133, 244); /* #4285f4 */
+      color: white;
     }
     paper-checkbox {
       --paper-checkbox-size: 12px;
@@ -66,7 +80,7 @@
       <div class="content">
         <p class="title" id="greetingTitle" i18n-content="greetingHeader"
             aria-hidden="true"></p>
-        <p class="subtitle" i18n-content="progressLsoLoading"
+        <p class="subtitle" i18n-content="progressTermsLoading"
             aria-live="polite"></p>
         <div class="progress-container">
           <div class="progress-primary"></div>
@@ -81,7 +95,7 @@
         <p class="subtitle" i18n-content="greetingDescription">
         </p>
         <div class="section-terms" id="terms-container">
-          <webview id="terms-view" partition="persist:arc_support"></webview>
+          <webview id="terms-view"></webview>
         </div>
         <div class="subcontentcontainer">
           <div>
@@ -116,11 +130,13 @@
       </div>
       <div class="layout horizontal center end-justified section-buttons">
         <div class="flex"></div>
-        <paper-button class="white" id="button-cancel"
-            i18n-content="buttonCancel">
+        <paper-button class="white" id="button-cancel">
+          <div class="container flex" i18n-content="buttonCancel">
+          </div>
         </paper-button>
-        <div class="button-separator"></div>
-        <paper-button class="blue" id="button-agree" i18n-content="buttonAgree">
+        <paper-button class="blue" id="button-agree">
+          <div class="container flex" i18n-content="buttonAgree">
+          </div>
         </paper-button>
       </div>
     </div>
@@ -135,9 +151,7 @@
             i18n-content="activeDirectoryAuthDesc"></p>
         <div class="section-active-directory-auth-view"
             id="active-directory-auth-container">
-          <webview id="active-directory-auth-view"
-              partition="persist:arc_support">
-          </webview>
+          <webview id="active-directory-auth-view"></webview>
         </div>
         <div class="section-active-directory-auth-buttons">
           <paper-button class="button-active-directory-auth"
@@ -147,23 +161,6 @@
         </div>
       </div>
     </div>
-  </div>
-  <div id="lso-loading" class="section" hidden>
-    <img class="image-header" src="images/header.png">
-    <div class="scrollable">
-      <div class="content">
-        <div class="progress-container">
-          <div class="progress-primary"></div>
-          <div class="progress-secondary"></div>
-        </div>
-        <p class="text-status" i18n-content="progressLsoLoading"
-            aria-live="polite"></p>
-      </div>
-    </div>
-  </div>
-  <div id="lso" class="section" hidden>
-    <img class="image-header" src="images/header.png">
-    <webview id="arc-support" partition="persist:arc_support"></webview>
   </div>
   <div id="arc-loading" class="section" hidden>
     <div class="header">
@@ -195,11 +192,13 @@
       </div>
       <div class="layout horizontal center end-justified section-buttons">
         <div class="flex"></div>
-        <paper-button class="white" id="button-send-feedback"
-            i18n-content="buttonSendFeedback">
+        <paper-button class="white" id="button-send-feedback">
+          <div class="container flex" i18n-content="buttonSendFeedback">
+          </div>
         </paper-button>
-        <div class="button-separator"></div>
-        <paper-button class="blue" id="button-retry" i18n-content="buttonRetry">
+        <paper-button class="blue" id="button-retry">
+          <div class="container flex" i18n-content="buttonRetry">
+          </div>
         </paper-button>
       </div>
     </div>
@@ -214,8 +213,9 @@
       <div class="action-area">
         <div class="action-area-right">
           <div class="button-strip">
-            <paper-button class ="blue" id="overlay-close"
-                i18n-content="overlayClose">
+            <paper-button class ="blue" id="overlay-close">
+              <div class="container flex" i18n-content="overlayClose">
+              </div>
             </paper-button>
           </div>
         </div>

@@ -23,11 +23,13 @@ class Rect;
 
 namespace ui {
 class GestureEvent;
+class MouseWheelEvent;
 }
 
 namespace ash {
 
 enum class AnimationChangeType;
+class LoginShelfView;
 class ShelfBezelEventHandler;
 class ShelfLayoutManager;
 class ShelfLayoutManagerTest;
@@ -123,6 +125,9 @@ class ASH_EXPORT Shelf : public ShelfLayoutManagerObserver {
   // Returns true if the event was handled.
   bool ProcessGestureEvent(const ui::GestureEvent& event);
 
+  // Handles a mousewheel scroll event coming from the shelf.
+  void ProcessMouseWheelEvent(const ui::MouseWheelEvent& event);
+
   void AddObserver(ShelfObserver* observer);
   void RemoveObserver(ShelfObserver* observer);
 
@@ -132,6 +137,7 @@ class ASH_EXPORT Shelf : public ShelfLayoutManagerObserver {
   void SetVirtualKeyboardBoundsForTesting(const gfx::Rect& bounds);
   ShelfLockingManager* GetShelfLockingManagerForTesting();
   ShelfView* GetShelfViewForTesting();
+  LoginShelfView* GetLoginShelfViewForTesting();
 
  protected:
   // ShelfLayoutManagerObserver:

@@ -71,6 +71,13 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   void SetNeedsBeginFrames(bool needs_begin_frames) override;
   TouchSelectionControllerClientManager*
   GetTouchSelectionControllerClientManager() override;
+  gfx::PointF TransformPointToRootCoordSpaceF(
+      const gfx::PointF& point) override;
+  bool TransformPointToLocalCoordSpace(const gfx::PointF& point,
+                                       const viz::SurfaceId& original_surface,
+                                       gfx::PointF* transformed_point) override;
+  gfx::PointF TransformRootPointToViewCoordSpace(
+      const gfx::PointF& point) override;
 
   // RenderWidgetHostViewBase implementation.
   void InitAsPopup(RenderWidgetHostView* parent_host_view,
@@ -95,7 +102,7 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   void SelectionBoundsChanged(
       const ViewHostMsg_SelectionBounds_Params& params) override;
   void SubmitCompositorFrame(const viz::LocalSurfaceId& local_surface_id,
-                             cc::CompositorFrame frame) override;
+                             viz::CompositorFrame frame) override;
 #if defined(USE_AURA)
   void ProcessAckedTouchEvent(const TouchEventWithLatencyInfo& touch,
                               InputEventAckState ack_result) override;
@@ -105,6 +112,7 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   void ProcessTouchEvent(const blink::WebTouchEvent& event,
                          const ui::LatencyInfo& latency) override;
 
+  void DidStopFlinging() override;
   bool LockMouse() override;
   void UnlockMouse() override;
   viz::LocalSurfaceId GetLocalSurfaceId() const override;

@@ -25,14 +25,20 @@ interface BackgroundFetchManager
     method fetch
     method get
     method getIds
-interface BackgroundFetchRegistration
+interface BackgroundFetchRegistration : EventTarget
     attribute @@toStringTag
+    getter downloadTotal
+    getter downloaded
     getter icons
     getter id
+    getter onprogress
     getter title
     getter totalDownloadSize
+    getter uploadTotal
+    getter uploaded
     method abort
     method constructor
+    setter onprogress
 interface BackgroundFetchSettledFetch : BackgroundFetchFetch
     attribute @@toStringTag
     getter response
@@ -482,6 +488,28 @@ interface FileReader : EventTarget
     setter onloadend
     setter onloadstart
     setter onprogress
+interface FontFace
+    attribute @@toStringTag
+    getter display
+    getter family
+    getter featureSettings
+    getter loaded
+    getter status
+    getter stretch
+    getter style
+    getter unicodeRange
+    getter variant
+    getter weight
+    method constructor
+    method load
+    setter display
+    setter family
+    setter featureSettings
+    setter stretch
+    setter style
+    setter unicodeRange
+    setter variant
+    setter weight
 interface ForeignFetchEvent : ExtendableEvent
     attribute @@toStringTag
     getter origin
@@ -783,7 +811,6 @@ interface Notification : EventTarget
     getter data
     getter dir
     getter icon
-    getter image
     getter lang
     getter onclick
     getter onclose
@@ -954,6 +981,27 @@ interface PerformanceObserverEntryList
     method getEntries
     method getEntriesByName
     method getEntriesByType
+interface PerformanceResourceTiming : PerformanceEntry
+    attribute @@toStringTag
+    getter connectEnd
+    getter connectStart
+    getter decodedBodySize
+    getter domainLookupEnd
+    getter domainLookupStart
+    getter encodedBodySize
+    getter fetchStart
+    getter initiatorType
+    getter nextHopProtocol
+    getter redirectEnd
+    getter redirectStart
+    getter requestStart
+    getter responseEnd
+    getter responseStart
+    getter secureConnectionStart
+    getter serverTiming
+    getter transferSize
+    getter workerStart
+    method constructor
 interface PerformanceServerTiming
     attribute @@toStringTag
     getter description
@@ -1131,6 +1179,23 @@ interface TextEncoder
     getter encoding
     method constructor
     method encode
+interface TrustedHTML
+    static method escape
+    static method unsafelyCreate
+    attribute @@toStringTag
+    method constructor
+    method toString
+interface TrustedScriptURL
+    static method unsafelyCreate
+    attribute @@toStringTag
+    method constructor
+    method toString
+interface TrustedURL
+    static method create
+    static method unsafelyCreate
+    attribute @@toStringTag
+    method constructor
+    method toString
 interface URL
     attribute @@toStringTag
     getter hash
@@ -2435,7 +2500,6 @@ interface WindowClient : Client
     method navigate
 interface WorkerGlobalScope : EventTarget
     attribute @@toStringTag
-    getter addressSpace
     getter caches
     getter crypto
     getter indexedDB

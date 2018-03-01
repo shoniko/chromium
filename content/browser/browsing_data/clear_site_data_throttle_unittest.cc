@@ -161,7 +161,7 @@ TEST_F(ClearSiteDataThrottleTest, MaybeCreateThrottleForRequest) {
   // We can create the throttle for a valid ResourceRequestInfo.
   ResourceRequestInfo::AllocateForTesting(request.get(), RESOURCE_TYPE_IMAGE,
                                           nullptr, 0, 0, 0, false, true, true,
-                                          true, false);
+                                          false);
   EXPECT_TRUE(
       ClearSiteDataThrottle::MaybeCreateThrottleForRequest(request.get()));
 }
@@ -176,17 +176,24 @@ TEST_F(ClearSiteDataThrottleTest, ParseHeaderAndExecuteClearingTask) {
       // One data type.
       {"\"cookies\"", true, false, false},
       {"\"storage\"", false, true, false},
-      {"\"cache\"", false, false, true},
+
+      // TODO(crbug.com/762417): The "cache" parameter is temporarily disabled.
+      // Therefore, a header consisting solely of the "cache" parameter is
+      // invalid. As this test verifies the behavior of Clear-Site-Data with
+      // valid headers, we will omit such test case.
 
       // Two data types.
       {"\"cookies\", \"storage\"", true, true, false},
-      {"\"cookies\", \"cache\"", true, false, true},
-      {"\"storage\", \"cache\"", false, true, true},
+
+      // TODO(crbug.com/762417): The "cache" parameter is temporarily disabled.
+      {"\"cookies\", \"cache\"", true, false, false},
+      {"\"storage\", \"cache\"", false, true, false},
 
       // Three data types.
-      {"\"storage\", \"cache\", \"cookies\"", true, true, true},
-      {"\"cache\", \"cookies\", \"storage\"", true, true, true},
-      {"\"cookies\", \"storage\", \"cache\"", true, true, true},
+      // TODO(crbug.com/762417): The "cache" parameter is temporarily disabled.
+      {"\"storage\", \"cache\", \"cookies\"", true, true, false},
+      {"\"cache\", \"cookies\", \"storage\"", true, true, false},
+      {"\"cookies\", \"storage\", \"cache\"", true, true, false},
 
       // Different formatting.
       {"\"cookies\"", true, false, false},
@@ -199,7 +206,7 @@ TEST_F(ClearSiteDataThrottleTest, ParseHeaderAndExecuteClearingTask) {
 
       // Unknown types are ignored, but we still proceed with the deletion for
       // those that we recognize.
-      {"\"cache\", \"foo\"", false, false, true},
+      {"\"storage\", \"foo\"", false, true, false},
   };
 
   for (const TestCase& test_case : test_cases) {
@@ -233,8 +240,9 @@ TEST_F(ClearSiteDataThrottleTest, ParseHeaderAndExecuteClearingTask) {
     throttle.SetResponseHeaders(std::string(kClearSiteDataHeaderPrefix) +
                                 test_case.header);
 
-    EXPECT_CALL(throttle, ClearSiteData(url::Origin(url), test_case.cookies,
-                                        test_case.storage, test_case.cache));
+    EXPECT_CALL(throttle,
+                ClearSiteData(url::Origin::Create(url), test_case.cookies,
+                              test_case.storage, test_case.cache));
     bool defer;
     throttle.WillProcessResponse(&defer);
     EXPECT_TRUE(defer);
@@ -253,6 +261,9 @@ TEST_F(ClearSiteDataThrottleTest, InvalidHeader) {
                      "No recognized types specified.\n"},
                     {"\"passwords\"",
                      "Unrecognized type: \"passwords\".\n"
+                     "No recognized types specified.\n"},
+                    {"\"cache\"",
+                     "The \"cache\" datatype is temporarily not supported.\n"
                      "No recognized types specified.\n"},
                     {"[ \"list\" ]",
                      "Unrecognized type: [ \"list\" ].\n"
@@ -477,7 +488,8 @@ TEST_F(ClearSiteDataThrottleTest, DeferAndResume) {
       if (expected_defer) {
         testing::Expectation expectation = EXPECT_CALL(
             throttle,
-            ClearSiteData(url::Origin(GURL(test_origin.origin)), _, _, _));
+            ClearSiteData(url::Origin::Create(GURL(test_origin.origin)), _, _,
+                          _));
         EXPECT_CALL(delegate, Resume()).After(expectation);
       } else {
         EXPECT_CALL(throttle, ClearSiteData(_, _, _, _)).Times(0);
@@ -548,9 +560,9 @@ TEST_F(ClearSiteDataThrottleTest, FormattedConsoleOutput) {
        "No recognized types specified.\n"},
 
       // Successful deletion on the same URL.
-      {"\"cache\"", "https://origin3.com/bar",
+      {"\"cookies\"", "https://origin3.com/bar",
        "Clear-Site-Data header on 'https://origin3.com/bar': "
-       "Cleared data types: \"cache\".\n"},
+       "Cleared data types: \"cookies\".\n"},
 
       // Redirect to the original URL.
       // Successful deletion outputs one line.
@@ -570,7 +582,7 @@ TEST_F(ClearSiteDataThrottleTest, FormattedConsoleOutput) {
     ResourceRequestInfo::AllocateForTesting(
         request.get(),
         navigation ? RESOURCE_TYPE_SUB_FRAME : RESOURCE_TYPE_IMAGE, nullptr, 0,
-        0, 0, false, true, true, true, false);
+        0, 0, false, true, true, false);
 
     std::string output_buffer;
     std::unique_ptr<RedirectableTestThrottle> throttle =

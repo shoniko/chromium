@@ -23,7 +23,7 @@
 #include "core/events/KeyboardEvent.h"
 
 #include "build/build_config.h"
-#include "core/editing/InputMethodController.h"
+#include "core/editing/ime/InputMethodController.h"
 #include "core/input/InputDeviceCapabilities.h"
 #include "platform/WindowsKeyboardCodes.h"
 #include "platform/bindings/DOMWrapperWorld.h"
@@ -209,7 +209,7 @@ void KeyboardEvent::InitLocationModifiers(unsigned location) {
   }
 }
 
-DEFINE_TRACE(KeyboardEvent) {
+void KeyboardEvent::Trace(blink::Visitor* visitor) {
   UIEventWithKeyState::Trace(visitor);
 }
 

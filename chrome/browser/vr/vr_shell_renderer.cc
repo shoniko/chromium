@@ -147,8 +147,8 @@ static constexpr float kMidRingOpacity = 0.22f;
 static constexpr float kReticleColor[] = {1.0f, 1.0f, 1.0f, 1.0f};
 
 // Laser constants
-static constexpr float kFadeEnd = 0.535;
-static constexpr float kFadePoint = 0.5335;
+static constexpr float kFadeEnd = 0.535f;
+static constexpr float kFadePoint = 0.5335f;
 static constexpr float kLaserColor[] = {1.0f, 1.0f, 1.0f, 0.5f};
 static constexpr int kLaserDataWidth = 48;
 static constexpr int kLaserDataHeight = 1;
@@ -170,30 +170,10 @@ static const unsigned char kLaserData[] =
     "\xd2\x11\xd8\xd8\xd8\x0d\xcc\xcc\xcc\x0a\xdb\xdb\xdb\x07\xcc\xcc\xcc\x05"
     "\xbf\xbf\xbf\x04\xff\xff\xff\x02\xff\xff\xff\x01";
 
-// This is used to help with antialiasing rounded rects and is a heuristic. We
-// implement antialiasing via a smooth-step in the rrect shader (we smoothly
-// transition from being inside the rrect to being outside of it). We need to
-// compute the size of that step, and the size is related to physical pixels.
-// This function aims to compute the width of the quad in physical pixels for
-// this purpose. This heuristic will produce worse values when the quad is
-// heavily distorted in perspective, but in practice, the error in smooth-step
-// ramp size is not noticeable, even in those cases.
-float ComputePhysicalPixelWidth(const gfx::Transform& view_proj_matrix,
-                                float corner_radius,
-                                const gfx::SizeF element_size,
-                                const gfx::Size surface_texture_size) {
-  gfx::Point3F top_left(-0.5, 0.5, 0.0);
-  gfx::Point3F top_right(0.5, 0.5, 0.0);
-  view_proj_matrix.TransformPoint(&top_left);
-  view_proj_matrix.TransformPoint(&top_right);
-  gfx::Vector3dF top_vector = top_right - top_left;
-  float physical_width = top_vector.Length();
-  physical_width *= corner_radius / element_size.width();
-  return 0.5 * physical_width * surface_texture_size.width();
-}
+#define SHADER(Src) "#version 100\n" #Src
+#define OEIE_SHADER(Src) \
+  "#version 100\n#extension GL_OES_EGL_image_external : require\n" #Src
 
-#define SHADER(Src) #Src
-#define OEIE_SHADER(Src) "#extension GL_OES_EGL_image_external : require\n" #Src
 #define VOID_OFFSET(x) reinterpret_cast<void*>(x)
 
 /* clang-format off */
@@ -322,7 +302,6 @@ static constexpr char const* kGradientQuadFragmentShader = SHADER(
   precision highp float;
   varying vec2 v_CornerPosition;
   varying vec2 v_Position;
-  uniform float u_CornerScale;
   uniform mediump float u_Opacity;
   uniform vec4 u_CenterColor;
   uniform vec4 u_EdgeColor;
@@ -335,10 +314,10 @@ static constexpr char const* kGradientQuadFragmentShader = SHADER(
     float center_color_weight = 1.0 - edge_color_weight;
     vec4 color = u_CenterColor * center_color_weight + u_EdgeColor *
         edge_color_weight;
-    float mask = smoothstep(1.0 + u_CornerScale,
-        1.0 - u_CornerScale,
-        length(v_CornerPosition));
-    gl_FragColor = color * u_Opacity * mask;
+    float mask = 1.0 - step(1.0, length(v_CornerPosition));
+    // Add some noise to prevent banding artifacts in the gradient.
+    float n = (fract(dot(v_Position.xy, vec2(12345.67, 456.7))) - 0.5) / 255.0;
+    gl_FragColor = (color + n) * u_Opacity * mask;
   }
 );
 
@@ -384,7 +363,10 @@ static constexpr char const* kGradientGridFragmentShader = SHADER(
           grid_color.xyz + bg_color.xyz * (1.0 - opacity),
           opacity + bg_color.w * (1.0 - opacity));
     } else {
-      gl_FragColor = bg_color;
+      // Add some noise to prevent banding artifacts in the gradient.
+      float n =
+          (fract(dot(v_GridPosition.xy, vec2(12345.67, 456.7))) - 0.5) / 255.0;
+      gl_FragColor = bg_color + n;
     }
   }
 );
@@ -411,19 +393,17 @@ static constexpr char const* kTexturedQuadVertexShader = SHADER(
   }
 );
 
-#define TEXTURED_QUAD_FRAGMENT_SHADER_BODY "uniform vec4 u_CopyRect;" \
+#define TEXTURED_QUAD_FRAGMENT_SHADER_BODY                            \
+  "uniform vec4 u_CopyRect;"                                          \
   "varying vec2 v_TexCoordinate;"                                     \
   "varying vec2 v_CornerPosition;"                                    \
-  "uniform float u_CornerScale;"                                      \
   "uniform mediump float u_Opacity;"                                  \
   "void main() {"                                                     \
     "vec2 scaledTex ="                                                \
         "vec2(u_CopyRect[0] + v_TexCoordinate.x * u_CopyRect[2],"     \
         "u_CopyRect[1] + v_TexCoordinate.y * u_CopyRect[3]);"         \
     "lowp vec4 color = texture2D(u_Texture, scaledTex);"              \
-    "float mask = smoothstep(1.0 + u_CornerScale,"                    \
-        "1.0 - u_CornerScale,"                                        \
-        "length(v_CornerPosition));"                                  \
+    "float mask = 1.0 - step(1.0, length(v_CornerPosition));"         \
     "gl_FragColor = color * u_Opacity * mask;"                        \
   "}"
 
@@ -564,7 +544,6 @@ TexturedQuadRenderer::TexturedQuadRenderer(const char* vertex_src,
 
   copy_rect_handler_ = glGetUniformLocation(program_handle_, "u_CopyRect");
 
-  corner_scale_handle_ = glGetUniformLocation(program_handle_, "u_CornerScale");
   opacity_handle_ = glGetUniformLocation(program_handle_, "u_Opacity");
   texture_handle_ = glGetUniformLocation(program_handle_, "u_Texture");
 }
@@ -572,18 +551,16 @@ TexturedQuadRenderer::TexturedQuadRenderer(const char* vertex_src,
 TexturedQuadRenderer::~TexturedQuadRenderer() = default;
 
 void TexturedQuadRenderer::AddQuad(int texture_data_handle,
-                                   const gfx::Transform& view_proj_matrix,
+                                   const gfx::Transform& model_view_proj_matrix,
                                    const gfx::RectF& copy_rect,
                                    float opacity,
-                                   const gfx::Size& surface_texture_size,
                                    const gfx::SizeF& element_size,
                                    float corner_radius) {
   QuadData quad;
   quad.texture_data_handle = texture_data_handle;
-  quad.view_proj_matrix = view_proj_matrix;
+  quad.model_view_proj_matrix = model_view_proj_matrix;
   quad.copy_rect = copy_rect;
   quad.opacity = opacity;
-  quad.surface_texture_size = surface_texture_size;
   quad.element_size = element_size;
   quad.corner_radius = corner_radius;
   quad_queue_.push(quad);
@@ -654,13 +631,8 @@ void TexturedQuadRenderer::Flush() {
       last_corner_radius = quad.corner_radius;
       last_element_size = quad.element_size;
       if (quad.corner_radius == 0.0f) {
-        glUniform1f(corner_scale_handle_, 0.5);
         glUniform2f(corner_offset_handle_, 0.0, 0.0);
       } else {
-        glUniform1f(corner_scale_handle_,
-                    1.0f / ComputePhysicalPixelWidth(
-                               quad.view_proj_matrix, quad.corner_radius,
-                               quad.element_size, quad.surface_texture_size));
         glUniform2f(corner_offset_handle_,
                     quad.corner_radius / quad.element_size.width(),
                     quad.corner_radius / quad.element_size.height());
@@ -669,7 +641,7 @@ void TexturedQuadRenderer::Flush() {
 
     // Pass in model view project matrix.
     glUniformMatrix4fv(model_view_proj_matrix_handle_, 1, false,
-                       MatrixToGLArray(quad.view_proj_matrix).data());
+                       MatrixToGLArray(quad.model_view_proj_matrix).data());
 
     if (last_copy_rect != quad.copy_rect) {
       last_copy_rect = quad.copy_rect;
@@ -941,7 +913,6 @@ GradientQuadRenderer::GradientQuadRenderer()
   corner_position_handle_ =
       glGetAttribLocation(program_handle_, "a_CornerPosition");
   offset_scale_handle_ = glGetAttribLocation(program_handle_, "a_OffsetScale");
-  corner_scale_handle_ = glGetUniformLocation(program_handle_, "u_CornerScale");
   opacity_handle_ = glGetUniformLocation(program_handle_, "u_Opacity");
   center_color_handle_ = glGetUniformLocation(program_handle_, "u_CenterColor");
   edge_color_handle_ = glGetUniformLocation(program_handle_, "u_EdgeColor");
@@ -949,11 +920,10 @@ GradientQuadRenderer::GradientQuadRenderer()
 
 GradientGridRenderer::~GradientGridRenderer() = default;
 
-void GradientQuadRenderer::Draw(const gfx::Transform& view_proj_matrix,
+void GradientQuadRenderer::Draw(const gfx::Transform& model_view_proj_matrix,
                                 SkColor edge_color,
                                 SkColor center_color,
                                 float opacity,
-                                const gfx::Size& surface_texture_size,
                                 const gfx::SizeF& element_size,
                                 float corner_radius) {
   glUseProgram(program_handle_);
@@ -982,14 +952,8 @@ void GradientQuadRenderer::Draw(const gfx::Transform& view_proj_matrix,
   glEnableVertexAttribArray(corner_position_handle_);
 
   if (corner_radius == 0.0f) {
-    glUniform1f(corner_scale_handle_, 0.5);
     glUniform2f(corner_offset_handle_, 0.0, 0.0);
   } else {
-    glUniform1f(
-        corner_scale_handle_,
-        1.0f / ComputePhysicalPixelWidth(view_proj_matrix, corner_radius,
-                                         element_size, surface_texture_size));
-
     glUniform2f(corner_offset_handle_, corner_radius / element_size.width(),
                 corner_radius / element_size.height());
   }
@@ -1001,7 +965,7 @@ void GradientQuadRenderer::Draw(const gfx::Transform& view_proj_matrix,
 
   // Pass in model view project matrix.
   glUniformMatrix4fv(model_view_proj_matrix_handle_, 1, false,
-                     MatrixToGLArray(view_proj_matrix).data());
+                     MatrixToGLArray(model_view_proj_matrix).data());
 
   if (corner_radius == 0.0f) {
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT,
@@ -1030,13 +994,13 @@ GradientGridRenderer::GradientGridRenderer()
   lines_count_handle_ = glGetUniformLocation(program_handle_, "u_LinesCount");
 }
 
-void GradientGridRenderer::Draw(const gfx::Transform& view_proj_matrix,
+void GradientGridRenderer::Draw(const gfx::Transform& model_view_proj_matrix,
                                 SkColor edge_color,
                                 SkColor center_color,
                                 SkColor grid_color,
                                 int gridline_count,
                                 float opacity) {
-  PrepareToDraw(model_view_proj_matrix_handle_, view_proj_matrix);
+  PrepareToDraw(model_view_proj_matrix_handle_, model_view_proj_matrix);
 
   // Tell shader the grid size so that it can calculate the fading.
   glUniform1f(scene_radius_handle_, kHalfSize);
@@ -1090,40 +1054,48 @@ VrShellRenderer::VrShellRenderer()
 
 VrShellRenderer::~VrShellRenderer() = default;
 
-void VrShellRenderer::DrawTexturedQuad(int texture_data_handle,
-                                       TextureLocation texture_location,
-                                       const gfx::Transform& view_proj_matrix,
-                                       const gfx::RectF& copy_rect,
-                                       float opacity,
-                                       gfx::SizeF element_size,
-                                       float corner_radius) {
+void VrShellRenderer::DrawTexturedQuad(
+    int texture_data_handle,
+    TextureLocation texture_location,
+    const gfx::Transform& model_view_proj_matrix,
+    const gfx::RectF& copy_rect,
+    float opacity,
+    gfx::SizeF element_size,
+    float corner_radius) {
+  // TODO(vollick): handle drawing this degenerate situation crbug.com/768922
+  if (corner_radius * 2.0 > element_size.width() ||
+      corner_radius * 2.0 > element_size.height()) {
+    return;
+  }
   TexturedQuadRenderer* renderer = texture_location == kTextureLocationExternal
                                        ? GetExternalTexturedQuadRenderer()
                                        : GetTexturedQuadRenderer();
-  renderer->AddQuad(texture_data_handle, view_proj_matrix, copy_rect, opacity,
-                    surface_texture_size_, element_size, corner_radius);
+  renderer->AddQuad(texture_data_handle, model_view_proj_matrix, copy_rect,
+                    opacity, element_size, corner_radius);
 }
 
-void VrShellRenderer::DrawGradientQuad(const gfx::Transform& view_proj_matrix,
-                                       const SkColor edge_color,
-                                       const SkColor center_color,
-                                       float opacity,
-                                       gfx::SizeF element_size,
-                                       float corner_radius) {
-  GetGradientQuadRenderer()->Draw(view_proj_matrix, edge_color, center_color,
-                                  opacity, surface_texture_size_, element_size,
+void VrShellRenderer::DrawGradientQuad(
+    const gfx::Transform& model_view_proj_matrix,
+    const SkColor edge_color,
+    const SkColor center_color,
+    float opacity,
+    gfx::SizeF element_size,
+    float corner_radius) {
+  GetGradientQuadRenderer()->Draw(model_view_proj_matrix, edge_color,
+                                  center_color, opacity, element_size,
                                   corner_radius);
 }
 
 void VrShellRenderer::DrawGradientGridQuad(
-    const gfx::Transform& view_proj_matrix,
+    const gfx::Transform& model_view_proj_matrix,
     const SkColor edge_color,
     const SkColor center_color,
     const SkColor grid_color,
     int gridline_count,
     float opacity) {
-  GetGradientGridRenderer()->Draw(view_proj_matrix, edge_color, center_color,
-                                  grid_color, gridline_count, opacity);
+  GetGradientGridRenderer()->Draw(model_view_proj_matrix, edge_color,
+                                  center_color, grid_color, gridline_count,
+                                  opacity);
 }
 
 ExternalTexturedQuadRenderer*

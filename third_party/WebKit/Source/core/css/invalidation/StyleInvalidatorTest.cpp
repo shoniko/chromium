@@ -31,13 +31,14 @@ void StyleInvalidatorTest::SetUp() {
 }
 
 TEST_F(StyleInvalidatorTest, ScheduleOnDocumentNode) {
-  GetDocument().body()->setInnerHTML(
+  GetDocument().body()->SetInnerHTMLFromString(
       "<div id='d'></div><i id='i'></i><span></span>");
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   unsigned before_count = GetStyleEngine().StyleForElementCount();
 
-  RefPtr<DescendantInvalidationSet> set = DescendantInvalidationSet::Create();
+  scoped_refptr<DescendantInvalidationSet> set =
+      DescendantInvalidationSet::Create();
   set->AddTagName("div");
   set->AddTagName("span");
 

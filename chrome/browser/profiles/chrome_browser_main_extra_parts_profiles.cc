@@ -30,12 +30,13 @@
 #include "chrome/browser/google/google_url_tracker_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
+#include "chrome/browser/language/language_model_factory.h"
+#include "chrome/browser/language/url_language_histogram_factory.h"
 #include "chrome/browser/media/media_engagement_service.h"
 #include "chrome/browser/media/media_engagement_service_factory.h"
 #include "chrome/browser/media/router/media_router_factory.h"
 #include "chrome/browser/media_galleries/media_galleries_preferences_factory.h"
 #include "chrome/browser/net/nqe/ui_network_quality_estimator_service_factory.h"
-#include "chrome/browser/notifications/extension_welcome_notification_factory.h"
 #include "chrome/browser/notifications/notifier_state_tracker_factory.h"
 #include "chrome/browser/ntp_snippets/content_suggestions_service_factory.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
@@ -68,6 +69,7 @@
 #include "chrome/browser/sync/user_event_service_factory.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/thumbnails/thumbnail_service_factory.h"
+#include "chrome/browser/translate/translate_ranker_factory.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
 #include "chrome/browser/ui/find_bar/find_bar_state_factory.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
@@ -76,6 +78,7 @@
 #include "chrome/browser/undo/bookmark_undo_service_factory.h"
 #include "chrome/browser/web_data_service_factory.h"
 #include "chrome/common/features.h"
+#include "components/feature_engagement/features.h"
 #include "components/spellcheck/spellcheck_build_features.h"
 #include "extensions/features/features.h"
 #include "ppapi/features/features.h"
@@ -122,7 +125,6 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/printing/cups_print_job_manager_factory.h"
 #include "chrome/browser/chromeos/printing/synced_printers_manager_factory.h"
-#include "chrome/browser/chromeos/printing/usb_printer_detector_factory.h"
 #include "chrome/browser/chromeos/tether/tether_service_factory.h"
 #include "chrome/browser/extensions/api/platform_keys/verify_trust_api.h"
 #endif
@@ -142,8 +144,9 @@
 #include "chrome/browser/ui/desktop_ios_promotion/sms_service_factory.h"
 #endif
 
-#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS))
+#if BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
 #include "chrome/browser/feature_engagement/bookmark/bookmark_tracker_factory.h"
+#include "chrome/browser/feature_engagement/incognito_window/incognito_window_tracker_factory.h"
 #include "chrome/browser/feature_engagement/new_tab/new_tab_tracker_factory.h"
 #endif
 
@@ -220,9 +223,6 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   CloudPrintProxyServiceFactory::GetInstance();
 #endif
   CookieSettingsFactory::GetInstance();
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  ExtensionWelcomeNotificationFactory::GetInstance();
-#endif
   NotifierStateTrackerFactory::GetInstance();
   data_use_measurement::ChromeDataUseAscriberServiceFactory::GetInstance();
 #if defined(OS_WIN)
@@ -237,7 +237,6 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   EnhancedBookmarkKeyServiceFactory::GetInstance();
 #endif
 #if defined(OS_CHROMEOS)
-  chromeos::UsbPrinterDetectorFactory::GetInstance();
   chromeos::CupsPrintJobManagerFactory::GetInstance();
   chromeos::SyncedPrintersManagerFactory::GetInstance();
   TetherServiceFactory::GetInstance();
@@ -281,6 +280,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
       ->SetUIDelegateFactory(std::move(networking_private_ui_delegate_factory));
 #endif
 #endif
+  LanguageModelFactory::GetInstance();
   if (MediaEngagementService::IsEnabled())
     MediaEngagementServiceFactory::GetInstance();
   media_router::MediaRouterFactory::GetInstance();
@@ -291,8 +291,9 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   MediaGalleriesPreferencesFactory::GetInstance();
   NTPResourceCacheFactory::GetInstance();
 #endif
-#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS))
+#if BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
   feature_engagement::BookmarkTrackerFactory::GetInstance();
+  feature_engagement::IncognitoWindowTrackerFactory::GetInstance();
   feature_engagement::NewTabTrackerFactory::GetInstance();
 #endif
   ContentSuggestionsServiceFactory::GetInstance();
@@ -348,10 +349,12 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   TabRestoreServiceFactory::GetInstance();
   TemplateURLFetcherFactory::GetInstance();
   TemplateURLServiceFactory::GetInstance();
+  translate::TranslateRankerFactory::GetInstance();
 #if defined(OS_WIN)
   TriggeredProfileResetterFactory::GetInstance();
 #endif
   UINetworkQualityEstimatorServiceFactory::GetInstance();
+  UrlLanguageHistogramFactory::GetInstance();
 #if !defined(OS_ANDROID)
   UsbChooserContextFactory::GetInstance();
 #endif

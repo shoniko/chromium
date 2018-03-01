@@ -6,7 +6,9 @@
 
 #include <linux/magic.h>
 #include <sys/statfs.h>
+#include <map>
 #include <set>
+#include <string>
 
 #include "base/callback.h"
 #include "base/command_line.h"
@@ -22,8 +24,8 @@
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/arc/arc_prefs.h"
 #include "components/arc/arc_util.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_manager/known_user.h"
@@ -40,6 +42,11 @@ constexpr char kAndroidMSdkVersion[] = "23";
 // Contains set of profiles for which decline reson was already reported.
 base::LazyInstance<std::set<base::FilePath>>::DestructorAtExit
     g_profile_declined_set = LAZY_INSTANCE_INITIALIZER;
+
+// The cached value of migration allowed for profile. It is necessary to use
+// the same value during a user session.
+base::LazyInstance<std::map<base::FilePath, bool>>::DestructorAtExit
+    g_is_arc_migration_allowed = LAZY_INSTANCE_INITIALIZER;
 
 // Let IsAllowedForProfile() return "false" for any profile.
 bool g_disallow_for_testing = false;
@@ -64,7 +71,7 @@ base::LazyInstance<std::set<AccountId>>::DestructorAtExit
 // Returns whether ARC can run on the filesystem mounted at |path|.
 // This function should run only on threads where IO operations are allowed.
 bool IsArcCompatibleFilesystem(const base::FilePath& path) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   // If it can be verified it is not on ecryptfs, then it is ok.
   struct statfs statfs_buf;
@@ -108,6 +115,41 @@ bool IsReportingFirstTimeForProfile(const Profile* profile) {
   bool inserted;
   std::tie(std::ignore, inserted) = g_profile_declined_set.Get().insert(path);
   return inserted;
+}
+
+bool IsArcMigrationAllowedInternal(const Profile* profile) {
+  policy_util::EcryptfsMigrationAction migration_strategy =
+      policy_util::GetDefaultEcryptfsMigrationActionForManagedUser(
+          IsActiveDirectoryUserForProfile(profile));
+  if (profile->GetPrefs()->IsManagedPreference(
+          prefs::kEcryptfsMigrationStrategy)) {
+    migration_strategy = static_cast<policy_util::EcryptfsMigrationAction>(
+        profile->GetPrefs()->GetInteger(prefs::kEcryptfsMigrationStrategy));
+  }
+  // |kAskForEcryptfsArcUsers| value is received only if the device is in EDU
+  // and admin left the migration policy unset. Note that when enabling ARC on
+  // the admin console, it is mandatory for the administrator to also choose a
+  // migration policy.
+  // In this default case, only a group of devices that had ARC M enabled are
+  // allowed to migrate, provided that ARC is enabled by policy.
+  // TODO(pmarko): Remove the special kAskForEcryptfsArcUsers handling when we
+  // assess that it's not necessary anymore: crbug.com/761348.
+  if (migration_strategy ==
+      policy_util::EcryptfsMigrationAction::kAskForEcryptfsArcUsers) {
+    // Note that ARC enablement is controlled by policy for managed users (as
+    // it's marked 'default_for_enterprise_users': False in
+    // policy_templates.json).
+    DCHECK(profile->GetPrefs()->IsManagedPreference(prefs::kArcEnabled));
+    // We can't reuse IsArcPlayStoreEnabledForProfile here because this would
+    // lead to a circular dependency: It ends up calling this function for some
+    // cases.
+    return profile->GetPrefs()->GetBoolean(prefs::kArcEnabled) &&
+           base::CommandLine::ForCurrentProcess()->HasSwitch(
+               chromeos::switches::kArcTransitionMigrationRequired);
+  }
+
+  return migration_strategy !=
+         policy_util::EcryptfsMigrationAction::kDisallowMigration;
 }
 
 }  // namespace
@@ -154,7 +196,7 @@ bool IsArcAllowedForProfile(const Profile* profile) {
     return false;
   }
 
-  if (!IsArcCompatibleFileSystemUsedForProfile(profile) &&
+  if (IsArcBlockedDueToIncompatibleFileSystem(profile) &&
       !IsArcMigrationAllowedByPolicyForProfile(profile)) {
     VLOG_IF(1, IsReportingFirstTimeForProfile(profile))
         << "Incompatible encryption and migration forbidden.";
@@ -187,39 +229,30 @@ bool IsArcAllowedForProfile(const Profile* profile) {
 }
 
 bool IsArcMigrationAllowedByPolicyForProfile(const Profile* profile) {
-  if (!profile || !profile->GetPrefs()->IsManagedPreference(
-                      prefs::kEcryptfsMigrationStrategy)) {
+  // Always allow migration for unmanaged users.
+  // We're checking if kArcEnabled is managed to find out if the profile is
+  // managed. This is equivalent, because kArcEnabled is marked
+  // 'default_for_enterprise_users': False in policy_templates.json).
+  // Also note that IsArcPlayStoreEnabledPreferenceManagedForProfile cannot be
+  // used here due to function call chain (it calls IsArcAllowedForProfile
+  // again).
+  // TODO(pmarko): crbug.com/771666: Figure out a nicer way to do this on a
+  // const Profile*.
+  if (!profile ||
+      !profile->GetPrefs()->IsManagedPreference(prefs::kArcEnabled)) {
     return true;
   }
 
-  int migration_strategy =
-      profile->GetPrefs()->GetInteger(prefs::kEcryptfsMigrationStrategy);
-  // |kAskForEcryptfsArcUsers| value is received only if the device is in EDU
-  // and admin left the migration policy unset. Note that when enabling ARC on
-  // the admin console, it is mandatory for the administrator to also choose a
-  // migration policy.
-  // In this default case, only a group of devices that had ARC M enabled are
-  // allowed to migrate, provided that ARC is enabled by policy.
-  // TODO(pmarko): Remove the special kAskForEcryptfsArcUsers handling when we
-  // assess that it's not necessary anymore: crbug.com/761348.
-  if (migration_strategy ==
-      static_cast<int>(
-          arc::policy_util::EcryptfsMigrationAction::kAskForEcryptfsArcUsers)) {
-    // Note that ARC enablement is controlled by policy for managed users (as
-    // it's marked 'default_for_enterprise_users': False in
-    // policy_templates.json).
-    DCHECK(profile->GetPrefs()->IsManagedPreference(prefs::kArcEnabled));
-    // We can't reuse IsArcPlayStoreEnabledForProfile here because this would
-    // lead to a circular dependency: It ends up calling this function for some
-    // cases.
-    return profile->GetPrefs()->GetBoolean(prefs::kArcEnabled) &&
-           base::CommandLine::ForCurrentProcess()->HasSwitch(
-               chromeos::switches::kArcTransitionMigrationRequired);
+  // Use the profile path as unique identifier for profile.
+  const base::FilePath path = profile->GetPath();
+  auto iter = g_is_arc_migration_allowed.Get().find(path);
+  if (iter == g_is_arc_migration_allowed.Get().end()) {
+    iter = g_is_arc_migration_allowed.Get()
+               .emplace(path, IsArcMigrationAllowedInternal(profile))
+               .first;
   }
 
-  return migration_strategy !=
-         static_cast<int>(
-             arc::policy_util::EcryptfsMigrationAction::kDisallowMigration);
+  return iter->second;
 }
 
 bool IsArcBlockedDueToIncompatibleFileSystem(const Profile* profile) {
@@ -298,7 +331,7 @@ bool SetArcPlayStoreEnabledForProfile(Profile* profile, bool enabled) {
     // Need update ARC session manager manually for managed case in order to
     // keep its state up to date, otherwise it may stuck with enabling
     // request.
-    // TODO (khmel): Consider finding the better way handling this.
+    // TODO(khmel): Consider finding the better way handling this.
     ArcSessionManager* arc_session_manager = ArcSessionManager::Get();
     // |arc_session_manager| can be nullptr in unit_tests.
     if (!arc_session_manager)

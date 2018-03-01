@@ -25,18 +25,19 @@ TEST(IDBValueUnwrapperTest, IsWrapped) {
                           SerializedScriptValue::SerializeOptions::kSerialize,
                           non_throwable_exception_state);
   wrapper.WrapIfBiggerThan(0);
-  Vector<RefPtr<BlobDataHandle>> blob_data_handles;
+  Vector<scoped_refptr<BlobDataHandle>> blob_data_handles;
   wrapper.ExtractBlobDataHandles(&blob_data_handles);
   Vector<WebBlobInfo>& blob_infos = wrapper.WrappedBlobInfo();
-  RefPtr<SharedBuffer> wrapped_marker_buffer = wrapper.ExtractWireBytes();
+  scoped_refptr<SharedBuffer> wrapped_marker_buffer =
+      wrapper.ExtractWireBytes();
   IDBKey* key = IDBKey::CreateNumber(42.0);
   IDBKeyPath key_path(String("primaryKey"));
 
-  RefPtr<IDBValue> wrapped_value = IDBValue::Create(
+  scoped_refptr<IDBValue> wrapped_value = IDBValue::Create(
       wrapped_marker_buffer,
-      WTF::MakeUnique<Vector<RefPtr<BlobDataHandle>>>(blob_data_handles),
+      WTF::MakeUnique<Vector<scoped_refptr<BlobDataHandle>>>(blob_data_handles),
       WTF::MakeUnique<Vector<WebBlobInfo>>(blob_infos), key, key_path);
-  EXPECT_TRUE(IDBValueUnwrapper::IsWrapped(wrapped_value.Get()));
+  EXPECT_TRUE(IDBValueUnwrapper::IsWrapped(wrapped_value.get()));
 
   Vector<char> wrapped_marker_bytes(wrapped_marker_buffer->size());
   ASSERT_TRUE(wrapped_marker_buffer->GetBytes(wrapped_marker_bytes.data(),
@@ -47,12 +48,13 @@ TEST(IDBValueUnwrapperTest, IsWrapped) {
   // return false.
   ASSERT_LT(3U, wrapped_marker_bytes.size());
   for (size_t i = 0; i < 3; ++i) {
-    RefPtr<IDBValue> mutant_value = IDBValue::Create(
+    scoped_refptr<IDBValue> mutant_value = IDBValue::Create(
         SharedBuffer::Create(wrapped_marker_bytes.data(), i),
-        WTF::MakeUnique<Vector<RefPtr<BlobDataHandle>>>(blob_data_handles),
+        WTF::MakeUnique<Vector<scoped_refptr<BlobDataHandle>>>(
+            blob_data_handles),
         WTF::MakeUnique<Vector<WebBlobInfo>>(blob_infos), key, key_path);
 
-    EXPECT_FALSE(IDBValueUnwrapper::IsWrapped(mutant_value.Get()));
+    EXPECT_FALSE(IDBValueUnwrapper::IsWrapped(mutant_value.get()));
   }
 
   // IsWrapped() looks at the first 3 bytes in the value. Flipping any bit in
@@ -62,12 +64,13 @@ TEST(IDBValueUnwrapperTest, IsWrapped) {
     for (int j = 0; j < 8; ++j) {
       char mask = 1 << j;
       wrapped_marker_bytes[i] ^= mask;
-      RefPtr<IDBValue> mutant_value = IDBValue::Create(
+      scoped_refptr<IDBValue> mutant_value = IDBValue::Create(
           SharedBuffer::Create(wrapped_marker_bytes.data(),
                                wrapped_marker_bytes.size()),
-          WTF::MakeUnique<Vector<RefPtr<BlobDataHandle>>>(blob_data_handles),
+          WTF::MakeUnique<Vector<scoped_refptr<BlobDataHandle>>>(
+              blob_data_handles),
           WTF::MakeUnique<Vector<WebBlobInfo>>(blob_infos), key, key_path);
-      EXPECT_FALSE(IDBValueUnwrapper::IsWrapped(mutant_value.Get()));
+      EXPECT_FALSE(IDBValueUnwrapper::IsWrapped(mutant_value.get()));
 
       wrapped_marker_bytes[i] ^= mask;
     }

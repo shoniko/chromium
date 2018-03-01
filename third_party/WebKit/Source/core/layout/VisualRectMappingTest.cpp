@@ -109,7 +109,7 @@ TEST_F(VisualRectMappingTest, LayoutText) {
 }
 
 TEST_F(VisualRectMappingTest, LayoutInline) {
-  GetDocument().SetBaseURLOverride(KURL(kParsedURLString, "http://test.com"));
+  GetDocument().SetBaseURLOverride(KURL("http://test.com"));
   SetBodyInnerHTML(
       "<style>body { margin: 0; }</style>"
       "<div id='container' style='overflow: scroll; width: 50px; height: 50px'>"
@@ -144,7 +144,7 @@ TEST_F(VisualRectMappingTest, LayoutInline) {
 }
 
 TEST_F(VisualRectMappingTest, LayoutView) {
-  GetDocument().SetBaseURLOverride(KURL(kParsedURLString, "http://test.com"));
+  GetDocument().SetBaseURLOverride(KURL("http://test.com"));
   SetBodyInnerHTML(
       "<style>body { margin: 0; }</style>"
       "<div id=frameContainer>"
@@ -188,7 +188,7 @@ TEST_F(VisualRectMappingTest, LayoutView) {
 }
 
 TEST_F(VisualRectMappingTest, LayoutViewSubpixelRounding) {
-  GetDocument().SetBaseURLOverride(KURL(kParsedURLString, "http://test.com"));
+  GetDocument().SetBaseURLOverride(KURL("http://test.com"));
   SetBodyInnerHTML(
       "<style>body { margin: 0; }</style>"
       "<div id=frameContainer style='position: relative; left: 0.5px'>"
@@ -216,7 +216,7 @@ TEST_F(VisualRectMappingTest, LayoutViewSubpixelRounding) {
 }
 
 TEST_F(VisualRectMappingTest, LayoutViewDisplayNone) {
-  GetDocument().SetBaseURLOverride(KURL(kParsedURLString, "http://test.com"));
+  GetDocument().SetBaseURLOverride(KURL("http://test.com"));
   SetBodyInnerHTML(
       "<style>body { margin: 0; }</style>"
       "<div id=frameContainer>"
@@ -371,7 +371,7 @@ TEST_F(VisualRectMappingTest, ContainerOverflowScroll) {
   CheckPaintInvalidationVisualRect(*target);
   // (2, 3, 140, 100) is first clipped by container's overflow clip, to
   // (10, 10, 50, 80), then is by added container's offset in LayoutView
-  // (111, 222).
+  // (222, 111).
   EXPECT_EQ(LayoutRect(232, 121, 50, 80), target->VisualRect());
 
   LayoutRect container_local_visual_rect = container->LocalVisualRect();
@@ -408,8 +408,8 @@ TEST_F(VisualRectMappingTest, ContainerFlippedWritingModeAndOverflowScroll) {
   // 150 = total_layout_overflow(100 + 100) - width(50)
   EXPECT_EQ(LayoutUnit(150), container->ScrollLeft());
   container->SetScrollTop(LayoutUnit(7));
-  container->SetScrollLeft(
-      LayoutUnit(142));  // Scroll to the right by 8 pixels.
+  // Scroll to the right by 8 pixels.
+  container->SetScrollLeft(LayoutUnit(142));
   GetDocument().View()->UpdateAllLifecyclePhases();
 
   LayoutBlock* target = ToLayoutBlock(GetLayoutObjectByElementId("target"));
@@ -438,10 +438,9 @@ TEST_F(VisualRectMappingTest, ContainerFlippedWritingModeAndOverflowScroll) {
   CheckPaintInvalidationVisualRect(*target);
   // (-2, 3, 140, 100) is first clipped by container's overflow clip, to
   // (40, 10, 50, 80), then is added by container's offset in LayoutView
-  // (111, 222).
-  // TODO(crbug.com/600039): rect.x() should be 262 (left + border-left), but is
-  // offset
-  // by extra horizontal border-widths because of layout error.
+  // (222, 111).
+  // TODO(crbug.com/600039): rect.X() should be 262 (left + border-left), but is
+  // offset by extra horizontal border-widths because of layout error.
   EXPECT_EQ(LayoutRect(322, 121, 50, 80), target->VisualRect());
 
   LayoutRect container_local_visual_rect = container->LocalVisualRect();
@@ -876,7 +875,7 @@ TEST_F(VisualRectMappingTest, PerspectivePlusScroll) {
   transform.FlattenTo2d();
 
   LayoutRect output(transform.MapRect(FloatRect(originalRect)));
-  output.Intersect(container->ClippingRect());
+  output.Intersect(container->ClippingRect(LayoutPoint()));
   CheckVisualRect(*target, *target->View(), originalRect, output, false, false);
 }
 

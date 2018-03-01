@@ -26,16 +26,15 @@
 #ifndef WTF_Functional_h
 #define WTF_Functional_h
 
+#include <utility>
 #include "base/bind.h"
 #include "base/threading/thread_checker.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Assertions.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/RefPtr.h"
 #include "platform/wtf/ThreadSafeRefCounted.h"
 #include "platform/wtf/TypeTraits.h"
-#include <utility>
 
 namespace blink {
 template <typename T>
@@ -128,6 +127,27 @@ PassedWrapper<T> Passed(T&& value) {
   return PassedWrapper<T>(std::move(value));
 }
 
+template <typename T>
+class RetainedRefWrapper final {
+ public:
+  explicit RetainedRefWrapper(T* ptr) : ptr_(ptr) {}
+  explicit RetainedRefWrapper(scoped_refptr<T> ptr) : ptr_(std::move(ptr)) {}
+  T* get() const { return ptr_.get(); }
+
+ private:
+  scoped_refptr<T> ptr_;
+};
+
+template <typename T>
+RetainedRefWrapper<T> RetainedRef(T* ptr) {
+  return RetainedRefWrapper<T>(ptr);
+}
+
+template <typename T>
+RetainedRefWrapper<T> RetainedRef(scoped_refptr<T> ptr) {
+  return RetainedRefWrapper<T>(std::move(ptr));
+}
+
 template <typename T, FunctionThreadAffinity threadAffinity>
 class UnretainedWrapper final {
  public:
@@ -172,13 +192,8 @@ struct ParamStorageTraits {
 };
 
 template <typename T>
-struct ParamStorageTraits<PassRefPtr<T>> {
-  typedef RefPtr<T> StorageType;
-};
-
-template <typename T>
-struct ParamStorageTraits<RefPtr<T>> {
-  typedef RefPtr<T> StorageType;
+struct ParamStorageTraits<scoped_refptr<T>> {
+  typedef scoped_refptr<T> StorageType;
 };
 
 template <typename>
@@ -230,12 +245,25 @@ class Function<R(Args...), threadAffinity> {
     return *this;
   }
 
+  // TODO(tzik): Remove operator() once we finished to update all call sites
+  // to use Run() instead.
   R operator()(Args... args) const {
     DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
     return callback_.Run(std::forward<Args>(args)...);
   }
 
+  R Run(Args... args) const & {
+    DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+    return callback_.Run(std::forward<Args>(args)...);
+  }
+
+  R Run(Args... args) && {
+    DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+    return std::move(callback_).Run(std::forward<Args>(args)...);
+  }
+
   bool IsCancelled() const { return callback_.IsCancelled(); }
+  void Reset() { callback_.Reset(); }
   explicit operator bool() const { return static_cast<bool>(callback_); }
 
   friend base::Callback<R(Args...)> ConvertToBaseCallback(Function function) {
@@ -283,8 +311,10 @@ typedef Function<void(), kCrossThreadAffinity> CrossThreadClosure;
 namespace base {
 
 template <typename T>
-struct BindUnwrapTraits<WTF::RefPtr<T>> {
-  static T* Unwrap(const WTF::RefPtr<T>& wrapped) { return wrapped.Get(); }
+struct BindUnwrapTraits<WTF::RetainedRefWrapper<T>> {
+  static T* Unwrap(const WTF::RetainedRefWrapper<T>& wrapped) {
+    return wrapped.get();
+  }
 };
 
 template <typename T>

@@ -11,10 +11,10 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
-#include "content/public/child/v8_value_converter.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/render_frame.h"
+#include "content/public/renderer/v8_value_converter.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_api.h"
@@ -104,6 +104,7 @@ ScriptContext::ScriptContext(const v8::Local<v8::Context>& v8_context,
       context_type_(context_type),
       effective_extension_(effective_extension),
       effective_context_type_(effective_context_type),
+      context_id_(base::UnguessableToken::Create()),
       safe_builtins_(this),
       isolate_(v8_context->GetIsolate()),
       runner_(new Runner(this)) {

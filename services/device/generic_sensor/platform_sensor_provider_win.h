@@ -6,14 +6,13 @@
 #define SERVICES_DEVICE_GENERIC_SENSOR_PLATFORM_SENSOR_PROVIDER_WIN_H_
 
 #include <SensorsApi.h>
+#include <wrl/client.h>
 
-#include "base/win/scoped_comptr.h"
 #include "services/device/generic_sensor/platform_sensor_provider.h"
 
 namespace base {
 template <typename T>
 struct DefaultSingletonTraits;
-class Thread;
 }  // namespace base
 
 namespace device {
@@ -32,13 +31,13 @@ class PlatformSensorProviderWin final : public PlatformSensorProvider {
   // Overrides ISensorManager COM interface provided by the system, used
   // only for testing purposes.
   void SetSensorManagerForTesting(
-      base::win::ScopedComPtr<ISensorManager> sensor_manager);
+      Microsoft::WRL::ComPtr<ISensorManager> sensor_manager);
 
  protected:
   ~PlatformSensorProviderWin() override;
 
   // PlatformSensorProvider interface implementation.
-  void AllSensorsRemoved() override;
+  void FreeResources() override;
   void CreateSensorInternal(mojom::SensorType type,
                             mojo::ScopedSharedBufferMapping mapping,
                             const CreateSensorCallback& callback) override;
@@ -46,7 +45,7 @@ class PlatformSensorProviderWin final : public PlatformSensorProvider {
  private:
   PlatformSensorProviderWin();
 
-  bool InitializeSensorManager();
+  void CreateSensorThread();
   bool StartSensorThread();
   void StopSensorThread();
   std::unique_ptr<PlatformSensorReaderWin> CreateSensorReader(
@@ -60,8 +59,8 @@ class PlatformSensorProviderWin final : public PlatformSensorProvider {
  private:
   friend struct base::DefaultSingletonTraits<PlatformSensorProviderWin>;
 
-  base::win::ScopedComPtr<ISensorManager> sensor_manager_;
-  std::unique_ptr<base::Thread> sensor_thread_;
+  class SensorThread;
+  std::unique_ptr<SensorThread> sensor_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(PlatformSensorProviderWin);
 };

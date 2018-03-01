@@ -28,10 +28,10 @@
 #define TouchEvent_h
 
 #include "core/CoreExport.h"
-#include "core/dom/TouchList.h"
 #include "core/dom/events/EventDispatchMediator.h"
 #include "core/events/TouchEventInit.h"
 #include "core/events/UIEventWithKeyState.h"
+#include "core/input/TouchList.h"
 #include "platform/graphics/TouchAction.h"
 #include "public/platform/WebCoalescedInputEvent.h"
 #include "public/platform/WebTouchEvent.h"
@@ -89,7 +89,7 @@ class CORE_EXPORT TouchEvent final : public UIEventWithKeyState {
     return native_event_.get();
   }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   TouchEvent();

@@ -21,7 +21,6 @@ const APPLICATION_DESCRIPTORS = [
   'inspector.json',
   'toolbox.json',
   'integration_test_runner.json',
-  'unit_test_runner.json',
   'formatter_worker.json',
   'heap_snapshot_worker.json',
 ];
@@ -40,7 +39,7 @@ const MODULES_TO_REMOVE = [];
  * {file: 'ui/SomeFile.js', existing: 'common'}
  */
 const JS_FILES_MAPPING = [
-  {file: 'main/WarningErrorCounter.js', new: 'console_counters'},
+  {file: 'profiler_test_runner/HeapSnapshotTestRunner.js', new: 'heap_snapshot_test_runner'},
 ];
 
 /**
@@ -53,11 +52,11 @@ const JS_FILES_MAPPING = [
  * }
  */
 const MODULE_MAPPING = {
-  console_counters: {
-    dependencies: ['common', 'ui', 'console_model'],
-    dependents: ['main', 'console_test_runner'],
-    applications: ['inspector.json', 'integration_test_runner.json'],
-    autostart: true,
+  heap_snapshot_test_runner: {
+    dependencies: ['heap_snapshot_worker', 'test_runner'],
+    dependents: [],
+    applications: ['integration_test_runner.json'],
+    autostart: false,
   },
 };
 
@@ -74,7 +73,7 @@ const NEW_DEPENDENCIES_BY_EXISTING_MODULES = {
  * console: ['former_dependency']
  */
 const REMOVE_DEPENDENCIES_BY_EXISTING_MODULES = {
-  console_test_runner: ['main']
+    // console_test_runner: ['main']
 };
 
 /*
@@ -199,7 +198,8 @@ function calculateIdentifiers() {
     let identifiers = [];
     let lines = content.split('\n');
     for (let line of lines) {
-      let match = line.match(new RegExp(`^([a-z_A-Z0-9\.]+)\\s=`)) || line.match(new RegExp(`^([a-z_A-Z0-9\.]+);`));
+      let match =
+          line.match(new RegExp(`^\\s*([a-z_A-Z0-9\.]+)\\s=`)) || line.match(new RegExp(`^\\s*([a-z_A-Z0-9\.]+);`));
       if (!match)
         continue;
       let name = match[1];
@@ -267,7 +267,7 @@ function updateBuildGNFile(cssFilesMapping, newModuleSet) {
 
   let newContent = addContentToLinesInSortedOrder({
     content,
-    startLine: '# this contains non-autostart non-remote modules only.',
+    startLine: 'generated_non_autostart_non_remote_modules = [',
     endLine: ']',
     linesToInsert: newNonAutostartModules,
   });
@@ -368,12 +368,8 @@ function mapIdentifiers(identifiersByFile, cssFilesMapping) {
 function renameIdentifiers(identifierMap) {
   walkSync('front_end', write, true);
 
-  walkSync('../../LayoutTests/http/tests/inspector', write, false);
-  walkSync('../../LayoutTests/http/tests/inspector-enabled', write, false);
+  walkSync('../../LayoutTests/http/tests/devtools', write, false);
   walkSync('../../LayoutTests/http/tests/inspector-protocol', write, false);
-  walkSync('../../LayoutTests/http/tests/inspector-unit', write, false);
-  walkSync('../../LayoutTests/inspector', write, false);
-  walkSync('../../LayoutTests/inspector-enabled', write, false);
   walkSync('../../LayoutTests/inspector-protocol', write, false);
 
   function walkSync(currentDirPath, process, json) {

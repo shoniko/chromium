@@ -64,7 +64,7 @@ void ScriptPromiseResolver::OnTimerFired(TimerBase*) {
     return;
   }
 
-  ScriptState::Scope scope(script_state_.Get());
+  ScriptState::Scope scope(script_state_.get());
   ResolveOrRejectImmediately();
 }
 
@@ -83,7 +83,7 @@ void ScriptPromiseResolver::ResolveOrRejectImmediately() {
   Detach();
 }
 
-DEFINE_TRACE(ScriptPromiseResolver) {
+void ScriptPromiseResolver::Trace(blink::Visitor* visitor) {
   SuspendableObject::Trace(visitor);
 }
 

@@ -30,6 +30,7 @@
 #include <memory>
 #include "core/dom/SynchronousMutationObserver.h"
 #include "core/editing/CaretDisplayItemClient.h"
+#include "core/editing/PositionWithAffinity.h"
 #include "platform/graphics/PaintInvalidationReason.h"
 
 namespace blink {
@@ -65,7 +66,7 @@ class DragCaret final : public GarbageCollectedFinalized<DragCaret>,
   void SetCaretPosition(const PositionWithAffinity&);
   void Clear() { SetCaretPosition(PositionWithAffinity()); }
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   DragCaret();

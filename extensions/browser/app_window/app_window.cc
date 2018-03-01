@@ -47,8 +47,10 @@
 #include "extensions/browser/view_type_utils.h"
 #include "extensions/common/draggable_region.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_messages.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
 #include "extensions/common/permissions/permissions_data.h"
+#include "ipc/ipc_message_macros.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "ui/display/display.h"
@@ -372,12 +374,8 @@ void AppWindow::AddNewContents(WebContents* source,
                                bool user_gesture,
                                bool* was_blocked) {
   DCHECK(new_contents->GetBrowserContext() == browser_context_);
-  app_delegate_->AddNewContents(browser_context_,
-                                new_contents,
-                                disposition,
-                                initial_rect,
-                                user_gesture,
-                                was_blocked);
+  app_delegate_->AddNewContents(browser_context_, new_contents, disposition,
+                                initial_rect, user_gesture);
 }
 
 content::KeyboardEventProcessingResult AppWindow::PreHandleKeyboardEvent(
@@ -442,6 +440,16 @@ std::unique_ptr<content::BluetoothChooser> AppWindow::RunBluetoothChooser(
 
 bool AppWindow::TakeFocus(WebContents* source, bool reverse) {
   return app_delegate_->TakeFocus(source, reverse);
+}
+
+bool AppWindow::OnMessageReceived(const IPC::Message& message,
+                                  content::RenderFrameHost* render_frame_host) {
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(AppWindow, message)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_AppWindowReady, OnAppWindowReady)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+  return handled;
 }
 
 void AppWindow::RenderViewCreated(content::RenderViewHost* render_view_host) {
@@ -716,11 +724,6 @@ void AppWindow::RestoreAlwaysOnTop() {
     UpdateNativeAlwaysOnTop();
 }
 
-void AppWindow::NotifyRenderViewReady() {
-  if (app_window_contents_)
-    app_window_contents_->OnWindowReady();
-}
-
 void AppWindow::GetSerializedState(base::DictionaryValue* properties) const {
   DCHECK(properties);
 
@@ -884,6 +887,11 @@ void AppWindow::EnterFullscreenModeForTab(content::WebContents* source,
 
 void AppWindow::ExitFullscreenModeForTab(content::WebContents* source) {
   ToggleFullscreenModeForTab(source, false);
+}
+
+void AppWindow::OnAppWindowReady() {
+  if (app_window_contents_)
+    app_window_contents_->OnWindowReady();
 }
 
 void AppWindow::ToggleFullscreenModeForTab(content::WebContents* source,

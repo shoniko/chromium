@@ -37,6 +37,7 @@
 #include "core/frame/FrameConsole.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameClient.h"
+#include "core/frame/WebFeature.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/InspectorNetworkAgent.h"
 #include "core/inspector/InspectorTraceEvents.h"
@@ -45,8 +46,6 @@
 #include "core/loader/FrameLoader.h"
 #include "core/loader/ThreadableLoaderClient.h"
 #include "core/loader/ThreadableLoadingContext.h"
-#include "core/page/ChromeClient.h"
-#include "core/page/Page.h"
 #include "core/probe/CoreProbes.h"
 #include "platform/SharedBuffer.h"
 #include "platform/exported/WrappedResourceRequest.h"
@@ -292,25 +291,15 @@ void DocumentThreadableLoader::StartBlinkCORS(const ResourceRequest& request) {
   // headers.
   request_headers_ = request.HttpHeaderFields();
 
-  // DocumentThreadableLoader is used by all javascript initiated fetch, so we
-  // use this chance to record non-GET fetch script requests. However, this is
-  // based on the following assumptions, so please be careful when adding
-  // similar logic:
-  // - ThreadableLoader is used as backend for all javascript initiated network
-  //   fetches.
-  // - Note that ThreadableLoader is also used for non-network fetch such as
-  //   FileReaderLoader. However it emulates GET method so signal is not
-  //   recorded here.
-  // - ThreadableLoader w/ non-GET request is only created from javascript
-  //   initiated fetch.
-  // - Some non-script initiated fetches such as WorkerScriptLoader also use
-  //   ThreadableLoader, but they are guaranteed to use GET method.
-  if (request.HttpMethod() != HTTPNames::GET && GetDocument()) {
-    if (Page* page = GetDocument()->GetPage())
-      page->GetChromeClient().DidObserveNonGetFetchFromScript();
-  }
-
   ResourceRequest new_request(request);
+
+  // Set the service worker mode to none if "bypass for network" in DevTools is
+  // enabled.
+  bool should_bypass_service_worker = false;
+  probe::shouldBypassServiceWorker(GetExecutionContext(),
+                                   &should_bypass_service_worker);
+  if (should_bypass_service_worker)
+    new_request.SetServiceWorkerMode(WebURLRequest::ServiceWorkerMode::kNone);
 
   // Process the CORS protocol inside the DocumentThreadableLoader for the
   // following cases:
@@ -335,10 +324,10 @@ void DocumentThreadableLoader::StartBlinkCORS(const ResourceRequest& request) {
   // intercepted since LoadPreflightRequest() sets the flag to kNone in
   // advance.
   if (!async_ ||
-      request.GetServiceWorkerMode() !=
+      new_request.GetServiceWorkerMode() !=
           WebURLRequest::ServiceWorkerMode::kAll ||
       !SchemeRegistry::ShouldTreatURLSchemeAsAllowingServiceWorkers(
-          request.Url().Protocol()) ||
+          new_request.Url().Protocol()) ||
       !loading_context_->GetResourceFetcher()->IsControlledByServiceWorker()) {
     DispatchInitialRequestBlinkCORS(new_request);
     return;
@@ -740,10 +729,10 @@ bool DocumentThreadableLoader::RedirectReceivedBlinkCORS(
   //
   // See https://fetch.spec.whatwg.org/#http-redirect-fetch.
   if (cors_flag_) {
-    RefPtr<SecurityOrigin> original_origin =
+    scoped_refptr<SecurityOrigin> original_origin =
         SecurityOrigin::Create(original_url);
-    RefPtr<SecurityOrigin> new_origin = SecurityOrigin::Create(new_url);
-    if (!original_origin->IsSameSchemeHostPort(new_origin.Get()))
+    scoped_refptr<SecurityOrigin> new_origin = SecurityOrigin::Create(new_url);
+    if (!original_origin->IsSameSchemeHostPort(new_origin.get()))
       security_origin_ = SecurityOrigin::CreateUnique();
   }
 
@@ -1264,7 +1253,7 @@ void DocumentThreadableLoader::LoadRequestSync(
   if (!client_)
     return;
 
-  if (RefPtr<const SharedBuffer> data = resource->ResourceBuffer()) {
+  if (scoped_refptr<const SharedBuffer> data = resource->ResourceBuffer()) {
     data->ForEachSegment([this](const char* segment, size_t segment_size,
                                 size_t segment_offset) -> bool {
       HandleReceivedData(segment, segment_size);
@@ -1326,7 +1315,7 @@ bool DocumentThreadableLoader::IsAllowedRedirect(
 
 SecurityOrigin* DocumentThreadableLoader::GetSecurityOrigin() const {
   return security_origin_
-             ? security_origin_.Get()
+             ? security_origin_.get()
              : loading_context_->GetFetchContext()->GetSecurityOrigin();
 }
 
@@ -1342,7 +1331,7 @@ ExecutionContext* DocumentThreadableLoader::GetExecutionContext() const {
   return loading_context_->GetExecutionContext();
 }
 
-DEFINE_TRACE(DocumentThreadableLoader) {
+void DocumentThreadableLoader::Trace(blink::Visitor* visitor) {
   visitor->Trace(resource_);
   visitor->Trace(loading_context_);
   ThreadableLoader::Trace(visitor);

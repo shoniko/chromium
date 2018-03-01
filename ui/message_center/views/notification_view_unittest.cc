@@ -77,9 +77,7 @@ class NotificationViewTest : public views::ViewsTestBase,
   void RemoveNotification(const std::string& notification_id,
                           bool by_user) override;
   std::unique_ptr<ui::MenuModel> CreateMenuModel(
-      const NotifierId& notifier_id,
-      const base::string16& display_source) override;
-  bool HasClickedListener(const std::string& notification_id) override;
+      const Notification& notification) override;
   void ClickOnNotificationButton(const std::string& notification_id,
                                  int button_index) override;
   void ClickOnSettingsButton(const std::string& notification_id) override;
@@ -288,16 +286,10 @@ void NotificationViewTest::RemoveNotification(
 }
 
 std::unique_ptr<ui::MenuModel> NotificationViewTest::CreateMenuModel(
-    const NotifierId& notifier_id,
-    const base::string16& display_source) {
+    const Notification& notification) {
   // For this test, this method should not be invoked.
   NOTREACHED();
   return nullptr;
-}
-
-bool NotificationViewTest::HasClickedListener(
-    const std::string& notification_id) {
-  return true;
 }
 
 void NotificationViewTest::ClickOnNotificationButton(

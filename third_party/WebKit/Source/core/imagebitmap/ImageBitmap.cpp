@@ -6,8 +6,8 @@
 
 #include <memory>
 #include "core/html/HTMLCanvasElement.h"
-#include "core/html/HTMLVideoElement.h"
 #include "core/html/ImageData.h"
+#include "core/html/media/HTMLVideoElement.h"
 #include "core/offscreencanvas/OffscreenCanvas.h"
 #include "platform/CrossThreadFunctional.h"
 #include "platform/graphics/CanvasColorParams.h"
@@ -66,37 +66,26 @@ ImageBitmap::ParsedOptions ParseOptions(const ImageBitmapOptions& options,
            options.premultiplyAlpha() == kImageBitmapOptionPremultiply);
   }
 
-  if (options.colorSpaceConversion() != kImageBitmapOptionNone) {
-    if (CanvasColorParams::ColorCorrectRenderingInAnyColorSpace()) {
-      if (options.colorSpaceConversion() == kImageBitmapOptionDefault ||
-          options.colorSpaceConversion() ==
-              kSRGBImageBitmapColorSpaceConversion) {
-        parsed_options.color_params.SetCanvasColorSpace(kSRGBCanvasColorSpace);
-      } else if (options.colorSpaceConversion() ==
-                 kLinearRGBImageBitmapColorSpaceConversion) {
-        parsed_options.color_params.SetCanvasColorSpace(kSRGBCanvasColorSpace);
-        parsed_options.color_params.SetCanvasPixelFormat(kF16CanvasPixelFormat);
-      } else if (options.colorSpaceConversion() ==
-                 kP3ImageBitmapColorSpaceConversion) {
-        parsed_options.color_params.SetCanvasColorSpace(kP3CanvasColorSpace);
-        parsed_options.color_params.SetCanvasPixelFormat(kF16CanvasPixelFormat);
-      } else if (options.colorSpaceConversion() ==
-                 kRec2020ImageBitmapColorSpaceConversion) {
-        parsed_options.color_params.SetCanvasColorSpace(
-            kRec2020CanvasColorSpace);
-        parsed_options.color_params.SetCanvasPixelFormat(kF16CanvasPixelFormat);
-      } else {
-        NOTREACHED()
-            << "Invalid ImageBitmap creation attribute colorSpaceConversion: "
-            << options.colorSpaceConversion();
-      }
-    } else if (CanvasColorParams::ColorCorrectRenderingInSRGBOnly()) {
-      DCHECK_EQ(options.colorSpaceConversion(), kImageBitmapOptionDefault);
-      parsed_options.color_params.SetCanvasColorSpace(kSRGBCanvasColorSpace);
-    } else {
-      DCHECK_EQ(options.colorSpaceConversion(), kImageBitmapOptionDefault);
-      parsed_options.color_params.SetCanvasColorSpace(kLegacyCanvasColorSpace);
-    }
+  parsed_options.color_params.SetCanvasColorSpace(kLegacyCanvasColorSpace);
+  if (options.colorSpaceConversion() == kSRGBImageBitmapColorSpaceConversion) {
+    parsed_options.color_params.SetCanvasColorSpace(kSRGBCanvasColorSpace);
+  } else if (options.colorSpaceConversion() ==
+             kLinearRGBImageBitmapColorSpaceConversion) {
+    parsed_options.color_params.SetCanvasColorSpace(kSRGBCanvasColorSpace);
+    parsed_options.color_params.SetCanvasPixelFormat(kF16CanvasPixelFormat);
+  } else if (options.colorSpaceConversion() ==
+             kP3ImageBitmapColorSpaceConversion) {
+    parsed_options.color_params.SetCanvasColorSpace(kP3CanvasColorSpace);
+    parsed_options.color_params.SetCanvasPixelFormat(kF16CanvasPixelFormat);
+  } else if (options.colorSpaceConversion() ==
+             kRec2020ImageBitmapColorSpaceConversion) {
+    parsed_options.color_params.SetCanvasColorSpace(kRec2020CanvasColorSpace);
+    parsed_options.color_params.SetCanvasPixelFormat(kF16CanvasPixelFormat);
+  } else if (options.colorSpaceConversion() != kImageBitmapOptionNone &&
+             options.colorSpaceConversion() != kImageBitmapOptionDefault) {
+    NOTREACHED()
+        << "Invalid ImageBitmap creation attribute colorSpaceConversion: "
+        << options.colorSpaceConversion();
   }
 
   int source_width = source_size.Width();
@@ -166,7 +155,7 @@ bool DstBufferSizeHasOverflow(const ImageBitmap::ParsedOptions& options) {
   return false;
 }
 
-SkImageInfo GetSkImageInfo(const RefPtr<StaticBitmapImage>& image) {
+SkImageInfo GetSkImageInfo(const scoped_refptr<StaticBitmapImage>& image) {
   sk_sp<SkImage> skia_image = image->PaintImageForCurrentFrame().GetSkImage();
   SkColorType color_type = kN32_SkColorType;
   if (skia_image->colorSpace() && skia_image->colorSpace()->gammaIsLinear())
@@ -176,44 +165,54 @@ SkImageInfo GetSkImageInfo(const RefPtr<StaticBitmapImage>& image) {
                            skia_image->refColorSpace());
 }
 
-RefPtr<Uint8Array> CopyImageData(const RefPtr<StaticBitmapImage>& input,
-                                 const SkImageInfo& info) {
+scoped_refptr<Uint8Array> CopyImageData(
+    const scoped_refptr<StaticBitmapImage>& input,
+    const SkImageInfo& info) {
   unsigned width = static_cast<unsigned>(input->width());
-  RefPtr<ArrayBuffer> dst_buffer =
+  scoped_refptr<ArrayBuffer> dst_buffer =
       ArrayBuffer::CreateOrNull(width * input->height(), info.bytesPerPixel());
   if (!dst_buffer)
     return nullptr;
   unsigned byte_length = dst_buffer->ByteLength();
-  RefPtr<Uint8Array> dst_pixels =
+  scoped_refptr<Uint8Array> dst_pixels =
       Uint8Array::Create(std::move(dst_buffer), 0, byte_length);
   input->PaintImageForCurrentFrame().GetSkImage()->readPixels(
       info, dst_pixels->Data(), width * info.bytesPerPixel(), 0, 0);
   return dst_pixels;
 }
 
-RefPtr<Uint8Array> CopyImageData(const RefPtr<StaticBitmapImage>& input) {
+scoped_refptr<Uint8Array> CopyImageData(
+    const scoped_refptr<StaticBitmapImage>& input) {
   SkImageInfo info = GetSkImageInfo(input);
   return CopyImageData(std::move(input), info);
 }
 
 void freePixels(const void*, void* pixels) {
-  static_cast<Uint8Array*>(pixels)->Deref();
+  static_cast<Uint8Array*>(pixels)->Release();
 }
 
-RefPtr<StaticBitmapImage> NewImageFromRaster(
+scoped_refptr<StaticBitmapImage> NewImageFromRaster(
     const SkImageInfo& info,
-    RefPtr<Uint8Array>&& image_pixels) {
+    scoped_refptr<Uint8Array>&& image_pixels) {
   unsigned image_row_bytes = info.width() * info.bytesPerPixel();
   SkPixmap pixmap(info, image_pixels->Data(), image_row_bytes);
+
+  Uint8Array* pixels = image_pixels.get();
+  if (pixels) {
+    pixels->AddRef();
+    image_pixels = nullptr;
+  }
+
   return StaticBitmapImage::Create(
-      SkImage::MakeFromRaster(pixmap, freePixels, image_pixels.LeakRef()));
+      SkImage::MakeFromRaster(pixmap, freePixels, pixels));
 }
 
-RefPtr<StaticBitmapImage> FlipImageVertically(RefPtr<StaticBitmapImage> input) {
-  RefPtr<Uint8Array> image_pixels = CopyImageData(input);
+scoped_refptr<StaticBitmapImage> FlipImageVertically(
+    scoped_refptr<StaticBitmapImage> input) {
+  scoped_refptr<Uint8Array> image_pixels = CopyImageData(input);
   if (!image_pixels)
     return nullptr;
-  SkImageInfo info = GetSkImageInfo(input.Get());
+  SkImageInfo info = GetSkImageInfo(input.get());
   unsigned image_row_bytes = info.width() * info.bytesPerPixel();
   for (int i = 0; i < info.height() / 2; i++) {
     unsigned top_first_element = i * image_row_bytes;
@@ -226,8 +225,8 @@ RefPtr<StaticBitmapImage> FlipImageVertically(RefPtr<StaticBitmapImage> input) {
   return NewImageFromRaster(info, std::move(image_pixels));
 }
 
-RefPtr<StaticBitmapImage> GetImageWithAlphaDisposition(
-    RefPtr<StaticBitmapImage>&& image,
+scoped_refptr<StaticBitmapImage> GetImageWithAlphaDisposition(
+    scoped_refptr<StaticBitmapImage>&& image,
     AlphaDisposition alpha_disposition) {
   SkAlphaType alpha_type = kPremul_SkAlphaType;
   if (alpha_disposition == kDontPremultiplyAlpha)
@@ -236,18 +235,19 @@ RefPtr<StaticBitmapImage> GetImageWithAlphaDisposition(
   if (skia_image->alphaType() == alpha_type)
     return image;
 
-  SkImageInfo info = GetSkImageInfo(image.Get());
+  SkImageInfo info = GetSkImageInfo(image.get());
   info = info.makeAlphaType(alpha_type);
-  RefPtr<Uint8Array> dst_pixels = CopyImageData(image, info);
+  scoped_refptr<Uint8Array> dst_pixels = CopyImageData(image, info);
   if (!dst_pixels)
     return nullptr;
   return NewImageFromRaster(info, std::move(dst_pixels));
 }
 
-RefPtr<StaticBitmapImage> ScaleImage(RefPtr<StaticBitmapImage>&& image,
-                                     unsigned resize_width,
-                                     unsigned resize_height,
-                                     SkFilterQuality resize_quality) {
+scoped_refptr<StaticBitmapImage> ScaleImage(
+    scoped_refptr<StaticBitmapImage>&& image,
+    unsigned resize_width,
+    unsigned resize_height,
+    SkFilterQuality resize_quality) {
   sk_sp<SkImage> skia_image = image->PaintImageForCurrentFrame().GetSkImage();
   SkAlphaType original_alpha = skia_image->alphaType();
   auto pm_image = skia_image;
@@ -261,11 +261,11 @@ RefPtr<StaticBitmapImage> ScaleImage(RefPtr<StaticBitmapImage>&& image,
     pm_image = SkImage::MakeFromRaster(pm_pixmap, nullptr, nullptr);
   }
 
-  RefPtr<ArrayBuffer> dst_buffer = ArrayBuffer::CreateOrNull(
+  scoped_refptr<ArrayBuffer> dst_buffer = ArrayBuffer::CreateOrNull(
       resize_width * resize_height, pm_info.bytesPerPixel());
   if (!dst_buffer)
     return nullptr;
-  RefPtr<Uint8Array> resized_pixels =
+  scoped_refptr<Uint8Array> resized_pixels =
       Uint8Array::Create(dst_buffer, 0, dst_buffer->ByteLength());
   SkImageInfo pm_resized_info = pm_info.makeWH(resize_width, resize_height);
   SkPixmap pm_resized_pixmap(pm_resized_info, resized_pixels->Data(),
@@ -286,46 +286,30 @@ RefPtr<StaticBitmapImage> ScaleImage(RefPtr<StaticBitmapImage>&& image,
   pm_image->scalePixels(pm_resized_pixmap, resize_quality);
   sk_sp<SkImage> resized_image;
   if (original_alpha == kPremul_SkAlphaType) {
+    resized_pixels->AddRef();
     resized_image = SkImage::MakeFromRaster(pm_resized_pixmap, freePixels,
-                                            resized_pixels.LeakRef());
+                                            resized_pixels.get());
   } else {
     SkPixmap upm_resized_pixmap(
         pm_resized_info.makeAlphaType(kUnpremul_SkAlphaType),
         resized_pixels->Data(), resize_width * pm_info.bytesPerPixel());
+    resized_pixels->AddRef();
     resized_image = SkImage::MakeFromRaster(upm_resized_pixmap, freePixels,
-                                            resized_pixels.LeakRef());
+                                            resized_pixels.get());
   }
   return StaticBitmapImage::Create(resized_image,
                                    image->ContextProviderWrapper());
 }
 
-RefPtr<StaticBitmapImage> ApplyColorSpaceConversion(
-    RefPtr<StaticBitmapImage>&& image,
+scoped_refptr<StaticBitmapImage> ApplyColorSpaceConversion(
+    scoped_refptr<StaticBitmapImage>&& image,
     ImageBitmap::ParsedOptions& options) {
-  if (!CanvasColorParams::ColorCorrectRenderingEnabled())
-    return image;
-
-  // TODO(zakerinasab): crbug.com/754713
-  // If image does not have any color space info and we must color convert to
-  // SRGB, we should tag the image as SRGB. Since we cannot use SkImage::
-  // makeColorSpace() on SkImages with no color space to get the image in SRGB,
-  // we have to do this using a slow code path (reading the pixels and creating
-  // a new SRGB SkImage). This is inefficient and also converts GPU-backed
-  // images to CPU-backed. For now, we ignore this and let the images be in
-  // null color space. This must be okay if color management is only supported
-  // for SRGB. This might be okay for converting null color space to other
-  // color spaces. Please see crbug.com/754713 for more details.
-
-  if (!CanvasColorParams::ColorCorrectRenderingInAnyColorSpace())
-    return image;
-
-  // Color correct the image. This code path uses SkImage::makeColorSpace(). If
-  // the color space of the source image is nullptr, it will be assumed in SRGB.
-  return image->ConvertToColorSpace(options.color_params.GetSkColorSpace(),
-                                    SkTransferFunctionBehavior::kRespect);
+  return image->ConvertToColorSpace(
+      options.color_params.GetSkColorSpaceForSkSurfaces(),
+      SkTransferFunctionBehavior::kRespect);
 }
 
-RefPtr<StaticBitmapImage> MakeBlankImage(
+scoped_refptr<StaticBitmapImage> MakeBlankImage(
     const ImageBitmap::ParsedOptions& parsed_options) {
   SkImageInfo info = SkImageInfo::Make(
       parsed_options.crop_rect.Width(), parsed_options.crop_rect.Height(),
@@ -354,10 +338,10 @@ sk_sp<SkImage> ImageBitmap::GetSkImageFromDecoder(
   return frame->FinalizePixelsAndGetImage();
 }
 
-static RefPtr<StaticBitmapImage> CropImageAndApplyColorSpaceConversion(
-    RefPtr<Image>&& image,
+static scoped_refptr<StaticBitmapImage> CropImageAndApplyColorSpaceConversion(
+    scoped_refptr<Image>&& image,
     ImageBitmap::ParsedOptions& parsed_options,
-    ColorBehavior color_behavior = ColorBehavior::TransformToGlobalTarget()) {
+    ColorBehavior color_behavior = ColorBehavior::TransformToSRGB()) {
   DCHECK(image);
   IntRect img_rect(IntPoint(), IntSize(image->width(), image->height()));
   const IntRect src_rect = Intersection(img_rect, parsed_options.crop_rect);
@@ -388,7 +372,7 @@ static RefPtr<StaticBitmapImage> CropImageAndApplyColorSpaceConversion(
   if (src_rect != img_rect)
     skia_image = skia_image->makeSubset(src_rect);
 
-  RefPtr<StaticBitmapImage> result =
+  scoped_refptr<StaticBitmapImage> result =
       StaticBitmapImage::Create(skia_image, image->ContextProviderWrapper());
 
   // flip if needed
@@ -417,7 +401,7 @@ ImageBitmap::ImageBitmap(ImageElementBase* image,
                          Optional<IntRect> crop_rect,
                          Document* document,
                          const ImageBitmapOptions& options) {
-  RefPtr<Image> input = image->CachedImage()->GetImage();
+  scoped_refptr<Image> input = image->CachedImage()->GetImage();
   ParsedOptions parsed_options =
       ParseOptions(options, crop_rect, image->BitmapSourceSize());
   if (DstBufferSizeHasOverflow(parsed_options))
@@ -427,7 +411,7 @@ ImageBitmap::ImageBitmap(ImageElementBase* image,
       std::move(input), parsed_options,
       options.colorSpaceConversion() == kImageBitmapOptionNone
           ? ColorBehavior::Ignore()
-          : ColorBehavior::TransformToGlobalTarget());
+          : ColorBehavior::TransformToSRGB());
   if (!image_)
     return;
 
@@ -436,13 +420,9 @@ ImageBitmap::ImageBitmap(ImageElementBase* image,
   sk_sp<SkImage> sk_image = image_->PaintImageForCurrentFrame().GetSkImage();
   SkPixmap pixmap;
   if (!sk_image->isTextureBacked() && !sk_image->peekPixels(&pixmap)) {
-    sk_sp<SkColorSpace> dst_color_space = nullptr;
-    SkColorType dst_color_type = kN32_SkColorType;
-    if (CanvasColorParams::ColorCorrectRenderingInAnyColorSpace() ||
-        parsed_options.color_params.ColorCorrectNoColorSpaceToSRGB()) {
-      dst_color_space = parsed_options.color_params.GetSkColorSpace();
-      dst_color_type = parsed_options.color_params.GetSkColorType();
-    }
+    sk_sp<SkColorSpace> dst_color_space =
+        parsed_options.color_params.GetSkColorSpace();
+    SkColorType dst_color_type = parsed_options.color_params.GetSkColorType();
     SkImageInfo image_info =
         SkImageInfo::Make(sk_image->width(), sk_image->height(), dst_color_type,
                           kPremul_SkAlphaType, dst_color_space);
@@ -471,7 +451,7 @@ ImageBitmap::ImageBitmap(HTMLVideoElement* video,
 
   std::unique_ptr<ImageBuffer> buffer =
       ImageBuffer::Create(IntSize(video->videoWidth(), video->videoHeight()),
-                          kNonOpaque, kDoNotInitializeImagePixels);
+                          kDoNotInitializeImagePixels);
   if (!buffer)
     return;
 
@@ -479,7 +459,7 @@ ImageBitmap::ImageBitmap(HTMLVideoElement* video,
       buffer->Canvas(),
       IntRect(IntPoint(), IntSize(video->videoWidth(), video->videoHeight())),
       nullptr);
-  RefPtr<StaticBitmapImage> input = buffer->NewImageSnapshot();
+  scoped_refptr<StaticBitmapImage> input = buffer->NewImageSnapshot();
   image_ = CropImageAndApplyColorSpaceConversion(input, parsed_options);
   if (!image_)
     return;
@@ -492,14 +472,14 @@ ImageBitmap::ImageBitmap(HTMLCanvasElement* canvas,
                          Optional<IntRect> crop_rect,
                          const ImageBitmapOptions& options) {
   SourceImageStatus status;
-  RefPtr<Image> image_input = canvas->GetSourceImageForCanvas(
+  scoped_refptr<Image> image_input = canvas->GetSourceImageForCanvas(
       &status, kPreferAcceleration, kSnapshotReasonCreateImageBitmap,
       FloatSize());
   if (status != kNormalSourceImageStatus)
     return;
   DCHECK(image_input->IsStaticBitmapImage());
-  RefPtr<StaticBitmapImage> input =
-      static_cast<StaticBitmapImage*>(image_input.Get());
+  scoped_refptr<StaticBitmapImage> input =
+      static_cast<StaticBitmapImage*>(image_input.get());
 
   ParsedOptions parsed_options = ParseOptions(
       options, crop_rect, IntSize(input->width(), input->height()));
@@ -518,13 +498,13 @@ ImageBitmap::ImageBitmap(OffscreenCanvas* offscreen_canvas,
                          Optional<IntRect> crop_rect,
                          const ImageBitmapOptions& options) {
   SourceImageStatus status;
-  RefPtr<Image> raw_input = offscreen_canvas->GetSourceImageForCanvas(
+  scoped_refptr<Image> raw_input = offscreen_canvas->GetSourceImageForCanvas(
       &status, kPreferNoAcceleration, kSnapshotReasonCreateImageBitmap,
       FloatSize(offscreen_canvas->Size()));
   DCHECK(raw_input->IsStaticBitmapImage());
-  RefPtr<StaticBitmapImage> input =
-      static_cast<StaticBitmapImage*>(raw_input.Get());
-  raw_input.Clear();
+  scoped_refptr<StaticBitmapImage> input =
+      static_cast<StaticBitmapImage*>(raw_input.get());
+  raw_input = nullptr;
 
   if (status != kNormalSourceImageStatus)
     return;
@@ -600,25 +580,30 @@ ImageBitmap::ImageBitmap(ImageData* data,
   SwizzleImageDataIfNeeded(cropped_data);
 
   int byte_length = cropped_data->BufferBase()->ByteLength();
-  RefPtr<ArrayBuffer> array_buffer = ArrayBuffer::CreateOrNull(byte_length, 1);
+  scoped_refptr<ArrayBuffer> array_buffer =
+      ArrayBuffer::CreateOrNull(byte_length, 1);
   if (!array_buffer)
     return;
-  RefPtr<Uint8Array> image_pixels =
+  scoped_refptr<Uint8Array> image_pixels =
       Uint8Array::Create(std::move(array_buffer), 0, byte_length);
-  memcpy(image_pixels->Data(), cropped_data->BufferBase()->Data(), byte_length);
-
-  SkImageInfo info = SkImageInfo::Make(
-      cropped_data->width(), cropped_data->height(),
-      cropped_data->GetCanvasColorParams().GetSkColorType(),
-      kUnpremul_SkAlphaType,
-      cropped_data->GetCanvasColorParams().GetSkColorSpaceForSkSurfaces());
-
-  // If we are in color correct rendering mode but we only color correct to
-  // SRGB, we don't do any color conversion when transferring the pixels from
-  // ImageData to ImageBitmap to avoid double gamma correction. We tag the
-  // image with SRGB color space later in ApplyColorSpaceConversion().
-  if (CanvasColorParams::ColorCorrectRenderingInSRGBOnly())
-    info = info.makeColorSpace(nullptr);
+  const CanvasColorParams color_params = cropped_data->GetCanvasColorParams();
+  if (color_params.GetSkColorType() == kRGBA_F16_SkColorType) {
+    std::unique_ptr<SkColorSpaceXform> xform = SkColorSpaceXform::New(
+        color_params.GetSkColorSpaceForSkSurfaces().get(),
+        color_params.GetSkColorSpaceForSkSurfaces().get());
+    xform->apply(SkColorSpaceXform::ColorFormat::kRGBA_F16_ColorFormat,
+                 image_pixels->Data(),
+                 SkColorSpaceXform::ColorFormat::kRGBA_F32_ColorFormat,
+                 cropped_data->BufferBase()->Data(),
+                 cropped_data->Size().Area(), kUnpremul_SkAlphaType);
+  } else {
+    memcpy(image_pixels->Data(), cropped_data->BufferBase()->Data(),
+           byte_length);
+  }
+  SkImageInfo info =
+      SkImageInfo::Make(cropped_data->width(), cropped_data->height(),
+                        color_params.GetSkColorType(), kUnpremul_SkAlphaType,
+                        color_params.GetSkColorSpaceForSkSurfaces());
   image_ = NewImageFromRaster(info, std::move(image_pixels));
 
   // swizzle back
@@ -642,7 +627,7 @@ ImageBitmap::ImageBitmap(ImageData* data,
 ImageBitmap::ImageBitmap(ImageBitmap* bitmap,
                          Optional<IntRect> crop_rect,
                          const ImageBitmapOptions& options) {
-  RefPtr<StaticBitmapImage> input = bitmap->BitmapImage();
+  scoped_refptr<StaticBitmapImage> input = bitmap->BitmapImage();
   if (!input)
     return;
   ParsedOptions parsed_options =
@@ -658,7 +643,7 @@ ImageBitmap::ImageBitmap(ImageBitmap* bitmap,
   image_->SetOriginClean(bitmap->OriginClean());
 }
 
-ImageBitmap::ImageBitmap(RefPtr<StaticBitmapImage> image,
+ImageBitmap::ImageBitmap(scoped_refptr<StaticBitmapImage> image,
                          Optional<IntRect> crop_rect,
                          const ImageBitmapOptions& options) {
   bool origin_clean = image->OriginClean();
@@ -675,11 +660,11 @@ ImageBitmap::ImageBitmap(RefPtr<StaticBitmapImage> image,
   image_->SetOriginClean(origin_clean);
 }
 
-ImageBitmap::ImageBitmap(RefPtr<StaticBitmapImage> image) {
+ImageBitmap::ImageBitmap(scoped_refptr<StaticBitmapImage> image) {
   image_ = std::move(image);
 }
 
-RefPtr<StaticBitmapImage> ImageBitmap::Transfer() {
+scoped_refptr<StaticBitmapImage> ImageBitmap::Transfer() {
   DCHECK(!IsNeutered());
   is_neutered_ = true;
   image_->Transfer();
@@ -726,13 +711,13 @@ ImageBitmap* ImageBitmap::Create(ImageBitmap* bitmap,
   return new ImageBitmap(bitmap, crop_rect, options);
 }
 
-ImageBitmap* ImageBitmap::Create(RefPtr<StaticBitmapImage> image,
+ImageBitmap* ImageBitmap::Create(scoped_refptr<StaticBitmapImage> image,
                                  Optional<IntRect> crop_rect,
                                  const ImageBitmapOptions& options) {
   return new ImageBitmap(std::move(image), crop_rect, options);
 }
 
-ImageBitmap* ImageBitmap::Create(RefPtr<StaticBitmapImage> image) {
+ImageBitmap* ImageBitmap::Create(scoped_refptr<StaticBitmapImage> image) {
   return new ImageBitmap(std::move(image));
 }
 
@@ -752,7 +737,7 @@ void ImageBitmap::ResolvePromiseOnOriginalThread(
     sk_sp<SkImage> skia_image,
     bool origin_clean,
     std::unique_ptr<ParsedOptions> parsed_options) {
-  RefPtr<StaticBitmapImage> image =
+  scoped_refptr<StaticBitmapImage> image =
       StaticBitmapImage::Create(std::move(skia_image));
   DCHECK(IsMainThread());
   if (!parsed_options->premultiply_alpha) {
@@ -791,13 +776,17 @@ void ImageBitmap::RasterizeImageOnBackgroundThread(
     bool origin_clean,
     std::unique_ptr<ParsedOptions> parsed_options) {
   DCHECK(!IsMainThread());
-  SkImageInfo info = SkImageInfo::Make(
-      dst_rect.Width(), dst_rect.Height(),
-      parsed_options->color_params.GetSkColorType(), kPremul_SkAlphaType);
+  // TODO (zakerinasab): crbug.com/768844
+  // For now only SVG is decoded async so it is fine to assume the color space
+  // is SRGB. When other sources are decoded async (crbug.com/580202), make sure
+  // that proper color space is used in SkImageInfo to avoid clipping the gamut
+  // of the image bitmap source.
+  SkImageInfo info = SkImageInfo::MakeS32(dst_rect.Width(), dst_rect.Height(),
+                                          kPremul_SkAlphaType);
   sk_sp<SkSurface> surface = SkSurface::MakeRaster(info);
   paint_record->Playback(surface->getCanvas());
   sk_sp<SkImage> skia_image = surface->makeImageSnapshot();
-  RefPtr<WebTaskRunner> task_runner =
+  scoped_refptr<WebTaskRunner> task_runner =
       Platform::Current()->MainThread()->GetWebTaskRunner();
   task_runner->PostTask(
       BLINK_FROM_HERE, CrossThreadBind(&ResolvePromiseOnOriginalThread,
@@ -814,7 +803,7 @@ ScriptPromise ImageBitmap::CreateAsync(ImageElementBase* image,
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
   ScriptPromise promise = resolver->Promise();
 
-  RefPtr<Image> input = image->CachedImage()->GetImage();
+  scoped_refptr<Image> input = image->CachedImage()->GetImage();
   ParsedOptions parsed_options =
       ParseOptions(options, crop_rect, image->BitmapSourceSize());
   if (DstBufferSizeHasOverflow(parsed_options)) {
@@ -861,14 +850,13 @@ ScriptPromise ImageBitmap::CreateAsync(ImageElementBase* image,
                       std::move(paint_record), draw_dst_rect,
                       !image->WouldTaintOrigin(document->GetSecurityOrigin()),
                       WTF::Passed(std::move(passed_parsed_options))));
-
   return promise;
 }
 
 void ImageBitmap::close() {
   if (!image_ || is_neutered_)
     return;
-  image_.Clear();
+  image_ = nullptr;
   is_neutered_ = true;
 }
 
@@ -881,8 +869,8 @@ CanvasColorParams ImageBitmap::GetCanvasColorParams() {
   return CanvasColorParams(GetSkImageInfo(image_));
 }
 
-RefPtr<Uint8Array> ImageBitmap::CopyBitmapData(AlphaDisposition alpha_op,
-                                               DataColorFormat format) {
+scoped_refptr<Uint8Array> ImageBitmap::CopyBitmapData(AlphaDisposition alpha_op,
+                                                      DataColorFormat format) {
   SkImageInfo info = GetSkImageInfo(image_);
   auto color_type = info.colorType();
   if (color_type == kN32_SkColorType && format == kRGBAColorType)
@@ -895,7 +883,7 @@ RefPtr<Uint8Array> ImageBitmap::CopyBitmapData(AlphaDisposition alpha_op,
   return CopyImageData(image_, info);
 }
 
-RefPtr<Uint8Array> ImageBitmap::CopyBitmapData() {
+scoped_refptr<Uint8Array> ImageBitmap::CopyBitmapData() {
   return CopyImageData(image_);
 }
 
@@ -934,10 +922,11 @@ ScriptPromise ImageBitmap::CreateImageBitmap(
       script_state, Create(this, crop_rect, options));
 }
 
-RefPtr<Image> ImageBitmap::GetSourceImageForCanvas(SourceImageStatus* status,
-                                                   AccelerationHint,
-                                                   SnapshotReason,
-                                                   const FloatSize&) {
+scoped_refptr<Image> ImageBitmap::GetSourceImageForCanvas(
+    SourceImageStatus* status,
+    AccelerationHint,
+    SnapshotReason,
+    const FloatSize&) {
   *status = kNormalSourceImageStatus;
   if (!image_)
     return nullptr;
@@ -954,7 +943,5 @@ void ImageBitmap::AdjustDrawRects(FloatRect* src_rect,
 FloatSize ImageBitmap::ElementSize(const FloatSize&) const {
   return FloatSize(width(), height());
 }
-
-DEFINE_TRACE(ImageBitmap) {}
 
 }  // namespace blink

@@ -179,12 +179,14 @@ class CORE_EXPORT StyleSheetContents
     DCHECK(rule_set_);
     return *rule_set_.Get();
   }
+
+  bool HasRuleSet() { return rule_set_.Get(); }
   RuleSet& EnsureRuleSet(const MediaQueryEvaluator&, AddRuleFlags);
   void ClearRuleSet();
 
   String SourceMapURL() const { return source_map_url_; }
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   StyleSheetContents(StyleRuleImport* owner_rule,

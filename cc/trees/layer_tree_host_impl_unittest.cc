@@ -21,7 +21,6 @@
 #include "cc/animation/animation_id_provider.h"
 #include "cc/animation/transform_operations.h"
 #include "cc/base/histograms.h"
-#include "cc/base/math_util.h"
 #include "cc/input/browser_controls_offset_manager.h"
 #include "cc/input/main_thread_scrolling_reason.h"
 #include "cc/input/page_scale_animation.h"
@@ -36,12 +35,6 @@
 #include "cc/layers/texture_layer_impl.h"
 #include "cc/layers/video_layer_impl.h"
 #include "cc/layers/viewport.h"
-#include "cc/output/compositor_frame_metadata.h"
-#include "cc/output/latency_info_swap_promise.h"
-#include "cc/quads/render_pass_draw_quad.h"
-#include "cc/quads/solid_color_draw_quad.h"
-#include "cc/quads/texture_draw_quad.h"
-#include "cc/quads/tile_draw_quad.h"
 #include "cc/resources/ui_resource_bitmap.h"
 #include "cc/resources/ui_resource_manager.h"
 #include "cc/test/animation_test_common.h"
@@ -60,6 +53,7 @@
 #include "cc/test/test_task_graph_runner.h"
 #include "cc/test/test_web_graphics_context_3d.h"
 #include "cc/trees/effect_node.h"
+#include "cc/trees/latency_info_swap_promise.h"
 #include "cc/trees/layer_tree_host_common.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/mutator_host.h"
@@ -67,8 +61,13 @@
 #include "cc/trees/single_thread_proxy.h"
 #include "cc/trees/transform_node.h"
 #include "components/viz/common/frame_sinks/begin_frame_args.h"
-#include "components/viz/common/quads/copy_output_request.h"
-#include "components/viz/common/quads/copy_output_result.h"
+#include "components/viz/common/frame_sinks/copy_output_request.h"
+#include "components/viz/common/frame_sinks/copy_output_result.h"
+#include "components/viz/common/quads/compositor_frame_metadata.h"
+#include "components/viz/common/quads/render_pass_draw_quad.h"
+#include "components/viz/common/quads/solid_color_draw_quad.h"
+#include "components/viz/common/quads/texture_draw_quad.h"
+#include "components/viz/common/quads/tile_draw_quad.h"
 #include "components/viz/service/display/gl_renderer.h"
 #include "components/viz/test/begin_frame_args_test.h"
 #include "components/viz/test/test_layer_tree_frame_sink.h"
@@ -76,6 +75,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkMallocPixelRef.h"
+#include "ui/gfx/geometry/angle_conversions.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/geometry/vector2d_conversions.h"
@@ -186,7 +186,8 @@ class LayerTreeHostImplTest : public testing::Test,
     std::unique_ptr<TestFrameData> frame(new TestFrameData);
     EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(frame.get()));
     last_on_draw_render_passes_.clear();
-    RenderPass::CopyAll(frame->render_passes, &last_on_draw_render_passes_);
+    viz::RenderPass::CopyAll(frame->render_passes,
+                             &last_on_draw_render_passes_);
     host_impl_->DrawLayers(frame.get());
     host_impl_->DidDrawAllLayers(*frame);
     last_on_draw_frame_ = std::move(frame);
@@ -436,10 +437,10 @@ class LayerTreeHostImplTest : public testing::Test,
     squash1->SetBounds(gfx::Size(140, 300));
     squash1->SetPosition(gfx::PointF(220, 0));
     if (transparent_layer) {
-      // In the it is a transparent layer but should still participate
-      // in hit testing.
       squash1->test_properties()->opacity = 0.0f;
-      squash1->SetShouldHitTest(true);
+      // The transparent layer should still participate in hit testing even
+      // through it does not draw content.
+      squash1->SetHitTestableWithoutDrawsContent(true);
     } else {
       squash1->SetDrawsContent(true);
     }
@@ -672,7 +673,7 @@ class LayerTreeHostImplTest : public testing::Test,
   base::Closure animation_task_;
   base::TimeDelta requested_animation_delay_;
   std::unique_ptr<TestFrameData> last_on_draw_frame_;
-  RenderPassList last_on_draw_render_passes_;
+  viz::RenderPassList last_on_draw_render_passes_;
   scoped_refptr<AnimationTimeline> timeline_;
   std::unique_ptr<base::Thread> image_worker_;
 };
@@ -884,60 +885,6 @@ TEST_F(LayerTreeHostImplTest, ScrollDeltaRepeatedScrolls) {
   scroll_info = host_impl_->ProcessScrollDeltas();
   EXPECT_TRUE(ScrollInfoContains(*scroll_info, root->element_id(),
                                  scroll_delta + scroll_delta2));
-}
-
-TEST_F(LayerTreeHostImplTest, ScrollerSizeOfCCScrollingHistogramRecordingTest) {
-  const gfx::Size content_size(800, 600);
-  const gfx::Size viewport_size(500, 500);
-  CreateBasicVirtualViewportLayers(viewport_size, content_size);
-
-  LayerImpl* outer_viewport_scroll_layer =
-      host_impl_->active_tree()->OuterViewportScrollLayer();
-  int id = outer_viewport_scroll_layer->id();
-  std::unique_ptr<LayerImpl> child =
-      LayerImpl::Create(host_impl_->active_tree(), id + 2);
-
-  child->SetScrollable(gfx::Size(100, 100));
-  child->SetElementId(LayerIdToElementIdForTesting(child->id()));
-  child->SetBounds(gfx::Size(100, 400));
-  child->SetPosition(gfx::PointF());
-  child->SetDrawsContent(true);
-
-  outer_viewport_scroll_layer->test_properties()->AddChild(std::move(child));
-  host_impl_->active_tree()->BuildPropertyTreesForTesting();
-
-  base::HistogramTester histogram_tester;
-
-  // Test touch scroll.
-  InputHandler::ScrollStatus status = host_impl_->ScrollBegin(
-      BeginState(gfx::Point()).get(), InputHandler::TOUCHSCREEN);
-  EXPECT_EQ(InputHandler::SCROLL_ON_IMPL_THREAD, status.thread);
-  EXPECT_EQ(MainThreadScrollingReason::kNotScrollingOnMain,
-            status.main_thread_scrolling_reasons);
-  host_impl_->ScrollBy(UpdateState(gfx::Point(), gfx::Vector2d(0, 10)).get());
-  host_impl_->ScrollEnd(EndState().get());
-
-  histogram_tester.ExpectBucketCount("Event.Scroll.ScrollerSize.OnScroll_Touch",
-                                     10000, 1);
-  histogram_tester.ExpectTotalCount("Event.Scroll.ScrollerSize.OnScroll_Touch",
-                                    1);
-
-  // Scrolling root layer doesn't add to count.
-  host_impl_->ScrollBegin(BeginState(gfx::Point(450, 450)).get(),
-                          InputHandler::TOUCHSCREEN);
-  host_impl_->ScrollBy(UpdateState(gfx::Point(), gfx::Vector2d(0, 10)).get());
-  host_impl_->ScrollEnd(EndState().get());
-  histogram_tester.ExpectTotalCount("Event.Scroll.ScrollerSize.OnScroll_Touch",
-                                    1);
-
-  // Test wheel scroll.
-  host_impl_->ScrollBegin(BeginState(gfx::Point()).get(), InputHandler::WHEEL);
-  host_impl_->ScrollBy(UpdateState(gfx::Point(), gfx::Vector2d(0, 10)).get());
-  host_impl_->ScrollEnd(EndState().get());
-  histogram_tester.ExpectBucketCount("Event.Scroll.ScrollerSize.OnScroll_Wheel",
-                                     10000, 1);
-  histogram_tester.ExpectTotalCount("Event.Scroll.ScrollerSize.OnScroll_Wheel",
-                                    1);
 }
 
 TEST_F(CommitToPendingTreeLayerTreeHostImplTest,
@@ -1952,7 +1899,7 @@ class MissingTilesLayer : public LayerImpl {
     has_missing_tiles_ = has_missing_tiles;
   }
 
-  void AppendQuads(RenderPass* render_pass,
+  void AppendQuads(viz::RenderPass* render_pass,
                    AppendQuadsData* append_quads_data) override {
     append_quads_data->num_missing_tiles += has_missing_tiles_;
   }
@@ -3903,7 +3850,7 @@ TEST_F(LayerTreeHostImplTest, MouseMoveAtWithDeviceScaleOf2) {
 }
 
 // This test verifies that only SurfaceLayers in the viewport and have fallbacks
-// that are different are included in CompositorFrameMetadata's
+// that are different are included in viz::CompositorFrameMetadata's
 // |activation_dependencies|.
 TEST_F(LayerTreeHostImplTest, ActivationDependenciesInMetadata) {
   SetupScrollAndContentsLayers(gfx::Size(100, 100));
@@ -3929,9 +3876,7 @@ TEST_F(LayerTreeHostImplTest, ActivationDependenciesInMetadata) {
     child->SetPrimarySurfaceInfo(
         viz::SurfaceInfo(primary_surfaces[i], 1.f /* device_scale_factor */,
                          gfx::Size(10, 10) /* size_in_pixels */));
-    child->SetFallbackSurfaceInfo(
-        viz::SurfaceInfo(fallback_surfaces[i], 1.f /* device_scale_factor */,
-                         gfx::Size(10, 10) /* size_in_pixels */));
+    child->SetFallbackSurfaceId(fallback_surfaces[i]);
     root->test_properties()->AddChild(std::move(child));
   }
 
@@ -3946,7 +3891,7 @@ TEST_F(LayerTreeHostImplTest, ActivationDependenciesInMetadata) {
 
   auto* fake_layer_tree_frame_sink =
       static_cast<FakeLayerTreeFrameSink*>(host_impl_->layer_tree_frame_sink());
-  const CompositorFrameMetadata& metadata =
+  const viz::CompositorFrameMetadata& metadata =
       fake_layer_tree_frame_sink->last_sent_frame()->metadata;
   EXPECT_THAT(
       metadata.activation_dependencies,
@@ -3963,7 +3908,7 @@ TEST_F(LayerTreeHostImplTest, CompositorFrameMetadata) {
   host_impl_->active_tree()->PushPageScaleFromMainThread(1.f, 0.5f, 4.f);
   DrawFrame();
   {
-    CompositorFrameMetadata metadata =
+    viz::CompositorFrameMetadata metadata =
         host_impl_->MakeCompositorFrameMetadata();
     EXPECT_EQ(gfx::Vector2dF(), metadata.root_scroll_offset);
     EXPECT_EQ(1.f, metadata.page_scale_factor);
@@ -3983,13 +3928,13 @@ TEST_F(LayerTreeHostImplTest, CompositorFrameMetadata) {
           .thread);
   host_impl_->ScrollBy(UpdateState(gfx::Point(), gfx::Vector2d(0, 10)).get());
   {
-    CompositorFrameMetadata metadata =
+    viz::CompositorFrameMetadata metadata =
         host_impl_->MakeCompositorFrameMetadata();
     EXPECT_EQ(gfx::Vector2dF(0.f, 10.f), metadata.root_scroll_offset);
   }
   host_impl_->ScrollEnd(EndState().get());
   {
-    CompositorFrameMetadata metadata =
+    viz::CompositorFrameMetadata metadata =
         host_impl_->MakeCompositorFrameMetadata();
     EXPECT_EQ(gfx::Vector2dF(0.f, 10.f), metadata.root_scroll_offset);
   }
@@ -4002,7 +3947,7 @@ TEST_F(LayerTreeHostImplTest, CompositorFrameMetadata) {
         ->test_properties()
         ->user_scrollable_horizontal = false;
     host_impl_->active_tree()->BuildPropertyTreesForTesting();
-    CompositorFrameMetadata metadata =
+    viz::CompositorFrameMetadata metadata =
         host_impl_->MakeCompositorFrameMetadata();
     EXPECT_TRUE(metadata.root_overflow_x_hidden);
     EXPECT_FALSE(metadata.root_overflow_y_hidden);
@@ -4028,7 +3973,7 @@ TEST_F(LayerTreeHostImplTest, CompositorFrameMetadata) {
         ->test_properties()
         ->user_scrollable_vertical = true;
     host_impl_->active_tree()->BuildPropertyTreesForTesting();
-    CompositorFrameMetadata metadata =
+    viz::CompositorFrameMetadata metadata =
         host_impl_->MakeCompositorFrameMetadata();
     EXPECT_FALSE(metadata.root_overflow_x_hidden);
     EXPECT_FALSE(metadata.root_overflow_y_hidden);
@@ -4042,7 +3987,7 @@ TEST_F(LayerTreeHostImplTest, CompositorFrameMetadata) {
         ->test_properties()
         ->user_scrollable_horizontal = false;
     host_impl_->active_tree()->BuildPropertyTreesForTesting();
-    CompositorFrameMetadata metadata =
+    viz::CompositorFrameMetadata metadata =
         host_impl_->MakeCompositorFrameMetadata();
     EXPECT_TRUE(metadata.root_overflow_x_hidden);
     EXPECT_FALSE(metadata.root_overflow_y_hidden);
@@ -4065,7 +4010,7 @@ TEST_F(LayerTreeHostImplTest, CompositorFrameMetadata) {
   host_impl_->PinchGestureEnd();
   host_impl_->ScrollEnd(EndState().get());
   {
-    CompositorFrameMetadata metadata =
+    viz::CompositorFrameMetadata metadata =
         host_impl_->MakeCompositorFrameMetadata();
     EXPECT_EQ(gfx::Vector2dF(0.f, 10.f), metadata.root_scroll_offset);
     EXPECT_EQ(2.f, metadata.page_scale_factor);
@@ -4080,7 +4025,7 @@ TEST_F(LayerTreeHostImplTest, CompositorFrameMetadata) {
   host_impl_->active_tree()->PushPageScaleFromMainThread(4.f, 0.5f, 4.f);
   host_impl_->active_tree()->SetPageScaleOnActiveTree(4.f);
   {
-    CompositorFrameMetadata metadata =
+    viz::CompositorFrameMetadata metadata =
         host_impl_->MakeCompositorFrameMetadata();
     EXPECT_EQ(gfx::Vector2dF(0.f, 10.f), metadata.root_scroll_offset);
     EXPECT_EQ(4.f, metadata.page_scale_factor);
@@ -4097,20 +4042,21 @@ class DidDrawCheckLayer : public LayerImpl {
     return base::WrapUnique(new DidDrawCheckLayer(tree_impl, id));
   }
 
-  bool WillDraw(DrawMode draw_mode, ResourceProvider* provider) override {
+  bool WillDraw(DrawMode draw_mode,
+                LayerTreeResourceProvider* provider) override {
     will_draw_called_ = true;
     if (will_draw_returns_false_)
       return false;
     return LayerImpl::WillDraw(draw_mode, provider);
   }
 
-  void AppendQuads(RenderPass* render_pass,
+  void AppendQuads(viz::RenderPass* render_pass,
                    AppendQuadsData* append_quads_data) override {
     append_quads_called_ = true;
     LayerImpl::AppendQuads(render_pass, append_quads_data);
   }
 
-  void DidDraw(ResourceProvider* provider) override {
+  void DidDraw(LayerTreeResourceProvider* provider) override {
     did_draw_called_ = true;
     LayerImpl::DidDraw(provider);
   }
@@ -4127,11 +4073,9 @@ class DidDrawCheckLayer : public LayerImpl {
     did_draw_called_ = false;
   }
 
-  static void IgnoreResult(std::unique_ptr<viz::CopyOutputResult> result) {}
-
   void AddCopyRequest() {
     test_properties()->copy_requests.push_back(
-        viz::CopyOutputRequest::CreateRequest(base::BindOnce(&IgnoreResult)));
+        viz::CopyOutputRequest::CreateStubForTesting());
   }
 
  protected:
@@ -4342,7 +4286,7 @@ class MissingTextureAnimatingLayer : public DidDrawCheckLayer {
         resource_provider, timeline));
   }
 
-  void AppendQuads(RenderPass* render_pass,
+  void AppendQuads(viz::RenderPass* render_pass,
                    AppendQuadsData* append_quads_data) override {
     LayerImpl::AppendQuads(render_pass, append_quads_data);
     if (had_incomplete_tile_)
@@ -5092,40 +5036,6 @@ TEST_F(LayerTreeHostImplBrowserControlsTest, BrowserControlsPushUnsentRatio) {
   host_impl_->active_tree()->PushBrowserControlsFromMainThread(0);
 
   ASSERT_EQ(0, host_impl_->active_tree()->CurrentBrowserControlsShownRatio());
-}
-
-TEST_F(LayerTreeHostImplBrowserControlsTest, ViewportBoundsUseZoomForDSF) {
-  SetupBrowserControlsAndScrollLayerWithVirtualViewport(
-      gfx::Size(50, 50), gfx::Size(100, 100), gfx::Size(100, 100));
-  DrawFrame();
-
-  LayerImpl* inner_container =
-      host_impl_->active_tree()->InnerViewportContainerLayer();
-
-  gfx::Vector2dF scroll_delta(0.f, 10.f);
-  EXPECT_EQ(InputHandler::SCROLL_ON_IMPL_THREAD,
-            host_impl_
-                ->ScrollBegin(BeginState(gfx::Point()).get(),
-                              InputHandler::TOUCHSCREEN)
-                .thread);
-  host_impl_->ScrollBy(UpdateState(gfx::Point(), scroll_delta).get());
-
-  gfx::Vector2dF bounds_delta = inner_container->ViewportBoundsDelta();
-  host_impl_->active_tree()->SetCurrentBrowserControlsShownRatio(1.f);
-  host_impl_->ScrollEnd(EndState().get());
-
-  float device_scale = 3.5f;
-  host_impl_->active_tree()->set_painted_device_scale_factor(device_scale);
-
-  EXPECT_EQ(InputHandler::SCROLL_ON_IMPL_THREAD,
-            host_impl_
-                ->ScrollBegin(BeginState(gfx::Point()).get(),
-                              InputHandler::TOUCHSCREEN)
-                .thread);
-  host_impl_->ScrollBy(UpdateState(gfx::Point(), scroll_delta).get());
-
-  bounds_delta.Scale(device_scale);
-  EXPECT_EQ(bounds_delta, inner_container->ViewportBoundsDelta());
 }
 
 // Test that if only the browser controls are scrolled, we shouldn't request a
@@ -6603,8 +6513,8 @@ TEST_F(LayerTreeHostImplTest, ScrollNonAxisAlignedRotatedLayer) {
     // The child layer should have scrolled down in its local coordinates an
     // amount proportional to the angle between it and the input scroll delta.
     gfx::Vector2d expected_scroll_delta(
-        0, gesture_scroll_delta.y() *
-               std::cos(MathUtil::Deg2Rad(child_layer_angle)));
+        0,
+        gesture_scroll_delta.y() * std::cos(gfx::DegToRad(child_layer_angle)));
     std::unique_ptr<ScrollAndScaleSet> scroll_info =
         host_impl_->ProcessScrollDeltas();
     EXPECT_TRUE(ScrollInfoContains(*scroll_info.get(), child_scroll_id,
@@ -6629,8 +6539,8 @@ TEST_F(LayerTreeHostImplTest, ScrollNonAxisAlignedRotatedLayer) {
     // The child layer should have scrolled down in its local coordinates an
     // amount proportional to the angle between it and the input scroll delta.
     gfx::Vector2d expected_scroll_delta(
-        0, -gesture_scroll_delta.x() *
-               std::sin(MathUtil::Deg2Rad(child_layer_angle)));
+        0,
+        -gesture_scroll_delta.x() * std::sin(gfx::DegToRad(child_layer_angle)));
     std::unique_ptr<ScrollAndScaleSet> scroll_info =
         host_impl_->ProcessScrollDeltas();
     EXPECT_TRUE(ScrollInfoContains(*scroll_info.get(), child_scroll_id,
@@ -7353,7 +7263,6 @@ TEST_F(LayerTreeHostImplTest, OverscrollOnMainThread) {
 // Test that scrolling the inner viewport directly works, as can happen when the
 // scroll chains up to it from an sibling of the outer viewport.
 TEST_F(LayerTreeHostImplTest, ScrollFromOuterViewportSibling) {
-  const gfx::Size content_size(200, 200);
   const gfx::Size viewport_size(100, 100);
 
   LayerTreeImpl* layer_tree_impl = host_impl_->active_tree();
@@ -7778,7 +7687,7 @@ class BlendStateCheckLayer : public LayerImpl {
         new BlendStateCheckLayer(tree_impl, id, resource_provider));
   }
 
-  void AppendQuads(RenderPass* render_pass,
+  void AppendQuads(viz::RenderPass* render_pass,
                    AppendQuadsData* append_quads_data) override {
     quads_appended_ = true;
 
@@ -7794,12 +7703,12 @@ class BlendStateCheckLayer : public LayerImpl {
         render_pass->CreateAndAppendSharedQuadState();
     PopulateSharedQuadState(shared_quad_state, contents_opaque());
 
-    TileDrawQuad* test_blending_draw_quad =
-        render_pass->CreateAndAppendDrawQuad<TileDrawQuad>();
+    auto* test_blending_draw_quad =
+        render_pass->CreateAndAppendDrawQuad<viz::TileDrawQuad>();
     test_blending_draw_quad->SetNew(
         shared_quad_state, quad_rect_, visible_quad_rect, needs_blending,
         resource_id_, gfx::RectF(0.f, 0.f, 1.f, 1.f), gfx::Size(1, 1), false,
-        false);
+        false, false);
 
     EXPECT_EQ(blend_, test_blending_draw_quad->ShouldDrawWithBlending());
     EXPECT_EQ(has_render_surface_,
@@ -7836,7 +7745,7 @@ class BlendStateCheckLayer : public LayerImpl {
         quad_visible_rect_(5, 5, 5, 5),
         resource_id_(resource_provider->CreateResource(
             gfx::Size(1, 1),
-            ResourceProvider::TEXTURE_HINT_IMMUTABLE,
+            ResourceProvider::TEXTURE_HINT_DEFAULT,
             viz::RGBA_8888,
             gfx::ColorSpace())) {
     resource_provider->AllocateForTesting(resource_id_);
@@ -8160,7 +8069,7 @@ TEST_F(LayerTreeHostImplTest, MayContainVideo) {
 class LayerTreeHostImplViewportCoveredTest : public LayerTreeHostImplTest {
  protected:
   LayerTreeHostImplViewportCoveredTest()
-      : gutter_quad_material_(DrawQuad::SOLID_COLOR),
+      : gutter_quad_material_(viz::DrawQuad::SOLID_COLOR),
         child_(NULL),
         did_activate_pending_tree_(false) {}
 
@@ -8224,7 +8133,7 @@ class LayerTreeHostImplViewportCoveredTest : public LayerTreeHostImplTest {
     host_impl_->active_tree()->BuildPropertyTreesForTesting();
   }
 
-  void VerifyEmptyLayerRenderPasses(const RenderPassList& render_passes) {
+  void VerifyEmptyLayerRenderPasses(const viz::RenderPassList& render_passes) {
     ASSERT_EQ(1u, render_passes.size());
 
     EXPECT_EQ(1u, CountGutterQuads(render_passes[0]->quad_list));
@@ -8261,7 +8170,7 @@ class LayerTreeHostImplViewportCoveredTest : public LayerTreeHostImplTest {
     host_impl_->active_tree()->BuildPropertyTreesForTesting();
   }
 
-  void VerifyLayerInMiddleOfViewport(const RenderPassList& render_passes) {
+  void VerifyLayerInMiddleOfViewport(const viz::RenderPassList& render_passes) {
     ASSERT_EQ(1u, render_passes.size());
 
     EXPECT_EQ(4u, CountGutterQuads(render_passes[0]->quad_list));
@@ -8299,7 +8208,8 @@ class LayerTreeHostImplViewportCoveredTest : public LayerTreeHostImplTest {
     host_impl_->active_tree()->BuildPropertyTreesForTesting();
   }
 
-  void VerifyLayerIsLargerThanViewport(const RenderPassList& render_passes) {
+  void VerifyLayerIsLargerThanViewport(
+      const viz::RenderPassList& render_passes) {
     ASSERT_EQ(1u, render_passes.size());
 
     EXPECT_EQ(0u, CountGutterQuads(render_passes[0]->quad_list));
@@ -8326,7 +8236,7 @@ class LayerTreeHostImplViewportCoveredTest : public LayerTreeHostImplTest {
 
   void DidActivateSyncTree() override { did_activate_pending_tree_ = true; }
 
-  void set_gutter_quad_material(DrawQuad::Material material) {
+  void set_gutter_quad_material(viz::DrawQuad::Material material) {
     gutter_quad_material_ = material;
   }
   void set_gutter_texture_size(const gfx::Size& gutter_texture_size) {
@@ -8334,7 +8244,7 @@ class LayerTreeHostImplViewportCoveredTest : public LayerTreeHostImplTest {
   }
 
  protected:
-  size_t CountGutterQuads(const QuadList& quad_list) {
+  size_t CountGutterQuads(const viz::QuadList& quad_list) {
     size_t num_gutter_quads = 0;
     for (auto* quad : quad_list) {
       num_gutter_quads += (quad->material == gutter_quad_material_) ? 1 : 0;
@@ -8342,17 +8252,18 @@ class LayerTreeHostImplViewportCoveredTest : public LayerTreeHostImplTest {
     return num_gutter_quads;
   }
 
-  void VerifyQuadsExactlyCoverViewport(const QuadList& quad_list) {
+  void VerifyQuadsExactlyCoverViewport(const viz::QuadList& quad_list) {
     LayerTestCommon::VerifyQuadsExactlyCoverRect(
         quad_list, gfx::Rect(DipSizeToPixelSize(viewport_size_)));
   }
 
   // Make sure that the texture coordinates match their expectations.
-  void ValidateTextureDrawQuads(const QuadList& quad_list) {
+  void ValidateTextureDrawQuads(const viz::QuadList& quad_list) {
     for (auto* quad : quad_list) {
-      if (quad->material != DrawQuad::TEXTURE_CONTENT)
+      if (quad->material != viz::DrawQuad::TEXTURE_CONTENT)
         continue;
-      const TextureDrawQuad* texture_quad = TextureDrawQuad::MaterialCast(quad);
+      const viz::TextureDrawQuad* texture_quad =
+          viz::TextureDrawQuad::MaterialCast(quad);
       gfx::SizeF gutter_texture_size_pixels =
           gfx::ScaleSize(gfx::SizeF(gutter_texture_size_),
                          host_impl_->active_tree()->device_scale_factor());
@@ -8374,7 +8285,7 @@ class LayerTreeHostImplViewportCoveredTest : public LayerTreeHostImplTest {
         size, host_impl_->active_tree()->device_scale_factor());
   }
 
-  DrawQuad::Material gutter_quad_material_;
+  viz::DrawQuad::Material gutter_quad_material_;
   gfx::Size gutter_texture_size_;
   gfx::Size viewport_size_;
   BlendStateCheckLayer* child_;
@@ -8465,7 +8376,7 @@ class FakeDrawableLayerImpl : public LayerImpl {
       : LayerImpl(tree_impl, id) {}
 };
 
-// Make sure damage tracking propagates all the way to the CompositorFrame
+// Make sure damage tracking propagates all the way to the viz::CompositorFrame
 // submitted to the LayerTreeFrameSink, where it should request to swap only
 // the sub-buffer that is damaged.
 TEST_F(LayerTreeHostImplTest, PartialSwapReceivesDamageRect) {
@@ -8583,7 +8494,7 @@ class FakeLayerWithQuads : public LayerImpl {
     return base::WrapUnique(new FakeLayerWithQuads(tree_impl, id));
   }
 
-  void AppendQuads(RenderPass* render_pass,
+  void AppendQuads(viz::RenderPass* render_pass,
                    AppendQuadsData* append_quads_data) override {
     viz::SharedQuadState* shared_quad_state =
         render_pass->CreateAndAppendSharedQuadState();
@@ -8592,8 +8503,8 @@ class FakeLayerWithQuads : public LayerImpl {
     SkColor gray = SkColorSetRGB(100, 100, 100);
     gfx::Rect quad_rect(bounds());
     gfx::Rect visible_quad_rect(quad_rect);
-    SolidColorDrawQuad* my_quad =
-        render_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
+    auto* my_quad =
+        render_pass->CreateAndAppendDrawQuad<viz::SolidColorDrawQuad>();
     my_quad->SetNew(shared_quad_state, quad_rect, visible_quad_rect, gray,
                     false);
   }
@@ -8658,13 +8569,13 @@ TEST_F(LayerTreeHostImplTest, HasTransparentBackground) {
   host_impl_->active_tree()->set_background_color(SK_ColorWHITE);
 
   // Verify one quad is drawn when transparent background set is not set.
-  host_impl_->active_tree()->set_has_transparent_background(false);
   TestFrameData frame;
   EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
   {
     const auto& root_pass = frame.render_passes.back();
     ASSERT_EQ(1u, root_pass->quad_list.size());
-    EXPECT_EQ(DrawQuad::SOLID_COLOR, root_pass->quad_list.front()->material);
+    EXPECT_EQ(viz::DrawQuad::SOLID_COLOR,
+              root_pass->quad_list.front()->material);
   }
   host_impl_->DrawLayers(&frame);
   host_impl_->DidDrawAllLayers(frame);
@@ -8673,7 +8584,7 @@ TEST_F(LayerTreeHostImplTest, HasTransparentBackground) {
   host_impl_->SetFullViewportDamage();
 
   // Verify no quads are drawn when transparent background is set.
-  host_impl_->active_tree()->set_has_transparent_background(true);
+  host_impl_->active_tree()->set_background_color(SK_ColorTRANSPARENT);
   host_impl_->SetFullViewportDamage();
   EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
   {
@@ -8703,7 +8614,8 @@ class LayerTreeHostImplTestDrawAndTestDamage : public LayerTreeHostImplTest {
       ASSERT_EQ(1u, frame.render_passes.size());
 
       // Verify the damage rect for the root render pass.
-      const RenderPass* root_render_pass = frame.render_passes.back().get();
+      const viz::RenderPass* root_render_pass =
+          frame.render_passes.back().get();
       EXPECT_EQ(expected_damage, root_render_pass->damage_rect);
 
       // Verify the root and child layers' quads are generated and not being
@@ -8831,7 +8743,7 @@ TEST_F(LayerTreeHostImplTest, FarAwayQuadsDontNeedAA) {
 
   ASSERT_EQ(1u, frame.render_passes.size());
   ASSERT_LE(1u, frame.render_passes[0]->quad_list.size());
-  const DrawQuad* quad = frame.render_passes[0]->quad_list.front();
+  const viz::DrawQuad* quad = frame.render_passes[0]->quad_list.front();
 
   bool clipped = false, force_aa = false;
   gfx::QuadF device_layer_quad = MathUtil::MapQuad(
@@ -8871,16 +8783,16 @@ TEST_F(CompositorFrameMetadataTest, CompositorFrameAckCountsAsSwapComplete) {
   EXPECT_EQ(acks_received_, 1);
 }
 
-class CountingSoftwareDevice : public SoftwareOutputDevice {
+class CountingSoftwareDevice : public viz::SoftwareOutputDevice {
  public:
   CountingSoftwareDevice() : frames_began_(0), frames_ended_(0) {}
 
   SkCanvas* BeginPaint(const gfx::Rect& damage_rect) override {
     ++frames_began_;
-    return SoftwareOutputDevice::BeginPaint(damage_rect);
+    return viz::SoftwareOutputDevice::BeginPaint(damage_rect);
   }
   void EndPaint() override {
-    SoftwareOutputDevice::EndPaint();
+    viz::SoftwareOutputDevice::EndPaint();
     ++frames_ended_;
   }
 
@@ -9021,7 +8933,7 @@ void ExpectFullDamageAndDraw(LayerTreeHostImpl* host_impl) {
   TestFrameData frame;
   EXPECT_EQ(DRAW_SUCCESS, host_impl->PrepareToDraw(&frame));
   ASSERT_EQ(1u, frame.render_passes.size());
-  const RenderPass* root_render_pass = frame.render_passes.back().get();
+  const viz::RenderPass* root_render_pass = frame.render_passes.back().get();
   EXPECT_EQ(full_frame_damage, root_render_pass->damage_rect);
   EXPECT_TRUE(host_impl->DrawLayers(&frame));
   host_impl->DidDrawAllLayers(frame);
@@ -9188,16 +9100,13 @@ TEST_F(LayerTreeHostImplTest, CreateETC1UIResource) {
   EXPECT_NE(0u, id1);
 }
 
-void ShutdownReleasesContext_Callback(
-    std::unique_ptr<viz::CopyOutputResult> result) {}
-
 class FrameSinkClient : public viz::TestLayerTreeFrameSinkClient {
  public:
   explicit FrameSinkClient(
       scoped_refptr<viz::ContextProvider> display_context_provider)
       : display_context_provider_(std::move(display_context_provider)) {}
 
-  std::unique_ptr<OutputSurface> CreateDisplayOutputSurface(
+  std::unique_ptr<viz::OutputSurface> CreateDisplayOutputSurface(
       scoped_refptr<viz::ContextProvider> compositor_context_provider)
       override {
     return FakeOutputSurface::Create3d(std::move(display_context_provider_));
@@ -9205,9 +9114,11 @@ class FrameSinkClient : public viz::TestLayerTreeFrameSinkClient {
 
   void DisplayReceivedLocalSurfaceId(
       const viz::LocalSurfaceId& local_surface_id) override {}
-  void DisplayReceivedCompositorFrame(const CompositorFrame& frame) override {}
-  void DisplayWillDrawAndSwap(bool will_draw_and_swap,
-                              const RenderPassList& render_passes) override {}
+  void DisplayReceivedCompositorFrame(
+      const viz::CompositorFrame& frame) override {}
+  void DisplayWillDrawAndSwap(
+      bool will_draw_and_swap,
+      const viz::RenderPassList& render_passes) override {}
   void DisplayDidDrawAndSwap() override {}
 
  private:
@@ -9233,9 +9144,16 @@ TEST_F(LayerTreeHostImplTest, ShutdownReleasesContext) {
   SetupRootLayerImpl(LayerImpl::Create(host_impl_->active_tree(), 1));
 
   LayerImpl* root = host_impl_->active_tree()->root_layer_for_testing();
+  struct Helper {
+    std::unique_ptr<viz::CopyOutputResult> unprocessed_result;
+    void OnResult(std::unique_ptr<viz::CopyOutputResult> result) {
+      unprocessed_result = std::move(result);
+    }
+  } helper;
   root->test_properties()->copy_requests.push_back(
-      viz::CopyOutputRequest::CreateRequest(
-          base::BindOnce(&ShutdownReleasesContext_Callback)));
+      std::make_unique<viz::CopyOutputRequest>(
+          viz::CopyOutputRequest::ResultFormat::RGBA_TEXTURE,
+          base::BindOnce(&Helper::OnResult, base::Unretained(&helper))));
   host_impl_->active_tree()->BuildPropertyTreesForTesting();
 
   TestFrameData frame;
@@ -9243,18 +9161,23 @@ TEST_F(LayerTreeHostImplTest, ShutdownReleasesContext) {
   host_impl_->DrawLayers(&frame);
   host_impl_->DidDrawAllLayers(frame);
 
-  // The CopyOutputResult's callback has a ref on the viz::ContextProvider and a
-  // texture in a texture mailbox.
+  // The CopyOutputResult has a ref on the viz::ContextProvider and a texture in
+  // a texture mailbox.
+  ASSERT_TRUE(helper.unprocessed_result);
   EXPECT_FALSE(context_provider->HasOneRef());
   EXPECT_EQ(1u, context_provider->TestContext3d()->NumTextures());
 
   host_impl_->ReleaseLayerTreeFrameSink();
   host_impl_ = nullptr;
 
-  // The CopyOutputResult's callback was cancelled, the CopyOutputResult
-  // released, and the texture deleted.
+  // The texture release callback that was given to the CopyOutputResult has
+  // been canceled, and the texture deleted.
   EXPECT_TRUE(context_provider->HasOneRef());
   EXPECT_EQ(0u, context_provider->TestContext3d()->NumTextures());
+
+  // When resetting the CopyOutputResult, it will run its texture release
+  // callback. This should not cause a crash, etc.
+  helper.unprocessed_result.reset();
 }
 
 TEST_F(LayerTreeHostImplTest, TouchFlingShouldNotBubble) {
@@ -9567,7 +9490,7 @@ TEST_F(LayerTreeHostImplTest, ScrollInvisibleScroller) {
 }
 
 // Make sure LatencyInfo carried by LatencyInfoSwapPromise are passed
-// in CompositorFrameMetadata.
+// in viz::CompositorFrameMetadata.
 TEST_F(LayerTreeHostImplTest, LatencyInfoPassedToCompositorFrameMetadata) {
   std::unique_ptr<SolidColorLayerImpl> root =
       SolidColorLayerImpl::Create(host_impl_->active_tree(), 1);
@@ -9640,7 +9563,7 @@ TEST_F(LayerTreeHostImplTest, SelectionBoundsPassedToCompositorFrameMetadata) {
   host_impl_->DidDrawAllLayers(frame);
 
   // Ensure the selection bounds have propagated to the frame metadata.
-  const Selection<gfx::SelectionBound>& selection_after =
+  const viz::Selection<gfx::SelectionBound>& selection_after =
       fake_layer_tree_frame_sink->last_sent_frame()->metadata.selection;
   EXPECT_EQ(selection.start.type, selection_after.start.type());
   EXPECT_EQ(selection.end.type, selection_after.end.type());
@@ -9691,7 +9614,7 @@ TEST_F(LayerTreeHostImplTest, HiddenSelectionBoundsStayHidden) {
   host_impl_->DidDrawAllLayers(frame);
 
   // Ensure the selection bounds have propagated to the frame metadata.
-  const Selection<gfx::SelectionBound>& selection_after =
+  const viz::Selection<gfx::SelectionBound>& selection_after =
       fake_layer_tree_frame_sink->last_sent_frame()->metadata.selection;
   EXPECT_EQ(selection.start.type, selection_after.start.type());
   EXPECT_EQ(selection.end.type, selection_after.end.type());
@@ -12033,38 +11956,37 @@ TEST_F(LayerTreeHostImplCountingLostSurfaces, TwiceLostSurface) {
   EXPECT_LE(1, num_lost_surfaces_);
 }
 
-size_t CountRenderPassesWithId(const RenderPassList& list, RenderPassId id) {
+size_t CountRenderPassesWithId(const viz::RenderPassList& list,
+                               viz::RenderPassId id) {
   return std::count_if(
       list.begin(), list.end(),
-      [id](const std::unique_ptr<RenderPass>& p) { return p->id == id; });
+      [id](const std::unique_ptr<viz::RenderPass>& p) { return p->id == id; });
 }
 
 TEST_F(LayerTreeHostImplTest, RemoveUnreferencedRenderPass) {
   TestFrameData frame;
-  frame.render_passes.push_back(RenderPass::Create());
-  RenderPass* pass3 = frame.render_passes.back().get();
-  frame.render_passes.push_back(RenderPass::Create());
-  RenderPass* pass2 = frame.render_passes.back().get();
-  frame.render_passes.push_back(RenderPass::Create());
-  RenderPass* pass1 = frame.render_passes.back().get();
+  frame.render_passes.push_back(viz::RenderPass::Create());
+  viz::RenderPass* pass3 = frame.render_passes.back().get();
+  frame.render_passes.push_back(viz::RenderPass::Create());
+  viz::RenderPass* pass2 = frame.render_passes.back().get();
+  frame.render_passes.push_back(viz::RenderPass::Create());
+  viz::RenderPass* pass1 = frame.render_passes.back().get();
 
   pass1->SetNew(1, gfx::Rect(), gfx::Rect(), gfx::Transform());
   pass2->SetNew(2, gfx::Rect(), gfx::Rect(), gfx::Transform());
   pass3->SetNew(3, gfx::Rect(), gfx::Rect(), gfx::Transform());
 
   // Add a quad to each pass so they aren't empty.
-  SolidColorDrawQuad* color_quad;
-  color_quad = pass1->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->material = DrawQuad::SOLID_COLOR;
-  color_quad = pass2->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->material = DrawQuad::SOLID_COLOR;
-  color_quad = pass3->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->material = DrawQuad::SOLID_COLOR;
+  auto* color_quad = pass1->CreateAndAppendDrawQuad<viz::SolidColorDrawQuad>();
+  color_quad->material = viz::DrawQuad::SOLID_COLOR;
+  color_quad = pass2->CreateAndAppendDrawQuad<viz::SolidColorDrawQuad>();
+  color_quad->material = viz::DrawQuad::SOLID_COLOR;
+  color_quad = pass3->CreateAndAppendDrawQuad<viz::SolidColorDrawQuad>();
+  color_quad->material = viz::DrawQuad::SOLID_COLOR;
 
   // pass3 is referenced by pass2.
-  RenderPassDrawQuad* rpdq =
-      pass2->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
-  rpdq->material = DrawQuad::RENDER_PASS;
+  auto* rpdq = pass2->CreateAndAppendDrawQuad<viz::RenderPassDrawQuad>();
+  rpdq->material = viz::DrawQuad::RENDER_PASS;
   rpdq->render_pass_id = pass3->id;
 
   // But pass2 is not referenced by pass1. So pass2 and pass3 should be culled.
@@ -12078,31 +12000,29 @@ TEST_F(LayerTreeHostImplTest, RemoveUnreferencedRenderPass) {
 
 TEST_F(LayerTreeHostImplTest, RemoveEmptyRenderPass) {
   TestFrameData frame;
-  frame.render_passes.push_back(RenderPass::Create());
-  RenderPass* pass3 = frame.render_passes.back().get();
-  frame.render_passes.push_back(RenderPass::Create());
-  RenderPass* pass2 = frame.render_passes.back().get();
-  frame.render_passes.push_back(RenderPass::Create());
-  RenderPass* pass1 = frame.render_passes.back().get();
+  frame.render_passes.push_back(viz::RenderPass::Create());
+  viz::RenderPass* pass3 = frame.render_passes.back().get();
+  frame.render_passes.push_back(viz::RenderPass::Create());
+  viz::RenderPass* pass2 = frame.render_passes.back().get();
+  frame.render_passes.push_back(viz::RenderPass::Create());
+  viz::RenderPass* pass1 = frame.render_passes.back().get();
 
   pass1->SetNew(1, gfx::Rect(), gfx::Rect(), gfx::Transform());
   pass2->SetNew(2, gfx::Rect(), gfx::Rect(), gfx::Transform());
   pass3->SetNew(3, gfx::Rect(), gfx::Rect(), gfx::Transform());
 
   // pass1 is not empty, but pass2 and pass3 are.
-  SolidColorDrawQuad* color_quad;
-  color_quad = pass1->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->material = DrawQuad::SOLID_COLOR;
+  auto* color_quad = pass1->CreateAndAppendDrawQuad<viz::SolidColorDrawQuad>();
+  color_quad->material = viz::DrawQuad::SOLID_COLOR;
 
   // pass3 is referenced by pass2.
-  RenderPassDrawQuad* rpdq =
-      pass2->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
-  rpdq->material = DrawQuad::RENDER_PASS;
+  auto* rpdq = pass2->CreateAndAppendDrawQuad<viz::RenderPassDrawQuad>();
+  rpdq->material = viz::DrawQuad::RENDER_PASS;
   rpdq->render_pass_id = pass3->id;
 
   // pass2 is referenced by pass1.
-  rpdq = pass1->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
-  rpdq->material = DrawQuad::RENDER_PASS;
+  rpdq = pass1->CreateAndAppendDrawQuad<viz::RenderPassDrawQuad>();
+  rpdq->material = viz::DrawQuad::RENDER_PASS;
   rpdq->render_pass_id = pass2->id;
 
   // Since pass3 is empty it should be removed. Then pass2 is empty too, and
@@ -12113,33 +12033,33 @@ TEST_F(LayerTreeHostImplTest, RemoveEmptyRenderPass) {
   EXPECT_EQ(0u, CountRenderPassesWithId(frame.render_passes, 2u));
   EXPECT_EQ(0u, CountRenderPassesWithId(frame.render_passes, 3u));
   EXPECT_EQ(1u, frame.render_passes[0]->id);
-  // The RenderPassDrawQuad should be removed from pass1.
+  // The viz::RenderPassDrawQuad should be removed from pass1.
   EXPECT_EQ(1u, pass1->quad_list.size());
-  EXPECT_EQ(DrawQuad::SOLID_COLOR, pass1->quad_list.ElementAt(0)->material);
+  EXPECT_EQ(viz::DrawQuad::SOLID_COLOR,
+            pass1->quad_list.ElementAt(0)->material);
 }
 
 TEST_F(LayerTreeHostImplTest, DoNotRemoveEmptyRootRenderPass) {
   TestFrameData frame;
-  frame.render_passes.push_back(RenderPass::Create());
-  RenderPass* pass3 = frame.render_passes.back().get();
-  frame.render_passes.push_back(RenderPass::Create());
-  RenderPass* pass2 = frame.render_passes.back().get();
-  frame.render_passes.push_back(RenderPass::Create());
-  RenderPass* pass1 = frame.render_passes.back().get();
+  frame.render_passes.push_back(viz::RenderPass::Create());
+  viz::RenderPass* pass3 = frame.render_passes.back().get();
+  frame.render_passes.push_back(viz::RenderPass::Create());
+  viz::RenderPass* pass2 = frame.render_passes.back().get();
+  frame.render_passes.push_back(viz::RenderPass::Create());
+  viz::RenderPass* pass1 = frame.render_passes.back().get();
 
   pass1->SetNew(1, gfx::Rect(), gfx::Rect(), gfx::Transform());
   pass2->SetNew(2, gfx::Rect(), gfx::Rect(), gfx::Transform());
   pass3->SetNew(3, gfx::Rect(), gfx::Rect(), gfx::Transform());
 
   // pass3 is referenced by pass2.
-  RenderPassDrawQuad* rpdq =
-      pass2->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
-  rpdq->material = DrawQuad::RENDER_PASS;
+  auto* rpdq = pass2->CreateAndAppendDrawQuad<viz::RenderPassDrawQuad>();
+  rpdq->material = viz::DrawQuad::RENDER_PASS;
   rpdq->render_pass_id = pass3->id;
 
   // pass2 is referenced by pass1.
-  rpdq = pass1->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
-  rpdq->material = DrawQuad::RENDER_PASS;
+  rpdq = pass1->CreateAndAppendDrawQuad<viz::RenderPassDrawQuad>();
+  rpdq->material = viz::DrawQuad::RENDER_PASS;
   rpdq->render_pass_id = pass2->id;
 
   // Since pass3 is empty it should be removed. Then pass2 is empty too, and
@@ -12151,7 +12071,7 @@ TEST_F(LayerTreeHostImplTest, DoNotRemoveEmptyRootRenderPass) {
   EXPECT_EQ(0u, CountRenderPassesWithId(frame.render_passes, 2u));
   EXPECT_EQ(0u, CountRenderPassesWithId(frame.render_passes, 3u));
   EXPECT_EQ(1u, frame.render_passes[0]->id);
-  // The RenderPassDrawQuad should be removed from pass1.
+  // The viz::RenderPassDrawQuad should be removed from pass1.
   EXPECT_EQ(0u, pass1->quad_list.size());
 }
 
@@ -12257,14 +12177,11 @@ TEST_F(LayerTreeHostImplTest, GpuRasterizationStatusTrigger) {
 
 // Tests that SetContentHasSlowPaths behaves as expected.
 TEST_F(LayerTreeHostImplTest, GpuRasterizationStatusSlowPaths) {
-  std::unique_ptr<TestWebGraphicsContext3D> context_with_msaa =
-      TestWebGraphicsContext3D::Create();
-  context_with_msaa->SetMaxSamples(4);
-  context_with_msaa->set_gpu_rasterization(true);
   LayerTreeSettings msaaSettings = DefaultSettings();
   msaaSettings.gpu_rasterization_msaa_sample_count = 4;
-  EXPECT_TRUE(CreateHostImpl(msaaSettings, FakeLayerTreeFrameSink::Create3d(
-                                               std::move(context_with_msaa))));
+  EXPECT_TRUE(CreateHostImpl(
+      msaaSettings, FakeLayerTreeFrameSink::Create3dForGpuRasterization(
+                        msaaSettings.gpu_rasterization_msaa_sample_count)));
 
   // Set initial state, with slow paths on.
   host_impl_->SetHasGpuRasterizationTrigger(true);
@@ -12295,15 +12212,11 @@ TEST_F(LayerTreeHostImplTest, GpuRasterizationStatusSlowPaths) {
 
 // Tests that SetDeviceScaleFactor correctly impacts GPU rasterization.
 TEST_F(LayerTreeHostImplTest, GpuRasterizationStatusDeviceScaleFactor) {
-  // Create a host impl with MSAA support.
-  std::unique_ptr<TestWebGraphicsContext3D> context_with_msaa =
-      TestWebGraphicsContext3D::Create();
-  context_with_msaa->SetMaxSamples(4);
-  context_with_msaa->set_gpu_rasterization(true);
+  // Create a host impl with MSAA support (4 samples).
   LayerTreeSettings msaaSettings = DefaultSettings();
   msaaSettings.gpu_rasterization_msaa_sample_count = -1;
-  EXPECT_TRUE(CreateHostImpl(msaaSettings, FakeLayerTreeFrameSink::Create3d(
-                                               std::move(context_with_msaa))));
+  EXPECT_TRUE(CreateHostImpl(
+      msaaSettings, FakeLayerTreeFrameSink::Create3dForGpuRasterization(4)));
 
   // Set initial state, before varying scale factor.
   host_impl_->SetHasGpuRasterizationTrigger(true);
@@ -12335,14 +12248,11 @@ TEST_F(LayerTreeHostImplTest, GpuRasterizationStatusDeviceScaleFactor) {
 // Tests that explicit MSAA sample count correctly impacts GPU rasterization.
 TEST_F(LayerTreeHostImplTest, GpuRasterizationStatusExplicitMSAACount) {
   // Create a host impl with MSAA support and a forced sample count of 4.
-  std::unique_ptr<TestWebGraphicsContext3D> context_with_msaa =
-      TestWebGraphicsContext3D::Create();
-  context_with_msaa->SetMaxSamples(4);
-  context_with_msaa->set_gpu_rasterization(true);
   LayerTreeSettings msaaSettings = DefaultSettings();
   msaaSettings.gpu_rasterization_msaa_sample_count = 4;
-  EXPECT_TRUE(CreateHostImpl(msaaSettings, FakeLayerTreeFrameSink::Create3d(
-                                               std::move(context_with_msaa))));
+  EXPECT_TRUE(CreateHostImpl(
+      msaaSettings, FakeLayerTreeFrameSink::Create3dForGpuRasterization(
+                        msaaSettings.gpu_rasterization_msaa_sample_count)));
 
   host_impl_->SetHasGpuRasterizationTrigger(true);
   host_impl_->SetContentHasSlowPaths(true);
@@ -12391,16 +12301,17 @@ class MsaaIsSlowLayerTreeHostImplTest : public LayerTreeHostImplTest {
   void CreateHostImplWithCaps(bool msaa_is_slow, bool avoid_stencil_buffers) {
     LayerTreeSettings settings = DefaultSettings();
     settings.gpu_rasterization_msaa_sample_count = 4;
-    auto context_provider = TestContextProvider::Create();
-    context_provider->UnboundTestContext3d()->SetMaxSamples(4);
-    context_provider->UnboundTestContext3d()->set_msaa_is_slow(msaa_is_slow);
-    context_provider->UnboundTestContext3d()->set_gpu_rasterization(true);
-    context_provider->UnboundTestContext3d()->set_avoid_stencil_buffers(
-        avoid_stencil_buffers);
-    auto msaa_is_normal_layer_tree_frame_sink =
-        FakeLayerTreeFrameSink::Create3d(context_provider);
-    EXPECT_TRUE(CreateHostImpl(
-        settings, std::move(msaa_is_normal_layer_tree_frame_sink)));
+    auto frame_sink =
+        FakeLayerTreeFrameSink::Builder()
+            .AllContexts(&TestWebGraphicsContext3D::SetMaxSamples,
+                         settings.gpu_rasterization_msaa_sample_count)
+            .AllContexts(&TestWebGraphicsContext3D::set_msaa_is_slow,
+                         msaa_is_slow)
+            .AllContexts(&TestWebGraphicsContext3D::set_gpu_rasterization, true)
+            .AllContexts(&TestWebGraphicsContext3D::set_avoid_stencil_buffers,
+                         avoid_stencil_buffers)
+            .Build();
+    EXPECT_TRUE(CreateHostImpl(settings, std::move(frame_sink)));
   }
 };
 
@@ -12451,16 +12362,16 @@ class MsaaCompatibilityLayerTreeHostImplTest : public LayerTreeHostImplTest {
       bool support_multisample_compatibility) {
     LayerTreeSettings settings = DefaultSettings();
     settings.gpu_rasterization_msaa_sample_count = 4;
-    auto context_provider = TestContextProvider::Create();
-    context_provider->UnboundTestContext3d()->SetMaxSamples(4);
-    context_provider->UnboundTestContext3d()
-        ->set_support_multisample_compatibility(
-            support_multisample_compatibility);
-    context_provider->UnboundTestContext3d()->set_gpu_rasterization(true);
-    auto msaa_is_normal_layer_tree_frame_sink =
-        FakeLayerTreeFrameSink::Create3d(context_provider);
-    EXPECT_TRUE(CreateHostImpl(
-        settings, std::move(msaa_is_normal_layer_tree_frame_sink)));
+    auto frame_sink =
+        FakeLayerTreeFrameSink::Builder()
+            .AllContexts(&TestWebGraphicsContext3D::SetMaxSamples,
+                         settings.gpu_rasterization_msaa_sample_count)
+            .AllContexts(&TestWebGraphicsContext3D::
+                             set_support_multisample_compatibility,
+                         support_multisample_compatibility)
+            .AllContexts(&TestWebGraphicsContext3D::set_gpu_rasterization, true)
+            .Build();
+    EXPECT_TRUE(CreateHostImpl(settings, std::move(frame_sink)));
   }
 };
 
@@ -13005,16 +12916,11 @@ TEST_F(LayerTreeHostImplTest, CheckerImagingTileInvalidation) {
     else
       EXPECT_FALSE(tile->HasRasterTask());
   }
-  Region expected_invalidation(
-      raster_source->GetRectForImage(checkerable_image.stable_id()));
+  const auto& expected_invalidation =
+      raster_source->GetDisplayItemList()
+          ->discardable_image_map()
+          .GetRegionForImage(checkerable_image.stable_id());
   EXPECT_EQ(expected_invalidation, *(root->GetPendingInvalidation()));
-}
-
-TEST_F(LayerTreeHostImplTest, RasterColorSpaceNoColorCorrection) {
-  LayerTreeSettings settings = DefaultSettings();
-  settings.enable_color_correct_rasterization = false;
-  CreateHostImpl(settings, CreateLayerTreeFrameSink());
-  EXPECT_FALSE(host_impl_->GetRasterColorSpace().IsValid());
 }
 
 TEST_F(LayerTreeHostImplTest, RasterColorSpace) {
@@ -13031,7 +12937,6 @@ TEST_F(LayerTreeHostImplTest, RasterColorSpace) {
 
 TEST_F(LayerTreeHostImplTest, RasterColorSpaceSoftware) {
   LayerTreeSettings settings = DefaultSettings();
-  settings.enable_color_correct_rasterization = true;
   CreateHostImpl(settings, FakeLayerTreeFrameSink::CreateSoftware());
   // Software composited resources should always use sRGB as their color space.
   EXPECT_EQ(host_impl_->GetRasterColorSpace(), gfx::ColorSpace::CreateSRGB());
@@ -13132,7 +13037,6 @@ TEST_F(LayerTreeHostImplTest, RasterTilePrioritizationForNonDrawingLayers) {
   root->test_properties()->AddChild(std::move(scoped_drawing_layer));
 
   gfx::Rect layer_rect(0, 0, 500, 500);
-  gfx::Rect empty_rect(0, 0, 0, 0);
   host_impl_->pending_tree()->BuildPropertyTreesForTesting();
 
   hidden_layer->tilings()->AddTiling(gfx::AxisTransform2d(), raster_source);
@@ -13209,6 +13113,25 @@ TEST_F(LayerTreeHostImplTest, DrawAfterDroppingTileResources) {
   DrawFrame();
   EXPECT_LT(0.f, layer->raster_page_scale());
   EXPECT_GT(layer->tilings()->num_tilings(), 0u);
+}
+
+TEST_F(LayerTreeHostImplTest, NeedUpdateGpuRasterization) {
+  EXPECT_FALSE(host_impl_->NeedUpdateGpuRasterizationStatusForTesting());
+
+  host_impl_->SetHasGpuRasterizationTrigger(true);
+  EXPECT_TRUE(host_impl_->NeedUpdateGpuRasterizationStatusForTesting());
+  host_impl_->CommitComplete();
+  EXPECT_FALSE(host_impl_->NeedUpdateGpuRasterizationStatusForTesting());
+
+  host_impl_->SetContentHasSlowPaths(true);
+  EXPECT_TRUE(host_impl_->NeedUpdateGpuRasterizationStatusForTesting());
+  host_impl_->CommitComplete();
+  EXPECT_FALSE(host_impl_->NeedUpdateGpuRasterizationStatusForTesting());
+
+  host_impl_->SetContentHasNonAAPaint(true);
+  EXPECT_TRUE(host_impl_->NeedUpdateGpuRasterizationStatusForTesting());
+  host_impl_->CommitComplete();
+  EXPECT_FALSE(host_impl_->NeedUpdateGpuRasterizationStatusForTesting());
 }
 
 }  // namespace

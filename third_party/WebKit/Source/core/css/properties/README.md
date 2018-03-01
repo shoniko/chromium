@@ -44,7 +44,22 @@ Shorthand property APIs are named like CSSShorthandPropertyAPI<ShorthandProperty
 
 ### Descriptors
 
-TODO(rjwright): write this section
+Descriptors define the characteristics of an at-rule. For example, @viewport is
+an at-rule, and width is a valid descriptor for @viewport. Within the context of
+@viewport, width is a shorthand comprising the min-width and max-width of the
+viewport. From this example we can see that a descriptor is not the same as a CSS
+property with the same name. Sometimes descriptors and CSS properties with the same
+name are handled together, but that should not be taken to mean that they are the
+same thing. Fixing this possible source of confusion is an open issue
+crbug.com/752745.
+
+### Variable & ApplyAtRule
+
+Variable and the Apply at-rule are not true CSS properties, but they are treated
+as such in places for convience. They do not appear in CSSProperties.json5; thus
+their property API headers needed to be hand-written & manually added to the
+list of api classes by make_css_property_api_base.py. Those hand-written headers
+are in this directory.
 
 ## How to add a new property API
 

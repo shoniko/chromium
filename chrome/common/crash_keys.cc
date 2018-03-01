@@ -170,6 +170,7 @@ size_t RegisterChromeCrashKeys() {
     {"channel_error_bt", kMediumSize},
     {"remove_route_bt", kMediumSize},
     {"rwhvm_window", kMediumSize},
+    {"text-input-context-client", kMediumSize},
 // media/:
 #endif
     {kBug464926CrashKey, kSmallSize},
@@ -185,6 +186,13 @@ size_t RegisterChromeCrashKeys() {
 #if defined(OS_LINUX)
     {"seccomp-sigsys", kMediumSize},
 #endif
+
+    // Site isolation.  These keys help debug renderer kills such as
+    // https://crbug.com/773140.
+    {"requested_site_url", kSmallSize},
+    {"requested_origin", kSmallSize},
+    {"killed_process_origin_lock", kSmallSize},
+    {"site_isolation_mode", kSmallSize},
 
     // Temporary for https://crbug.com/626802.
     {"newframe_routing_id", kSmallSize},
@@ -208,6 +216,14 @@ size_t RegisterChromeCrashKeys() {
 
     // TODO(asvitkine): Remove after fixing https://crbug.com/736675
     {"bad_histogram", kMediumSize},
+
+    // Temporary for https://crbug.com/752914.
+    {"blink_scheduler_task_function_name", kMediumSize},
+    {"blink_scheduler_task_file_name", kMediumSize},
+
+    // Accessibility keys. Temporary for http://crbug.com/765490.
+    {"ax_tree_error", kSmallSize},
+    {"ax_tree_update", kMediumSize},
   };
 
   // This dynamic set of keys is used for sets of key value pairs when gathering

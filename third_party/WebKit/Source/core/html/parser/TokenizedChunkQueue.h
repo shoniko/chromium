@@ -25,8 +25,8 @@ namespace blink {
 // thread kicks a consumer task on Blink main thread.
 class TokenizedChunkQueue : public ThreadSafeRefCounted<TokenizedChunkQueue> {
  public:
-  static RefPtr<TokenizedChunkQueue> Create() {
-    return AdoptRef(new TokenizedChunkQueue);
+  static scoped_refptr<TokenizedChunkQueue> Create() {
+    return WTF::AdoptRef(new TokenizedChunkQueue);
   }
 
   ~TokenizedChunkQueue();

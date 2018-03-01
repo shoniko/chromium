@@ -29,7 +29,6 @@ class FakeMessageCenter : public MessageCenter {
   bool HasPopupNotifications() const override;
   bool IsQuietMode() const override;
   bool IsLockedState() const override;
-  bool HasClickedListener(const std::string& id) override;
   message_center::Notification* FindVisibleNotificationById(
       const std::string& id) override;
   const NotificationList::Notifications& GetVisibleNotifications() override;
@@ -50,7 +49,6 @@ class FakeMessageCenter : public MessageCenter {
   void SetNotificationButtonIcon(const std::string& notification_id,
                                  int button_index,
                                  const gfx::Image& image) override;
-  void DisableNotificationsByNotifier(const NotifierId& notifier_id) override;
   void ClickOnNotification(const std::string& id) override;
   void ClickOnNotificationButton(const std::string& id,
                                  int button_index) override;
@@ -59,7 +57,8 @@ class FakeMessageCenter : public MessageCenter {
                               bool mark_notification_as_read) override;
   void DisplayedNotification(const std::string& id,
                              const DisplaySource source) override;
-  void SetNotifierSettingsProvider(NotifierSettingsProvider* provider) override;
+  void SetNotifierSettingsProvider(
+      std::unique_ptr<NotifierSettingsProvider> provider) override;
   NotifierSettingsProvider* GetNotifierSettingsProvider() override;
   void SetQuietMode(bool in_quiet_mode) override;
   void SetLockedState(bool locked) override;
@@ -73,7 +72,6 @@ class FakeMessageCenter : public MessageCenter {
 
  protected:
   void DisableTimersForTest() override;
-  void EnableChangeQueueForTest(bool enabled) override;
 
  private:
   const NotificationList::Notifications empty_notifications_;

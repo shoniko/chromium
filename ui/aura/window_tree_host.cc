@@ -252,7 +252,10 @@ WindowTreeHost::WindowTreeHost(std::unique_ptr<WindowPort> window_port)
 }
 
 void WindowTreeHost::DestroyCompositor() {
-  compositor_.reset();
+  if (compositor_) {
+    compositor_->RemoveObserver(this);
+    compositor_.reset();
+  }
 }
 
 void WindowTreeHost::DestroyDispatcher() {
@@ -271,7 +274,8 @@ void WindowTreeHost::DestroyDispatcher() {
 }
 
 void WindowTreeHost::CreateCompositor(const viz::FrameSinkId& frame_sink_id,
-                                      bool force_software_compositor) {
+                                      bool force_software_compositor,
+                                      bool external_begin_frames_enabled) {
   DCHECK(Env::GetInstance());
   ui::ContextFactory* context_factory = Env::GetInstance()->context_factory();
   DCHECK(context_factory);
@@ -287,7 +291,9 @@ void WindowTreeHost::CreateCompositor(const viz::FrameSinkId& frame_sink_id,
           : context_factory_private->AllocateFrameSinkId(),
       context_factory, context_factory_private,
       base::ThreadTaskRunnerHandle::Get(), enable_surface_synchronization,
-      ui::IsPixelCanvasRecordingEnabled(), false, force_software_compositor));
+      ui::IsPixelCanvasRecordingEnabled(), external_begin_frames_enabled,
+      force_software_compositor));
+  compositor_->AddObserver(this);
   if (!dispatcher()) {
     window()->Init(ui::LAYER_NOT_DRAWN);
     window()->set_host(this);
@@ -346,6 +352,14 @@ void WindowTreeHost::OnHostWorkspaceChanged() {
     observer.OnHostWorkspaceChanged(this);
 }
 
+void WindowTreeHost::OnHostDisplayChanged() {
+  if (!compositor_)
+    return;
+  display::Display display =
+      display::Screen::GetScreen()->GetDisplayNearestWindow(window());
+  compositor_->SetDisplayColorSpace(display.color_space());
+}
+
 void WindowTreeHost::OnHostCloseRequested() {
   for (WindowTreeHostObserver& observer : observers_)
     observer.OnHostCloseRequested(this);
@@ -356,6 +370,12 @@ void WindowTreeHost::OnHostActivated() {
 }
 
 void WindowTreeHost::OnHostLostWindowCapture() {
+  // It is possible for this function to be called during destruction, after the
+  // root window has already been destroyed (e.g. when the ui::PlatformWindow is
+  // destroyed, and during destruction, it loses capture. See more details in
+  // http://crbug.com/770670)
+  if (!window())
+    return;
   Window* capture_window = client::GetCaptureWindow(window());
   if (capture_window && capture_window->GetRootWindow() == window())
     capture_window->ReleaseCapture();
@@ -394,6 +414,35 @@ void WindowTreeHost::MoveCursorToInternal(const gfx::Point& root_location,
     cursor_client->SetDisplay(display);
   }
   dispatcher()->OnCursorMovedToRootLocation(root_location);
+}
+
+void WindowTreeHost::OnCompositingDidCommit(ui::Compositor* compositor) {}
+
+void WindowTreeHost::OnCompositingStarted(ui::Compositor* compositor,
+                                          base::TimeTicks start_time) {
+  if (!synchronizing_with_child_on_next_frame_)
+    return;
+  synchronizing_with_child_on_next_frame_ = false;
+  dispatcher_->HoldPointerMoves();
+  holding_pointer_moves_ = true;
+}
+
+void WindowTreeHost::OnCompositingEnded(ui::Compositor* compositor) {
+  if (!holding_pointer_moves_)
+    return;
+  dispatcher_->ReleasePointerMoves();
+  holding_pointer_moves_ = false;
+}
+
+void WindowTreeHost::OnCompositingLockStateChanged(ui::Compositor* compositor) {
+}
+
+void WindowTreeHost::OnCompositingChildResizing(ui::Compositor* compositor) {
+  synchronizing_with_child_on_next_frame_ = true;
+}
+
+void WindowTreeHost::OnCompositingShuttingDown(ui::Compositor* compositor) {
+  compositor->RemoveObserver(this);
 }
 
 }  // namespace aura

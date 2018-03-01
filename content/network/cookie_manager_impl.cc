@@ -4,6 +4,7 @@
 
 #include "content/network/cookie_manager_impl.h"
 
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_constants.h"
 #include "net/cookies/cookie_options.h"
@@ -17,7 +18,7 @@ namespace {
 // use by DeleteAllCreatedBetweenWithPredicateAsync.
 class PredicateWrapper {
  public:
-  explicit PredicateWrapper(mojom::CookieDeletionFilterPtr filter)
+  explicit PredicateWrapper(network::mojom::CookieDeletionFilterPtr filter)
       : use_excluding_domains_(filter->excluding_domains.has_value()),
         excluding_domains_(filter->excluding_domains.has_value()
                                ? std::set<std::string>(
@@ -32,62 +33,86 @@ class PredicateWrapper {
                                : std::set<std::string>()),
         session_control_(filter->session_control) {}
 
+  // Return true if the given cookie should be deleted.
   bool Predicate(const net::CanonicalCookie& cookie) {
     // Ignore begin/end times; they're handled by method args.
     bool result = true;
+    // Delete if the cookie is not in excluding_domains_.
     if (use_excluding_domains_)
-      result &= (excluding_domains_.count(cookie.Domain()) != 0);
+      result &= !DomainMatches(cookie, excluding_domains_);
 
+    // Delete if the cookie is in including_domains_.
     if (use_including_domains_)
-      result &= (including_domains_.count(cookie.Domain()) == 0);
+      result &= DomainMatches(cookie, including_domains_);
 
+    // Delete if the cookie is not the correct persistent or session type.
     if (session_control_ !=
-        mojom::CookieDeletionSessionControl::IGNORE_CONTROL) {
+        network::mojom::CookieDeletionSessionControl::IGNORE_CONTROL) {
       // Relies on the assumption that there are only three values possible for
       // session_control.
-      result &= (cookie.IsPersistent() ==
-                 (session_control_ ==
-                  mojom::CookieDeletionSessionControl::PERSISTENT_COOKIES));
+      result &=
+          (cookie.IsPersistent() ==
+           (session_control_ ==
+            network::mojom::CookieDeletionSessionControl::PERSISTENT_COOKIES));
     }
     return result;
   }
 
  private:
+  // Return true if the eTLD+1 of the domain matches any of the strings
+  // in |match_domains|, false otherwise.
+  bool DomainMatches(const net::CanonicalCookie& cookie,
+                     const std::set<std::string>& match_domains) {
+    std::string effective_domain(
+        net::registry_controlled_domains::GetDomainAndRegistry(
+            // GetDomainAndRegistry() is insensitive to leading dots, i.e.
+            // to host/domain cookie distinctions.
+            cookie.Domain(),
+            net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES));
+    // If the cookie's domain is is not parsed as belonging to a registry
+    // (e.g. for IP addresses or internal hostnames) an empty string will be
+    // returned.  In this case, use the domain in the cookie.
+    if (effective_domain.empty())
+      effective_domain = cookie.Domain();
+
+    return match_domains.count(effective_domain) != 0;
+  }
+
   bool use_excluding_domains_;
   std::set<std::string> excluding_domains_;
 
   bool use_including_domains_;
   std::set<std::string> including_domains_;
 
-  mojom::CookieDeletionSessionControl session_control_;
+  network::mojom::CookieDeletionSessionControl session_control_;
 
   DISALLOW_COPY_AND_ASSIGN(PredicateWrapper);
 };
 
-mojom::CookieChangeCause ChangeCauseTranslation(
+network::mojom::CookieChangeCause ChangeCauseTranslation(
     net::CookieStore::ChangeCause net_cause) {
   switch (net_cause) {
     case net::CookieStore::ChangeCause::INSERTED:
-      return mojom::CookieChangeCause::INSERTED;
+      return network::mojom::CookieChangeCause::INSERTED;
     case net::CookieStore::ChangeCause::EXPLICIT:
     case net::CookieStore::ChangeCause::EXPLICIT_DELETE_BETWEEN:
     case net::CookieStore::ChangeCause::EXPLICIT_DELETE_PREDICATE:
     case net::CookieStore::ChangeCause::EXPLICIT_DELETE_SINGLE:
     case net::CookieStore::ChangeCause::EXPLICIT_DELETE_CANONICAL:
-      return mojom::CookieChangeCause::EXPLICIT;
+      return network::mojom::CookieChangeCause::EXPLICIT;
     case net::CookieStore::ChangeCause::UNKNOWN_DELETION:
-      return mojom::CookieChangeCause::UNKNOWN_DELETION;
+      return network::mojom::CookieChangeCause::UNKNOWN_DELETION;
     case net::CookieStore::ChangeCause::OVERWRITE:
-      return mojom::CookieChangeCause::OVERWRITE;
+      return network::mojom::CookieChangeCause::OVERWRITE;
     case net::CookieStore::ChangeCause::EXPIRED:
-      return mojom::CookieChangeCause::EXPIRED;
+      return network::mojom::CookieChangeCause::EXPIRED;
     case net::CookieStore::ChangeCause::EVICTED:
-      return mojom::CookieChangeCause::EVICTED;
+      return network::mojom::CookieChangeCause::EVICTED;
     case net::CookieStore::ChangeCause::EXPIRED_OVERWRITE:
-      return mojom::CookieChangeCause::EXPIRED_OVERWRITE;
+      return network::mojom::CookieChangeCause::EXPIRED_OVERWRITE;
   }
   NOTREACHED();
-  return mojom::CookieChangeCause::EXPLICIT;
+  return network::mojom::CookieChangeCause::EXPLICIT;
 }
 
 }  // namespace
@@ -101,7 +126,8 @@ CookieManagerImpl::CookieManagerImpl(net::CookieStore* cookie_store)
 
 CookieManagerImpl::~CookieManagerImpl() {}
 
-void CookieManagerImpl::AddRequest(mojom::CookieManagerRequest request) {
+void CookieManagerImpl::AddRequest(
+    network::mojom::CookieManagerRequest request) {
   bindings_.AddBinding(this, std::move(request));
 }
 
@@ -126,8 +152,9 @@ void CookieManagerImpl::SetCanonicalCookie(
       modify_http_only, std::move(callback));
 }
 
-void CookieManagerImpl::DeleteCookies(mojom::CookieDeletionFilterPtr filter,
-                                      DeleteCookiesCallback callback) {
+void CookieManagerImpl::DeleteCookies(
+    network::mojom::CookieDeletionFilterPtr filter,
+    DeleteCookiesCallback callback) {
   base::Time start_time;
   base::Time end_time;
 
@@ -147,7 +174,7 @@ void CookieManagerImpl::DeleteCookies(mojom::CookieDeletionFilterPtr filter,
 void CookieManagerImpl::RequestNotification(
     const GURL& url,
     const std::string& name,
-    mojom::CookieChangeNotificationPtr notification_pointer) {
+    network::mojom::CookieChangeNotificationPtr notification_pointer) {
   std::unique_ptr<NotificationRegistration> notification_registration(
       base::MakeUnique<NotificationRegistration>());
   notification_registration->notification_pointer =
@@ -206,7 +233,7 @@ void CookieManagerImpl::NotificationPipeBroken(
 }
 
 void CookieManagerImpl::CloneInterface(
-    mojom::CookieManagerRequest new_interface) {
+    network::mojom::CookieManagerRequest new_interface) {
   AddRequest(std::move(new_interface));
 }
 

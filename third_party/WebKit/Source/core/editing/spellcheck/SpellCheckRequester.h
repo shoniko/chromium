@@ -28,7 +28,7 @@
 
 #include "core/dom/Element.h"
 #include "core/dom/Range.h"
-#include "core/editing/EphemeralRange.h"
+#include "core/editing/Forward.h"
 #include "platform/Timer.h"
 #include "platform/text/TextChecking.h"
 #include "platform/wtf/Deque.h"
@@ -63,7 +63,7 @@ class CORE_EXPORT SpellCheckRequest final : public TextCheckingRequest {
 
   int RequestNumber() const { return request_number_; }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   SpellCheckRequest(Range* checking_range, const String&, int request_number);
@@ -75,7 +75,7 @@ class CORE_EXPORT SpellCheckRequest final : public TextCheckingRequest {
   int request_number_;
 };
 
-class SpellCheckRequester final
+class CORE_EXPORT SpellCheckRequester final
     : public GarbageCollectedFinalized<SpellCheckRequester> {
   WTF_MAKE_NONCOPYABLE(SpellCheckRequester);
 
@@ -85,7 +85,7 @@ class SpellCheckRequester final
   }
 
   ~SpellCheckRequester();
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   void RequestCheckingFor(const EphemeralRange&);
   void RequestCheckingFor(const EphemeralRange&, int request_num);
@@ -108,9 +108,10 @@ class SpellCheckRequester final
   void TimerFiredToProcessQueuedRequest(TimerBase*);
   void InvokeRequest(SpellCheckRequest*);
   void EnqueueRequest(SpellCheckRequest*);
+  bool EnsureValidRequestQueueFor(int sequence);
   void DidCheckSucceed(int sequence, const Vector<TextCheckingResult>&);
   void DidCheckCancel(int sequence);
-  void DidCheck(int sequence, const Vector<TextCheckingResult>&);
+  void DidCheck(int sequence);
 
   void ClearProcessingRequest();
 

@@ -89,12 +89,12 @@ class ErrorEvent final : public Event {
 
   const AtomicString& InterfaceName() const override;
 
-  DOMWrapperWorld* World() const { return world_.Get(); }
+  DOMWrapperWorld* World() const { return world_.get(); }
 
   void SetUnsanitizedMessage(const String&);
 
-  DECLARE_VIRTUAL_TRACE();
-  DECLARE_VIRTUAL_TRACE_WRAPPERS();
+  virtual void Trace(blink::Visitor*);
+  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  private:
   ErrorEvent();
@@ -109,7 +109,7 @@ class ErrorEvent final : public Event {
   std::unique_ptr<SourceLocation> location_;
   TraceWrapperV8Reference<v8::Value> error_;
 
-  RefPtr<DOMWrapperWorld> world_;
+  scoped_refptr<DOMWrapperWorld> world_;
 };
 
 }  // namespace blink

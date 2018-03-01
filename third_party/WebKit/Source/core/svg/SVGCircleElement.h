@@ -21,7 +21,6 @@
 #ifndef SVGCircleElement_h
 #define SVGCircleElement_h
 
-#include "core/SVGNames.h"
 #include "core/svg/SVGAnimatedLength.h"
 #include "core/svg/SVGGeometryElement.h"
 #include "platform/heap/Handle.h"
@@ -40,7 +39,7 @@ class SVGCircleElement final : public SVGGeometryElement {
   SVGAnimatedLength* cy() const { return cy_.Get(); }
   SVGAnimatedLength* r() const { return r_.Get(); }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit SVGCircleElement(Document&);

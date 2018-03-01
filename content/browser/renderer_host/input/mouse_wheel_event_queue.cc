@@ -74,6 +74,7 @@ void MouseWheelEventQueue::QueueEvent(
 }
 
 void MouseWheelEventQueue::ProcessMouseWheelAck(
+    InputEventAckSource ack_source,
     InputEventAckState ack_result,
     const LatencyInfo& latency_info) {
   TRACE_EVENT0("input", "MouseWheelEventQueue::ProcessMouseWheelAck");
@@ -81,7 +82,8 @@ void MouseWheelEventQueue::ProcessMouseWheelAck(
     return;
 
   event_sent_for_gesture_ack_->latency.AddNewLatencyFrom(latency_info);
-  client_->OnMouseWheelEventAck(*event_sent_for_gesture_ack_, ack_result);
+  client_->OnMouseWheelEventAck(*event_sent_for_gesture_ack_, ack_source,
+                                ack_result);
 
   // If event wasn't consumed then generate a gesture scroll for it.
   if (ack_result != INPUT_EVENT_ACK_STATE_CONSUMED &&
@@ -181,6 +183,8 @@ void MouseWheelEventQueue::ProcessMouseWheelAck(
     if (enable_scroll_latching_) {
       if (event_sent_for_gesture_ack_->event.phase ==
           blink::WebMouseWheelEvent::kPhaseBegan) {
+        // Wheel event with phaseBegan must have non-zero deltas.
+        DCHECK(needs_update);
         send_wheel_events_async_ = true;
         SendScrollBegin(scroll_update, false);
       }

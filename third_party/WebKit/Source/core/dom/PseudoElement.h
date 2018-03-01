@@ -29,15 +29,16 @@
 
 #include "core/CoreExport.h"
 #include "core/dom/Element.h"
-#include "core/style/ComputedStyle.h"
 
 namespace blink {
+
+class ComputedStyle;
 
 class CORE_EXPORT PseudoElement : public Element {
  public:
   static PseudoElement* Create(Element* parent, PseudoId);
 
-  RefPtr<ComputedStyle> CustomStyleForLayoutObject() override;
+  scoped_refptr<ComputedStyle> CustomStyleForLayoutObject() override;
   void AttachLayoutTree(AttachContext&) override;
   bool LayoutObjectIsNeeded(const ComputedStyle&) override;
 
@@ -62,16 +63,7 @@ class CORE_EXPORT PseudoElement : public Element {
 
 const QualifiedName& PseudoElementTagName();
 
-inline bool PseudoElementLayoutObjectIsNeeded(const ComputedStyle* style) {
-  if (!style)
-    return false;
-  if (style->Display() == EDisplay::kNone)
-    return false;
-  if (style->StyleType() == kPseudoIdFirstLetter ||
-      style->StyleType() == kPseudoIdBackdrop)
-    return true;
-  return style->GetContentData();
-}
+bool PseudoElementLayoutObjectIsNeeded(const ComputedStyle*);
 
 DEFINE_ELEMENT_TYPE_CASTS(PseudoElement, IsPseudoElement());
 

@@ -13,43 +13,43 @@
 
 namespace blink {
 
+class LayoutObject;
 class NGPhysicalTextFragment;
 class ShapeResult;
+struct NGInlineItemResult;
 
 class CORE_EXPORT NGTextFragmentBuilder final : public NGBaseFragmentBuilder {
   STACK_ALLOCATED();
 
  public:
-  NGTextFragmentBuilder(NGInlineNode,
-                        RefPtr<const ComputedStyle>,
-                        NGWritingMode);
   NGTextFragmentBuilder(NGInlineNode, NGWritingMode);
 
-  NGTextFragmentBuilder& SetSize(const NGLogicalSize&);
-
-  NGTextFragmentBuilder& SetShapeResult(RefPtr<const ShapeResult>);
-
-  // The amount of expansion for justification.
-  // Not used in NG paint, only to copy to InlineTextBox::SetExpansion().
-  NGTextFragmentBuilder& SetExpansion(int expansion);
-
-  NGTextFragmentBuilder& SetEndEffect(NGTextEndEffect);
+  // NOTE: Takes ownership of the shape result within the item result.
+  void SetItem(NGInlineItemResult*, LayoutUnit line_height);
+  void SetAtomicInline(scoped_refptr<const ComputedStyle>,
+                       LayoutUnit inline_size,
+                       LayoutUnit line_height);
+  void SetText(scoped_refptr<const ComputedStyle>,
+               scoped_refptr<const ShapeResult>,
+               LayoutUnit inline_size,
+               LayoutUnit line_height);
 
   // Creates the fragment. Can only be called once.
-  RefPtr<NGPhysicalTextFragment> ToTextFragment(unsigned index,
-                                                unsigned start_offset,
-                                                unsigned end_offset);
+  scoped_refptr<NGPhysicalTextFragment> ToTextFragment(unsigned index,
+                                                       unsigned start_offset,
+                                                       unsigned end_offset);
 
  private:
-  NGInlineNode node_;
-
+  NGInlineNode inline_node_;
   NGLogicalSize size_;
-
-  RefPtr<const ShapeResult> shape_result_;
-
-  int expansion_ = 0;
-
+  scoped_refptr<const ShapeResult> shape_result_;
   NGTextEndEffect end_effect_ = NGTextEndEffect::kNone;
+
+  // TODO(eae): Replace with Node pointer.
+  LayoutObject* layout_object_ = nullptr;
+
+  // Not used in NG paint, only to copy to InlineTextBox::SetExpansion().
+  int expansion_ = 0;
 };
 
 }  // namespace blink

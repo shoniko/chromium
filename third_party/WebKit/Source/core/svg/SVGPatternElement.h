@@ -21,7 +21,6 @@
 #ifndef SVGPatternElement_h
 #define SVGPatternElement_h
 
-#include "core/SVGNames.h"
 #include "core/svg/SVGAnimatedEnumeration.h"
 #include "core/svg/SVGAnimatedLength.h"
 #include "core/svg/SVGAnimatedTransformList.h"
@@ -75,7 +74,7 @@ class SVGPatternElement final : public SVGElement,
     return pattern_content_units_.Get();
   }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit SVGPatternElement(Document&);

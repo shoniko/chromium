@@ -27,15 +27,18 @@
 #define SpellChecker_h
 
 #include "core/CoreExport.h"
-#include "core/editing/EphemeralRange.h"
+#include "core/editing/Forward.h"
 #include "core/editing/markers/DocumentMarker.h"
 #include "platform/heap/Handle.h"
 #include "platform/text/TextChecking.h"
 
 namespace blink {
 
+class Document;
+class Element;
 class IdleSpellCheckCallback;
 class LocalFrame;
+class HTMLElement;
 class SpellCheckerClient;
 class SpellCheckMarker;
 class SpellCheckRequest;
@@ -50,7 +53,7 @@ class CORE_EXPORT SpellChecker final : public GarbageCollected<SpellChecker> {
  public:
   static SpellChecker* Create(LocalFrame&);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   SpellCheckerClient& GetSpellCheckerClient() const;
   WebSpellCheckPanelHostClient& SpellCheckPanelHostClient() const;

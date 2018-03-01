@@ -5,18 +5,27 @@ cr.define('extensions', function() {
   const Sidebar = Polymer({
     is: 'extensions-sidebar',
 
-    behaviors: [I18nBehavior],
+    properties: {
+      /** @private {number} */
+      selected_: {
+        type: Number,
+        value: -1,
+      },
+    },
 
-    /** @private */
-    onExtensionsTap_: function() {
-      extensions.navigation.navigateTo(
-          {page: Page.LIST, type: extensions.ShowingType.EXTENSIONS});
+    hostAttributes: {
+      role: 'navigation',
+    },
+
+    /** @override */
+    attached: function() {
+      this.selected_ =
+          extensions.navigation.getCurrentPage().page == Page.SHORTCUTS ? 1 : 0;
     },
 
     /** @private */
-    onAppsTap_: function() {
-      extensions.navigation.navigateTo(
-          {page: Page.LIST, type: extensions.ShowingType.APPS});
+    onExtensionsTap_: function() {
+      extensions.navigation.navigateTo({page: Page.LIST});
     },
 
     /** @private */

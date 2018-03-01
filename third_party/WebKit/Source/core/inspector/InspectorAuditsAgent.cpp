@@ -39,7 +39,7 @@ bool EncodeAsImage(char* body,
       SkImageInfo::Make(bitmap.width(), bitmap.height(), kRGBA_8888_SkColorType,
                         kUnpremul_SkAlphaType);
   size_t row_bytes = info.minRowBytes();
-  Vector<unsigned char> pixel_storage(info.getSafeSize(row_bytes));
+  Vector<unsigned char> pixel_storage(info.computeByteSize(row_bytes));
   SkPixmap pixmap(info, pixel_storage.data(), row_bytes);
 
   if (!SkImage::MakeFromBitmap(bitmap)->readPixels(pixmap, 0, 0))
@@ -55,7 +55,7 @@ bool EncodeAsImage(char* body,
 
 }  // namespace
 
-DEFINE_TRACE(InspectorAuditsAgent) {
+void InspectorAuditsAgent::Trace(blink::Visitor* visitor) {
   visitor->Trace(network_agent_);
   InspectorBaseAgent::Trace(visitor);
 }

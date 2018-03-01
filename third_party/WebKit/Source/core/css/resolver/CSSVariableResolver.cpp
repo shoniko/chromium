@@ -22,6 +22,7 @@
 #include "core/css/resolver/StyleBuilderConverter.h"
 #include "core/css/resolver/StyleResolverState.h"
 #include "core/css/resolver/StyleResolverStats.h"
+#include "core/style/ComputedStyle.h"
 #include "core/style/StyleInheritedVariables.h"
 #include "core/style/StyleNonInheritedVariables.h"
 #include "platform/wtf/Vector.h"
@@ -67,11 +68,11 @@ CSSVariableData* CSSVariableResolver::ValueForCustomProperty(
     return variable_data;
 
   bool unused_cycle_detected;
-  RefPtr<CSSVariableData> new_variable_data =
+  scoped_refptr<CSSVariableData> new_variable_data =
       ResolveCustomProperty(name, *variable_data, unused_cycle_detected);
   if (!registration) {
     inherited_variables_->SetVariable(name, new_variable_data);
-    return new_variable_data.Get();
+    return new_variable_data.get();
   }
 
   const CSSValue* parsed_value = nullptr;
@@ -89,10 +90,10 @@ CSSVariableData* CSSVariableResolver::ValueForCustomProperty(
   }
   if (!new_variable_data)
     return registration->InitialVariableData();
-  return new_variable_data.Get();
+  return new_variable_data.get();
 }
 
-RefPtr<CSSVariableData> CSSVariableResolver::ResolveCustomProperty(
+scoped_refptr<CSSVariableData> CSSVariableResolver::ResolveCustomProperty(
     AtomicString name,
     const CSSVariableData& variable_data,
     bool& cycle_detected) {
@@ -303,7 +304,7 @@ const CSSValue* CSSVariableResolver::ResolvePendingSubstitutions(
   return CSSUnsetValue::Create();
 }
 
-RefPtr<CSSVariableData>
+scoped_refptr<CSSVariableData>
 CSSVariableResolver::ResolveCustomPropertyAnimationKeyframe(
     const CSSCustomPropertyDeclaration& keyframe,
     bool& cycle_detected) {

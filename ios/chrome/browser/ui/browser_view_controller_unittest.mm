@@ -13,7 +13,9 @@
 #include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
+#include "components/payments/core/features.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/sessions/core/tab_restore_service.h"
@@ -35,8 +37,6 @@
 #import "ios/chrome/browser/ui/browser_view_controller_dependency_factory.h"
 #import "ios/chrome/browser/ui/browser_view_controller_testing.h"
 #import "ios/chrome/browser/ui/commands/browser_commands.h"
-#import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
-#include "ios/chrome/browser/ui/commands/ios_command_ids.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_controller.h"
 #import "ios/chrome/browser/ui/page_not_available_controller.h"
 #include "ios/chrome/browser/ui/toolbar/test_toolbar_model_ios.h"
@@ -82,17 +82,12 @@ using web::WebStateImpl;
 - (void)tabSelected:(Tab*)tab;
 - (void)tabDeselected:(NSNotification*)notification;
 - (void)tabCountChanged:(NSNotification*)notification;
-- (IBAction)chromeExecuteCommand:(id)sender;
 @end
 
 @interface BVCTestTabMock : OCMockComplexTypeHelper {
-  GURL _lastCommittedURL;
-  GURL _visibleURL;
   WebStateImpl* _webState;
 }
 
-@property(nonatomic, assign) const GURL& lastCommittedURL;
-@property(nonatomic, assign) const GURL& visibleURL;
 @property(nonatomic, assign) WebStateImpl* webState;
 
 - (web::NavigationManager*)navigationManager;
@@ -101,18 +96,6 @@ using web::WebStateImpl;
 @end
 
 @implementation BVCTestTabMock
-- (const GURL&)lastCommittedURL {
-  return _lastCommittedURL;
-}
-- (void)setLastCommittedURL:(const GURL&)lastCommittedURL {
-  _lastCommittedURL = lastCommittedURL;
-}
-- (const GURL&)visibleURL {
-  return _visibleURL;
-}
-- (void)setVisibleURL:(const GURL&)visibleURL {
-  _visibleURL = visibleURL;
-}
 - (WebStateImpl*)webState {
   return _webState;
 }
@@ -129,12 +112,14 @@ using web::WebStateImpl;
 
 @interface BVCTestTabModel : OCMockComplexTypeHelper
 - (instancetype)init NS_DESIGNATED_INITIALIZER;
+@property(nonatomic, assign) ios::ChromeBrowserState* browserState;
 @end
 
 @implementation BVCTestTabModel {
   FakeWebStateListDelegate _webStateListDelegate;
   std::unique_ptr<WebStateList> _webStateList;
 }
+@synthesize browserState = _browserState;
 
 - (instancetype)init {
   if ((self = [super
@@ -184,6 +169,7 @@ class BrowserViewControllerTest : public BlockCleanupTest {
 
     // Set up mock TabModel, Tab, and CRWWebController.
     id tabModel = [[BVCTestTabModel alloc] init];
+    [tabModel setBrowserState:chrome_browser_state_.get()];
     id currentTab = [[BVCTestTabMock alloc]
         initWithRepresentedObject:[OCMockObject niceMockForClass:[Tab class]]];
     id webControllerMock =
@@ -224,16 +210,12 @@ class BrowserViewControllerTest : public BlockCleanupTest {
     // Set up a stub dependency factory.
     id factory = [OCMockObject
         mockForClass:[BrowserViewControllerDependencyFactory class]];
-    [[[factory stub] andReturn:nil]
-        newTabStripControllerWithTabModel:[OCMArg any]
-                               dispatcher:[OCMArg any]];
     [[[factory stub] andReturnValue:OCMOCK_VALUE(toolbarModelIOS_)]
         newToolbarModelIOSWithDelegate:static_cast<ToolbarModelDelegateIOS*>(
                                            [OCMArg anyPointer])];
     [[[factory stub] andReturn:nil]
         newWebToolbarControllerWithDelegate:[OCMArg any]
                                   urlLoader:[OCMArg any]
-                            preloadProvider:[OCMArg any]
                                  dispatcher:[OCMArg any]];
     [[[factory stub] andReturn:passKitViewController_]
         newPassKitViewControllerForPass:nil];
@@ -266,10 +248,6 @@ class BrowserViewControllerTest : public BlockCleanupTest {
     [bvc_ shutdown];
 
     BlockCleanupTest::TearDown();
-  }
-
-  GenericChromeCommand* GetCommandWithTag(NSInteger tag) {
-    return [[GenericChromeCommand alloc] initWithTag:tag];
   }
 
   MOCK_METHOD0(OnCompletionCalled, void());
@@ -464,7 +442,29 @@ TEST_F(BrowserViewControllerTest, TestClearPresentedState) {
   EXPECT_CALL(*this, OnCompletionCalled());
   [bvc_ clearPresentedStateWithCompletion:^{
     this->OnCompletionCalled();
-  }];
+  }
+                           dismissOmnibox:YES];
+}
+
+// Tests for the browser view controller when Payment Request is enabled.
+class PaymentRequestBrowserViewControllerTest
+    : public BrowserViewControllerTest {
+ public:
+  PaymentRequestBrowserViewControllerTest() {}
+
+ protected:
+  void SetUp() override {
+    feature_list_.InitAndEnableFeature(payments::features::kWebPayments);
+    BrowserViewControllerTest::SetUp();
+  }
+
+  base::test::ScopedFeatureList feature_list_;
+};
+
+// Verifies that the controller starts up and shuts down cleanly with Payment
+// Request enabled.
+TEST_F(PaymentRequestBrowserViewControllerTest, TestStartupAndShutdown) {
+  // The body of this test is deliberately left empty.
 }
 
 }  // namespace

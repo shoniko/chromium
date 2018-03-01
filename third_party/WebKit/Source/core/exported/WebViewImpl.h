@@ -44,7 +44,7 @@
 #include "core/page/EditorClient.h"
 #include "core/page/EventWithHitTestResults.h"
 #include "core/page/PageWidgetDelegate.h"
-#include "core/page/ScopedPageSuspender.h"
+#include "core/page/ScopedPagePauser.h"
 #include "platform/animation/CompositorAnimationTimeline.h"
 #include "platform/geometry/IntPoint.h"
 #include "platform/geometry/IntRect.h"
@@ -212,8 +212,9 @@ class CORE_EXPORT WebViewImpl final
 
   void SetDeviceScaleFactor(float) override;
   void SetZoomFactorForDeviceScaleFactor(float) override;
-
-  void SetDeviceColorProfile(const gfx::ICCProfile&) override;
+  float ZoomFactorForDeviceScaleFactor() override {
+    return zoom_factor_for_device_scale_factor_;
+  };
 
   void EnableAutoResizeMode(const WebSize& min_size,
                             const WebSize& max_size) override;
@@ -363,7 +364,7 @@ class CORE_EXPORT WebViewImpl final
   WebViewScheduler* Scheduler() const override;
   void SetVisibilityState(WebPageVisibilityState, bool) override;
 
-  bool HasOpenedPopup() const { return page_popup_.Get(); }
+  bool HasOpenedPopup() const { return page_popup_.get(); }
 
   // Called by a full frame plugin inside this view to inform it that its
   // zoom level has been updated.  The plugin should only call this function
@@ -514,8 +515,7 @@ class CORE_EXPORT WebViewImpl final
 
   void HideSelectPopup();
 
-  HitTestResult HitTestResultForRootFramePos(const IntPoint&);
-  HitTestResult HitTestResultForViewportPos(const IntPoint&);
+  HitTestResult HitTestResultForRootFramePos(const LayoutPoint&);
 
   void ConfigureAutoResizeMode();
 
@@ -630,12 +630,12 @@ class CORE_EXPORT WebViewImpl final
   bool ime_accept_events_;
 
   // The popup associated with an input/select element.
-  RefPtr<WebPagePopupImpl> page_popup_;
+  scoped_refptr<WebPagePopupImpl> page_popup_;
 
   // This stores the last hidden page popup. If a GestureTap attempts to open
   // the popup that is closed by its previous GestureTapDown, the popup remains
   // closed.
-  RefPtr<WebPagePopupImpl> last_hidden_page_popup_;
+  scoped_refptr<WebPagePopupImpl> last_hidden_page_popup_;
 
   Persistent<DevToolsEmulator> dev_tools_emulator_;
   std::unique_ptr<PageOverlay> page_color_overlay_;
@@ -645,7 +645,7 @@ class CORE_EXPORT WebViewImpl final
 
   // If set, the (plugin) node which has mouse capture.
   Persistent<Node> mouse_capture_node_;
-  RefPtr<UserGestureToken> mouse_capture_gesture_token_;
+  scoped_refptr<UserGestureToken> mouse_capture_gesture_token_;
 
   WebLayerTreeView* layer_tree_view_;
   std::unique_ptr<CompositorAnimationHost> animation_host_;

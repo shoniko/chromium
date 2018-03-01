@@ -57,6 +57,7 @@
 #include "net/test/cert_test_util.h"
 #include "net/test/test_data_directory.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/web/WebSandboxFlags.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "url/url_constants.h"
 
@@ -3570,14 +3571,14 @@ class TestJavaScriptDialogManager : public JavaScriptDialogManager {
                            JavaScriptDialogType dialog_type,
                            const base::string16& message_text,
                            const base::string16& default_prompt_text,
-                           const DialogClosedCallback& callback,
+                           DialogClosedCallback callback,
                            bool* did_suppress_message) override {
     *did_suppress_message = true;
   };
 
   void RunBeforeUnloadDialog(WebContents* web_contents,
                              bool is_reload,
-                             const DialogClosedCallback& callback) override {}
+                             DialogClosedCallback callback) override {}
 
   bool HandleJavaScriptDialog(WebContents* web_contents,
                               bool accept,
@@ -3616,6 +3617,23 @@ TEST_F(WebContentsImplTest, ResetJavaScriptDialogOnUserNavigate) {
   EXPECT_EQ(1u, dialog_manager.reset_count());
 
   contents()->SetJavaScriptDialogManagerForTesting(nullptr);
+}
+
+TEST_F(WebContentsImplTest, StartingSandboxFlags) {
+  WebContents::CreateParams params(browser_context());
+  const blink::WebSandboxFlags expected_flags =
+      blink::WebSandboxFlags::kPopups | blink::WebSandboxFlags::kModals |
+      blink::WebSandboxFlags::kTopNavigation;
+  params.starting_sandbox_flags = expected_flags;
+  WebContentsImpl* new_contents =
+      WebContentsImpl::CreateWithOpener(params, nullptr);
+  FrameTreeNode* root = new_contents->GetFrameTree()->root();
+  blink::WebSandboxFlags pending_flags =
+      root->pending_frame_policy().sandbox_flags;
+  EXPECT_EQ(pending_flags, expected_flags);
+  blink::WebSandboxFlags effective_flags =
+      root->effective_frame_policy().sandbox_flags;
+  EXPECT_EQ(effective_flags, expected_flags);
 }
 
 }  // namespace content

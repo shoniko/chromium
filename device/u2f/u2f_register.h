@@ -5,22 +5,27 @@
 #ifndef DEVICE_U2F_U2F_REGISTER_H_
 #define DEVICE_U2F_U2F_REGISTER_H_
 
+#include <memory>
 #include <vector>
 
-#include "u2f_request.h"
+#include "device/u2f/u2f_request.h"
 
 namespace device {
+
+class U2fDiscovery;
 
 class U2fRegister : public U2fRequest {
  public:
   U2fRegister(const std::vector<uint8_t>& challenge_hash,
               const std::vector<uint8_t>& app_param,
+              std::vector<std::unique_ptr<U2fDiscovery>> discoveries,
               const ResponseCallback& cb);
   ~U2fRegister() override;
 
   static std::unique_ptr<U2fRequest> TryRegistration(
       const std::vector<uint8_t>& challenge_hash,
       const std::vector<uint8_t>& app_param,
+      std::vector<std::unique_ptr<U2fDiscovery>> discoveries,
       const ResponseCallback& cb);
 
  private:

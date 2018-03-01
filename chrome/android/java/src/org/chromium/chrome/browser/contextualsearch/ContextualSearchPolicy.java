@@ -155,7 +155,7 @@ class ContextualSearchPolicy {
      * @return Whether surroundings are available.
      */
     boolean canSendSurroundings() {
-        if (isUserUndecided()) return false;
+        if (mDidOverrideDecidedStateForTesting) return mDecidedStateForTesting;
 
         if (isPromoAvailable()) return isBasePageHTTP(mNetworkCommunicator.getBasePageUrl());
 

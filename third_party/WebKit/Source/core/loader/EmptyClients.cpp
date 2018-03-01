@@ -31,10 +31,10 @@
 #include "core/frame/ContentSettingsClient.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/VisualViewport.h"
-#include "core/html/HTMLFormElement.h"
 #include "core/html/forms/ColorChooser.h"
 #include "core/html/forms/DateTimeChooser.h"
 #include "core/html/forms/FileChooser.h"
+#include "core/html/forms/HTMLFormElement.h"
 #include "core/loader/DocumentLoader.h"
 #include "platform/wtf/PtrUtil.h"
 #include "public/platform/Platform.h"
@@ -71,40 +71,40 @@ class EmptyPopupMenu : public PopupMenu {
 class EmptyFrameScheduler : public WebFrameScheduler {
  public:
   EmptyFrameScheduler() { DCHECK(IsMainThread()); }
+
+  scoped_refptr<WebTaskRunner> GetTaskRunner(TaskType type) override {
+    return Platform::Current()->MainThread()->GetWebTaskRunner();
+  }
+
   void AddThrottlingObserver(ObserverType, Observer*) override {}
   void RemoveThrottlingObserver(ObserverType, Observer*) override {}
   void SetFrameVisible(bool) override {}
-  RefPtr<WebTaskRunner> LoadingTaskRunner() override;
-  RefPtr<WebTaskRunner> LoadingControlTaskRunner() override;
-  RefPtr<WebTaskRunner> ThrottleableTaskRunner() override;
-  RefPtr<WebTaskRunner> DeferrableTaskRunner() override;
-  RefPtr<WebTaskRunner> PausableTaskRunner() override;
-  RefPtr<WebTaskRunner> UnpausableTaskRunner() override;
+  bool IsFrameVisible() const override { return false; }
+  void SetPageVisible(bool) override {}
+  bool IsPageVisible() const override { return false; }
+  void SetPaused(bool) override {}
+  void SetCrossOrigin(bool) override {}
+  bool IsCrossOrigin() const override { return false; }
+  WebFrameScheduler::FrameType GetFrameType() const override {
+    return WebFrameScheduler::FrameType::kSubframe;
+  }
+  WebViewScheduler* GetWebViewScheduler() override { return nullptr; }
+  void DidStartLoading(unsigned long identifier) override {}
+  void DidStopLoading(unsigned long identifier) override {}
+  void WillNavigateBackForwardSoon() override {}
+  void DidStartProvisionalLoad(bool is_main_frame) override {}
+  void DidFailProvisionalLoad() override {}
+  void DidCommitProvisionalLoad(bool is_web_history_inert_commit,
+                                bool is_reload,
+                                bool is_main_frame) override {}
+  void SetDocumentParsingInBackground(
+      bool background_parsing_enabled) override {}
+  void OnFirstMeaningfulPaint() override {}
+  std::unique_ptr<ActiveConnectionHandle> OnActiveConnectionCreated() override {
+    return nullptr;
+  }
+  bool IsExemptFromThrottling() const override { return false; }
 };
-
-RefPtr<WebTaskRunner> EmptyFrameScheduler::LoadingTaskRunner() {
-  return Platform::Current()->MainThread()->GetWebTaskRunner();
-}
-
-RefPtr<WebTaskRunner> EmptyFrameScheduler::LoadingControlTaskRunner() {
-  return Platform::Current()->MainThread()->GetWebTaskRunner();
-}
-
-RefPtr<WebTaskRunner> EmptyFrameScheduler::ThrottleableTaskRunner() {
-  return Platform::Current()->MainThread()->GetWebTaskRunner();
-}
-
-RefPtr<WebTaskRunner> EmptyFrameScheduler::DeferrableTaskRunner() {
-  return Platform::Current()->MainThread()->GetWebTaskRunner();
-}
-
-RefPtr<WebTaskRunner> EmptyFrameScheduler::PausableTaskRunner() {
-  return Platform::Current()->MainThread()->GetWebTaskRunner();
-}
-
-RefPtr<WebTaskRunner> EmptyFrameScheduler::UnpausableTaskRunner() {
-  return Platform::Current()->MainThread()->GetWebTaskRunner();
-}
 
 PopupMenu* EmptyChromeClient::OpenPopupMenu(LocalFrame&, HTMLSelectElement&) {
   return new EmptyPopupMenu();
@@ -124,7 +124,8 @@ DateTimeChooser* EmptyChromeClient::OpenDateTimeChooser(
 
 void EmptyChromeClient::OpenTextDataListChooser(HTMLInputElement&) {}
 
-void EmptyChromeClient::OpenFileChooser(LocalFrame*, RefPtr<FileChooser>) {}
+void EmptyChromeClient::OpenFileChooser(LocalFrame*,
+                                        scoped_refptr<FileChooser>) {}
 
 void EmptyChromeClient::AttachRootGraphicsLayer(GraphicsLayer* layer,
                                                 LocalFrame* local_root) {
@@ -139,7 +140,8 @@ String EmptyChromeClient::AcceptLanguages() {
 }
 
 std::unique_ptr<WebFrameScheduler> EmptyChromeClient::CreateFrameScheduler(
-    BlameContext*) {
+    BlameContext* blame_context,
+    WebFrameScheduler::FrameType frame_type) {
   return WTF::MakeUnique<EmptyFrameScheduler>();
 }
 

@@ -37,15 +37,15 @@
 #include <string>
 #include "core/exported/WebViewImpl.h"
 #include "core/frame/Settings.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/WebTaskRunner.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/scroll/ScrollbarTheme.h"
 #include "platform/testing/WebLayerTreeViewImplForTesting.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebCachePolicy.h"
 #include "public/platform/WebMouseEvent.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURLRequest.h"
+#include "public/platform/modules/fetch/fetch_api_request.mojom-shared.h"
 #include "public/web/WebFrameClient.h"
 #include "public/web/WebFrameOwnerProperties.h"
 #include "public/web/WebHistoryItem.h"
@@ -54,34 +54,10 @@
 #include "public/web/WebViewClient.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 
-#define ASSERT_POINT_EQ(expected, actual)    \
-  do {                                       \
-    ASSERT_EQ((expected).x(), (actual).x()); \
-    ASSERT_EQ((expected).y(), (actual).y()); \
-  } while (false)
-
-#define ASSERT_SIZE_EQ(expected, actual)               \
-  do {                                                 \
-    ASSERT_EQ((expected).Width(), (actual).Width());   \
-    ASSERT_EQ((expected).Height(), (actual).Height()); \
-  } while (false)
-
-#define EXPECT_POINT_EQ(expected, actual)    \
-  do {                                       \
-    EXPECT_EQ((expected).X(), (actual).X()); \
-    EXPECT_EQ((expected).Y(), (actual).Y()); \
-  } while (false)
-
 #define EXPECT_FLOAT_POINT_EQ(expected, actual)    \
   do {                                             \
     EXPECT_FLOAT_EQ((expected).X(), (actual).X()); \
     EXPECT_FLOAT_EQ((expected).Y(), (actual).Y()); \
-  } while (false)
-
-#define EXPECT_SIZE_EQ(expected, actual)               \
-  do {                                                 \
-    EXPECT_EQ((expected).Width(), (actual).Width());   \
-    EXPECT_EQ((expected).Height(), (actual).Height()); \
   } while (false)
 
 #define EXPECT_FLOAT_SIZE_EQ(expected, actual)               \
@@ -96,15 +72,6 @@
     EXPECT_FLOAT_EQ((expected).Y(), (actual).Y());           \
     EXPECT_FLOAT_EQ((expected).Width(), (actual).Width());   \
     EXPECT_FLOAT_EQ((expected).Height(), (actual).Height()); \
-  } while (false)
-
-#define EXPECT_RECT_EQ(expected, actual)                \
-  do {                                                  \
-    const IntRect& actual_rect = actual;                \
-    EXPECT_EQ(expected.X(), actual_rect.X());           \
-    EXPECT_EQ(expected.Y(), actual_rect.Y());           \
-    EXPECT_EQ(expected.Width(), actual_rect.Width());   \
-    EXPECT_EQ(expected.Height(), actual_rect.Height()); \
   } while (false)
 
 namespace blink {
@@ -133,7 +100,7 @@ void LoadHTMLString(WebLocalFrame*,
 void LoadHistoryItem(WebLocalFrame*,
                      const WebHistoryItem&,
                      WebHistoryLoadType,
-                     WebCachePolicy);
+                     mojom::FetchCacheMode);
 // Same as above, but for WebLocalFrame::Reload().
 void ReloadFrame(WebLocalFrame*);
 void ReloadFrameBypassingCache(WebLocalFrame*);
@@ -188,7 +155,7 @@ WebLocalFrameImpl* CreateLocalChild(
 // Helper for creating a remote child frame of a remote parent frame.
 WebRemoteFrameImpl* CreateRemoteChild(WebRemoteFrame& parent,
                                       const WebString& name = WebString(),
-                                      RefPtr<SecurityOrigin> = nullptr,
+                                      scoped_refptr<SecurityOrigin> = nullptr,
                                       TestWebRemoteFrameClient* = nullptr);
 
 // Forces to use mocked overlay scrollbars instead of the default native theme
@@ -206,7 +173,6 @@ class UseMockScrollbarSettings {
             RuntimeEnabledFeatures::OverlayScrollbarsEnabled()) {
     Settings::SetMockScrollbarsEnabled(true);
     RuntimeEnabledFeatures::SetOverlayScrollbarsEnabled(true);
-    EXPECT_TRUE(ScrollbarTheme::GetTheme().UsesOverlayScrollbars());
   }
 
   UseMockScrollbarSettings(bool use_mock, bool use_overlay)
@@ -318,7 +284,7 @@ class WebViewHelper {
   // nullptr as the SecurityOrigin results in a frame with a unique security
   // origin.
   WebViewImpl* InitializeRemote(TestWebRemoteFrameClient* = nullptr,
-                                RefPtr<SecurityOrigin> = nullptr,
+                                scoped_refptr<SecurityOrigin> = nullptr,
                                 TestWebViewClient* = nullptr);
 
   // Load the 'Ahem' font to this WebView.
@@ -380,11 +346,11 @@ class TestWebFrameClient : public WebFrameClient {
   service_manager::InterfaceProvider* GetInterfaceProvider() override {
     return interface_provider_.get();
   }
-  std::unique_ptr<blink::WebURLLoader> CreateURLLoader(
-      const blink::WebURLRequest& request,
-      SingleThreadTaskRunner* task_runner) override {
-    // TODO(yhirano): Stop using Platform::CreateURLLoader() here.
-    return Platform::Current()->CreateURLLoader(request, task_runner);
+  std::unique_ptr<blink::WebURLLoaderFactory> CreateURLLoaderFactory()
+      override {
+    // TODO(kinuko,toyoshim): Stop using Platform's URLLoaderFactory, but create
+    // its own WebURLLoaderFactoryWithMock. (crbug.com/751425)
+    return Platform::Current()->CreateDefaultURLLoaderFactory();
   }
 
  private:

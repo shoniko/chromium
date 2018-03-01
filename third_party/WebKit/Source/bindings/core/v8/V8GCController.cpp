@@ -44,7 +44,6 @@
 #include "core/html/imports/HTMLImportsController.h"
 #include "core/inspector/InspectorTraceEvents.h"
 #include "platform/Histogram.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/bindings/ScriptWrappableVisitor.h"
 #include "platform/bindings/WrapperTypeInfo.h"
@@ -104,7 +103,7 @@ class MinorGCUnmodifiedWrapperVisitor : public v8::PersistentHandleVisitor {
 
     if (class_id == WrapperTypeInfo::kNodeClassId) {
       DCHECK(V8Node::hasInstance(wrapper, isolate_));
-      Node* node = V8Node::toImpl(wrapper);
+      Node* node = V8Node::ToImpl(wrapper);
       if (node->HasEventListeners()) {
         v8::Persistent<v8::Object>::Cast(*value).MarkActive();
         return;
@@ -148,7 +147,7 @@ class HeapSnaphotWrapperVisitor : public ScriptWrappableVisitor,
     v8::Local<v8::Object> wrapper = v8::Local<v8::Object>::New(
         isolate_, v8::Persistent<v8::Object>::Cast(*value));
     DCHECK(V8Node::hasInstance(wrapper, isolate_));
-    Node* node = V8Node::toImpl(wrapper);
+    Node* node = V8Node::ToImpl(wrapper);
     Node* root = V8GCController::OpaqueRootForGC(isolate_, node);
     nodes_requiring_tracing_[root].push_back(node);
   }
@@ -295,8 +294,7 @@ void V8GCController::GcPrologue(v8::Isolate* isolate,
                                 v8::GCType type,
                                 v8::GCCallbackFlags flags) {
   RUNTIME_CALL_TIMER_SCOPE(isolate, RuntimeCallStats::CounterId::kGcPrologue);
-  if (IsMainThread())
-    ScriptForbiddenScope::Enter();
+  ScriptForbiddenScope::Enter();
 
   // Attribute garbage collection to the all frames instead of a specific
   // frame.
@@ -390,8 +388,7 @@ void V8GCController::GcEpilogue(v8::Isolate* isolate,
       NOTREACHED();
   }
 
-  if (IsMainThread())
-    ScriptForbiddenScope::Exit();
+  ScriptForbiddenScope::Exit();
 
   if (BlameContext* blame_context =
           Platform::Current()->GetTopLevelBlameContext())
@@ -457,13 +454,13 @@ void V8GCController::CollectGarbage(v8::Isolate* isolate, bool only_minor_gc) {
       v8::Context::New(isolate),
       DOMWrapperWorld::Create(isolate,
                               DOMWrapperWorld::WorldType::kGarbageCollector));
-  ScriptState::Scope scope(script_state.Get());
+  ScriptState::Scope scope(script_state.get());
   StringBuilder builder;
   builder.Append("if (gc) gc(");
   builder.Append(only_minor_gc ? "true" : "false");
   builder.Append(")");
   V8ScriptRunner::CompileAndRunInternalScript(
-      script_state.Get(), V8String(isolate, builder.ToString()), isolate);
+      script_state.get(), V8String(isolate, builder.ToString()), isolate);
   script_state->DisposePerContextData();
 }
 

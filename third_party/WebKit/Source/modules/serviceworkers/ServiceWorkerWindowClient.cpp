@@ -16,6 +16,7 @@
 #include "modules/serviceworkers/ServiceWorkerError.h"
 #include "modules/serviceworkers/ServiceWorkerGlobalScopeClient.h"
 #include "modules/serviceworkers/ServiceWorkerWindowClientCallback.h"
+#include "platform/bindings/V8ThrowException.h"
 #include "platform/wtf/RefPtr.h"
 #include "public/platform/WebString.h"
 
@@ -88,7 +89,7 @@ ScriptPromise ServiceWorkerWindowClient::navigate(ScriptState* script_state,
   return promise;
 }
 
-DEFINE_TRACE(ServiceWorkerWindowClient) {
+void ServiceWorkerWindowClient::Trace(blink::Visitor* visitor) {
   ServiceWorkerClient::Trace(visitor);
 }
 

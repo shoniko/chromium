@@ -30,6 +30,11 @@ void PasswordTabHelper::SetDispatcher(id<ApplicationCommands> dispatcher) {
   controller_.dispatcher = dispatcher;
 }
 
+void PasswordTabHelper::SetPasswordControllerDelegate(
+    id<PasswordControllerDelegate> delegate) {
+  controller_.delegate = delegate;
+}
+
 id<FormSuggestionProvider> PasswordTabHelper::GetSuggestionProvider() {
   return controller_.suggestionProvider;
 }
@@ -58,7 +63,7 @@ PasswordTabHelper::PasswordTabHelper(
   DCHECK(web::WebStateObserver::web_state());
 }
 
-void PasswordTabHelper::WebStateDestroyed() {
+void PasswordTabHelper::WebStateDestroyed(web::WebState* web_state) {
   [controller_ detach];
   controller_ = nil;
 }

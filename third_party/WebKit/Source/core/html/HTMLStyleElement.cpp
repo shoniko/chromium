@@ -23,13 +23,13 @@
 
 #include "core/html/HTMLStyleElement.h"
 
-#include "core/HTMLNames.h"
 #include "core/css/MediaList.h"
 #include "core/css/StyleEngine.h"
 #include "core/dom/Document.h"
 #include "core/dom/ShadowRoot.h"
 #include "core/dom/TaskRunnerHelper.h"
 #include "core/dom/events/Event.h"
+#include "core/html_names.h"
 
 namespace blink {
 
@@ -149,7 +149,7 @@ void HTMLStyleElement::setDisabled(bool set_disabled) {
     style_sheet->setDisabled(set_disabled);
 }
 
-DEFINE_TRACE(HTMLStyleElement) {
+void HTMLStyleElement::Trace(blink::Visitor* visitor) {
   StyleElement::Trace(visitor);
   HTMLElement::Trace(visitor);
 }

@@ -10,6 +10,10 @@
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
 #import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace {
 // Preferred image size in points.
 const CGFloat kBookmarkTableCellDefaultImageSize = 16.0;
@@ -26,12 +30,16 @@ const CGFloat kBookmarkTableCellImagePadding = 16.0;
 // The title text.
 @property(nonatomic, strong) UITextField* titleText;
 
+// Separator view. Displayed at 1 pixel height at the bottom.
+@property(nonatomic, strong) UIView* separatorView;
+
 @end
 
 @implementation BookmarkTableCell
 @synthesize placeholderLabel = _placeholderLabel;
 @synthesize titleText = _titleText;
 @synthesize textDelegate = _textDelegate;
+@synthesize separatorView = _separatorView;
 
 #pragma mark - Initializer
 
@@ -50,8 +58,26 @@ const CGFloat kBookmarkTableCellImagePadding = 16.0;
 
     _placeholderLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     _placeholderLabel.textAlignment = NSTextAlignmentCenter;
+    _placeholderLabel.font = [MDCTypography captionFont];
+
     [_placeholderLabel setHidden:YES];
     [self.contentView addSubview:_placeholderLabel];
+
+    // Add separator view.
+    _separatorView = [[UIView alloc] initWithFrame:CGRectZero];
+    [self.contentView addSubview:_separatorView];
+
+    CGFloat pixelSize = 1 / [[UIScreen mainScreen] scale];
+    [NSLayoutConstraint activateConstraints:@[
+      [_separatorView.leadingAnchor
+          constraintEqualToAnchor:_titleText.leadingAnchor],
+      [_separatorView.trailingAnchor
+          constraintEqualToAnchor:self.trailingAnchor],
+      [_separatorView.heightAnchor constraintEqualToConstant:pixelSize],
+      [_separatorView.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
+    ]];
+    _separatorView.translatesAutoresizingMaskIntoConstraints = NO;
+    _separatorView.backgroundColor = [UIColor colorWithWhite:0.0 alpha:.12];
   }
   return self;
 }
@@ -62,7 +88,7 @@ const CGFloat kBookmarkTableCellImagePadding = 16.0;
   self.titleText.text = bookmark_utils_ios::TitleForBookmarkNode(node);
   self.titleText.accessibilityIdentifier = self.titleText.text;
 
-  self.imageView.image = [UIImage imageNamed:@"bookmark_gray_folder"];
+  self.imageView.image = [UIImage imageNamed:@"bookmark_gray_folder_new"];
   if (node->is_folder()) {
     [self setAccessoryType:UITableViewCellAccessoryDisclosureIndicator];
   } else {
@@ -93,6 +119,12 @@ const CGFloat kBookmarkTableCellImagePadding = 16.0;
     }
   });
   self.titleText.delegate = self;
+}
+
+- (void)stopEdit {
+  [self.textDelegate textDidChangeTo:self.titleText.text];
+  self.titleText.userInteractionEnabled = NO;
+  [self.titleText endEditing:YES];
 }
 
 + (NSString*)reuseIdentifier {
@@ -141,9 +173,6 @@ const CGFloat kBookmarkTableCellImagePadding = 16.0;
   [super layoutSubviews];
   CGFloat titleTextStart =
       kBookmarkTableCellDefaultImageSize + kBookmarkTableCellImagePadding * 2;
-  // TODO(crbug.com/695749): Investigate why this separator inset is not
-  // set correctly in landscape mode.
-  [self setSeparatorInset:UIEdgeInsetsMake(0, titleTextStart, 0, 0)];
 
   // TODO(crbug.com/695749): Investigate using constraints instead of manual
   // layout.
@@ -172,6 +201,7 @@ const CGFloat kBookmarkTableCellImagePadding = 16.0;
 - (BOOL)textFieldShouldReturn:(UITextField*)textField {
   [self.textDelegate textDidChangeTo:self.titleText.text];
   self.titleText.userInteractionEnabled = NO;
+  [textField endEditing:YES];
   return YES;
 }
 

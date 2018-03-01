@@ -42,6 +42,7 @@
 #include "core/css/resolver/StyleResolverState.h"
 #include "core/frame/Deprecation.h"
 #include "core/style/BorderImageLengthBox.h"
+#include "core/style/ComputedStyle.h"
 #include "core/style/FillLayer.h"
 
 namespace blink {
@@ -407,7 +408,7 @@ CSSTransitionData::TransitionProperty CSSToStyleMap::MapAnimationProperty(
       CSSTransitionData::kTransitionNone);
 }
 
-RefPtr<TimingFunction> CSSToStyleMap::MapAnimationTimingFunction(
+scoped_refptr<TimingFunction> CSSToStyleMap::MapAnimationTimingFunction(
     const CSSValue& value,
     bool allow_step_middle,
     Document* document) {

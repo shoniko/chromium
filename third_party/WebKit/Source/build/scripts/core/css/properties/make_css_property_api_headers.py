@@ -6,6 +6,7 @@
 import os
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
+import types
 
 import json5_generator
 import template_expander
@@ -20,15 +21,15 @@ class ApiMethod(namedtuple('ApiMethod', 'name,return_type,parameters')):
 
 class CSSPropertyAPIHeadersWriter(CSSPropertyAPIWriter):
     def __init__(self, json5_file_paths):
-        super(CSSPropertyAPIHeadersWriter, self).__init__([json5_file_paths[0]])
-        assert len(json5_file_paths) == 2,\
-            ('CSSPropertyAPIHeadersWriter requires 2 input json5 files, ' +
+        super(CSSPropertyAPIHeadersWriter, self).__init__(json5_file_paths)
+        assert len(json5_file_paths) == 3,\
+            ('CSSPropertyAPIHeadersWriter requires 3 input json5 files, ' +
              'got {}.'.format(len(json5_file_paths)))
 
         # Map of API method name -> (return_type, parameters)
         self._api_methods = {}
         api_methods = json5_generator.Json5File.load_from_files(
-            [json5_file_paths[1]])
+            [json5_file_paths[2]])
         for api_method in api_methods.name_dictionaries:
             self._api_methods[api_method['name']] = ApiMethod(
                 name=api_method['name'],
@@ -38,15 +39,32 @@ class CSSPropertyAPIHeadersWriter(CSSPropertyAPIWriter):
         self.validate_input()
 
         self._outputs = {}
+        output_dir = sys.argv[sys.argv.index('--output_dir') + 1]
         for property_ in self.properties().values():
+            if 'longhands' in output_dir and property_['longhands']:
+                continue
+            if 'shorthands' in output_dir and not property_['longhands']:
+                continue
             if property_['api_class'] is None:
                 continue
-            methods = []
-            for method_name in property_['api_methods']:
-                methods.append(self._api_methods[method_name])
-            property_['api_methods'] = methods
+            property_['unique'] = isinstance(
+                property_['api_class'], types.BooleanType)
+            property_['api_methods'] = [
+                self._api_methods[method_name]
+                for method_name in property_['api_methods']
+            ]
             classname = self.get_classname(property_)
             assert classname is not None
+            # Functions should only be declared on the API classes if they are
+            # implemented and not shared (denoted by api_class = true. Shared
+            # classes are denoted by api_class = "some string").
+            property_['should_declare_application_functions'] = \
+                property_['unique'] \
+                and property_['is_property'] \
+                and not property_['use_handlers_for'] \
+                and not property_['longhands'] \
+                and not property_['direction_aware_options'] \
+                and not property_['builder_skip']
             self._outputs[classname + '.h'] = (
                 self.generate_property_api_h_builder(classname, property_))
 

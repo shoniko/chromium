@@ -30,12 +30,13 @@
 #include "content/public/common/mojo_channel_switches.h"
 #include "content/public/common/pepper_plugin_info.h"
 #include "content/public/common/process_type.h"
-#include "content/public/common/sandbox_type.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
 #include "content/public/common/service_names.mojom.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "net/base/network_change_notifier.h"
 #include "ppapi/proxy/ppapi_messages.h"
+#include "services/service_manager/sandbox/sandbox_type.h"
+#include "services/service_manager/sandbox/switches.h"
 #include "ui/base/ui_base_switches.h"
 
 #if defined(OS_POSIX)
@@ -88,7 +89,7 @@ class PpapiPluginSandboxedProcessLauncherDelegate
 #if !defined(NACL_WIN64)
     // We don't support PPAPI win32k lockdown prior to Windows 10.
     if (base::win::GetVersion() >= base::win::VERSION_WIN10 &&
-        IsWin32kLockdownEnabled()) {
+        service_manager::IsWin32kLockdownEnabled()) {
       result = AddWin32kLockdownPolicy(policy, true);
       if (result != sandbox::SBOX_ALL_OK)
         return false;
@@ -114,12 +115,12 @@ class PpapiPluginSandboxedProcessLauncherDelegate
   }
 #endif  // OS_WIN
 
-  SandboxType GetSandboxType() override {
+  service_manager::SandboxType GetSandboxType() override {
 #if defined(OS_WIN)
     if (is_broker_)
-      return SANDBOX_TYPE_NO_SANDBOX;
+      return service_manager::SANDBOX_TYPE_NO_SANDBOX;
 #endif  // OS_WIN
-    return SANDBOX_TYPE_PPAPI;
+    return service_manager::SANDBOX_TYPE_PPAPI;
   }
 
  private:
@@ -383,7 +384,7 @@ bool PpapiPluginProcessHost::Init(const PepperPluginInfo& info) {
 
   if (!is_broker_) {
     static const char* const kPluginForwardSwitches[] = {
-      switches::kDisableSeccompFilterSandbox,
+      service_manager::switches::kDisableSeccompFilterSandbox,
 #if defined(OS_MACOSX)
       switches::kEnableSandboxLogging,
 #endif

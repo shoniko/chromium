@@ -40,10 +40,6 @@
 #include "public/platform/WebString.h"
 #include "public/platform/WebVector.h"
 
-namespace gfx {
-class ICCProfile;
-}
-
 namespace blink {
 
 class WebCredentialManagerClient;
@@ -302,8 +298,7 @@ class WebView : protected WebWidget {
   // level.
   virtual void SetZoomFactorForDeviceScaleFactor(float) = 0;
 
-  // Set and reset the device color profile.
-  virtual void SetDeviceColorProfile(const gfx::ICCProfile&) = 0;
+  virtual float ZoomFactorForDeviceScaleFactor() = 0;
 
   // Resize the view at the same time as changing the state of the top
   // controls. If |browserControlsShrinkLayout| is true, the embedder shrunk the
@@ -341,7 +336,7 @@ class WebView : protected WebWidget {
   // Data exchange -------------------------------------------------------
 
   // Do a hit test at given point and return the HitTestResult.
-  virtual WebHitTestResult HitTestResultAt(const WebPoint&) = 0;
+  WebHitTestResult HitTestResultAt(const WebPoint&) override = 0;
 
   // Do a hit test equivalent to what would be done for a GestureTap event
   // that has width/height corresponding to the supplied |tapArea|.

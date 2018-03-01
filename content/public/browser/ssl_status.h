@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <vector>
 
 #include "content/common/content_export.h"
@@ -55,20 +56,12 @@ struct CONTENT_EXPORT SSLStatus {
     // loaded with certificate errors.
     RAN_CONTENT_WITH_CERT_ERRORS = 1 << 3,
 
-    // HTTP page containing a password input. Embedders may use this to
-    // adjust UI on nonsecure pages that collect sensitive data.
-    DISPLAYED_PASSWORD_FIELD_ON_HTTP = 1 << 4,
-
-    // HTTP page containing a credit card input. Embedders may use this to
-    // adjust UI on nonsecure pages that collect sensitive data.
-    DISPLAYED_CREDIT_CARD_FIELD_ON_HTTP = 1 << 5,
-
     // HTTPS page containing a form targeting an insecure action url.
     DISPLAYED_FORM_WITH_INSECURE_ACTION = 1 << 6,
   };
 
   SSLStatus();
-  SSLStatus(const net::SSLInfo& ssl_info);
+  explicit SSLStatus(const net::SSLInfo& ssl_info);
   SSLStatus(const SSLStatus& other);
   SSLStatus& operator=(SSLStatus other);
   ~SSLStatus();
@@ -76,6 +69,10 @@ struct CONTENT_EXPORT SSLStatus {
   bool initialized;
   scoped_refptr<net::X509Certificate> certificate;
   net::CertStatus cert_status;
+  // The hashes of the SubjectPublicKeyInfos from each certificate in
+  // |certificate|. This field is not necessarily populated, e.g. for responses
+  // served from disk cache.
+  net::HashValueVector public_key_hashes;
   int security_bits;
   uint16_t key_exchange_group;
   int connection_status;

@@ -30,8 +30,11 @@ class SingleThreadTaskRunner;
 namespace cc {
 class ResourceSettings;
 class SingleThreadTaskGraphRunner;
-class SoftwareOutputDevice;
 class SurfaceManager;
+}
+
+namespace gpu {
+class GpuChannelEstablishFactory;
 }
 
 namespace ui {
@@ -39,17 +42,19 @@ class ContextProviderCommandBuffer;
 }
 
 namespace viz {
+class OutputDeviceBacking;
+class SoftwareOutputDevice;
 class VulkanInProcessContextProvider;
 }
 
 namespace content {
-class OutputDeviceBacking;
 
 class GpuProcessTransportFactory : public ui::ContextFactory,
                                    public ui::ContextFactoryPrivate,
                                    public ImageTransportFactory {
  public:
-  explicit GpuProcessTransportFactory(
+  GpuProcessTransportFactory(
+      gpu::GpuChannelEstablishFactory* gpu_channel_factory,
       scoped_refptr<base::SingleThreadTaskRunner> resize_task_runner);
 
   ~GpuProcessTransportFactory() override;
@@ -93,8 +98,6 @@ class GpuProcessTransportFactory : public ui::ContextFactory,
   ui::ContextFactoryPrivate* GetContextFactoryPrivate() override;
   viz::FrameSinkManagerImpl* GetFrameSinkManager() override;
   viz::GLHelper* GetGLHelper() override;
-  void SetGpuChannelEstablishFactory(
-      gpu::GpuChannelEstablishFactory* factory) override;
 #if defined(OS_MACOSX)
   void SetCompositorSuspendedForRecycle(ui::Compositor* compositor,
                                         bool suspended) override;
@@ -104,12 +107,11 @@ class GpuProcessTransportFactory : public ui::ContextFactory,
   struct PerCompositorData;
 
   PerCompositorData* CreatePerCompositorData(ui::Compositor* compositor);
-  std::unique_ptr<cc::SoftwareOutputDevice> CreateSoftwareOutputDevice(
-      ui::Compositor* compositor);
+  std::unique_ptr<viz::SoftwareOutputDevice> CreateSoftwareOutputDevice(
+      gfx::AcceleratedWidget widget);
   void EstablishedGpuChannel(
       base::WeakPtr<ui::Compositor> compositor,
       bool create_gpu_output_surface,
-      int num_attempts,
       scoped_refptr<gpu::GpuChannelHost> established_channel_host);
 
   void OnLostMainThreadSharedContextInsideCallback();
@@ -122,7 +124,7 @@ class GpuProcessTransportFactory : public ui::ContextFactory,
 
 #if defined(OS_WIN)
   // Used by output surface, stored in PerCompositorData.
-  std::unique_ptr<OutputDeviceBacking> software_backing_;
+  std::unique_ptr<viz::OutputDeviceBacking> software_backing_;
 #endif
 
   // Depends on SurfaceManager.
@@ -145,7 +147,7 @@ class GpuProcessTransportFactory : public ui::ContextFactory,
   scoped_refptr<viz::VulkanInProcessContextProvider>
       shared_vulkan_context_provider_;
 
-  gpu::GpuChannelEstablishFactory* gpu_channel_factory_ = nullptr;
+  gpu::GpuChannelEstablishFactory* const gpu_channel_factory_;
 
   base::WeakPtrFactory<GpuProcessTransportFactory> callback_factory_;
 

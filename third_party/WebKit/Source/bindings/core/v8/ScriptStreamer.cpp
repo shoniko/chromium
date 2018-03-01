@@ -262,7 +262,7 @@ class SourceStream : public v8::ScriptCompiler::ExternalSourceStream {
         cache_handler ? cache_handler->GetCachedMetadata(
                             V8ScriptRunner::TagForCodeCache(cache_handler))
                       : nullptr);
-    if (code_cache.Get()) {
+    if (code_cache.get()) {
       // The resource has a code cache, so it's unnecessary to stream and
       // parse the code. Cancel the streaming and resume the non-streaming
       // code path.
@@ -445,7 +445,7 @@ void ScriptStreamer::Cancel() {
   // the control the next time. It can also be that V8 has already completed
   // its operations and streamingComplete will be called soon.
   detached_ = true;
-  resource_ = 0;
+  resource_ = nullptr;
   if (stream_)
     stream_->Cancel();
 }
@@ -528,7 +528,7 @@ void ScriptStreamer::NotifyAppendData(ScriptResource* resource) {
     source_ = WTF::WrapUnique(
         new v8::ScriptCompiler::StreamedSource(stream_, encoding_));
 
-    ScriptState::Scope scope(script_state_.Get());
+    ScriptState::Scope scope(script_state_.get());
     std::unique_ptr<v8::ScriptCompiler::ScriptStreamingTask>
         script_streaming_task(
             WTF::WrapUnique(v8::ScriptCompiler::StartStreamingScript(
@@ -536,7 +536,7 @@ void ScriptStreamer::NotifyAppendData(ScriptResource* resource) {
     if (!script_streaming_task) {
       // V8 cannot stream the script.
       SuppressStreaming();
-      stream_ = 0;
+      stream_ = nullptr;
       source_.reset();
       RecordNotStreamingReasonHistogram(script_type_, kV8CannotStream);
       RecordStartedStreamingHistogram(script_type_, 0);
@@ -581,7 +581,7 @@ ScriptStreamer::ScriptStreamer(
     : pending_script_(script),
       resource_(script->GetResource()),
       detached_(false),
-      stream_(0),
+      stream_(nullptr),
       loading_finished_(false),
       parsing_finished_(false),
       have_enough_data_for_streaming_(false),
@@ -598,7 +598,7 @@ ScriptStreamer::ScriptStreamer(
 
 ScriptStreamer::~ScriptStreamer() {}
 
-DEFINE_TRACE(ScriptStreamer) {
+void ScriptStreamer::Trace(blink::Visitor* visitor) {
   visitor->Trace(pending_script_);
   visitor->Trace(resource_);
 }

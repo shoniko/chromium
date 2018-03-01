@@ -74,15 +74,18 @@ void GetAllOriginsAndPaths(const base::FilePath& indexeddb_path,
         file_path.RemoveExtension().Extension() == kIndexedDBExtension) {
       std::string origin_id = file_path.BaseName().RemoveExtension()
           .RemoveExtension().MaybeAsASCII();
-      origins->push_back(Origin(storage::GetOriginFromIdentifier(origin_id)));
+      origins->push_back(
+          Origin::Create(storage::GetOriginFromIdentifier(origin_id)));
       if (file_paths)
         file_paths->push_back(file_path);
     }
   }
 }
 
+}  // namespace
+
 // This will be called after the IndexedDBContext is destroyed.
-void ClearSessionOnlyOrigins(
+void IndexedDBContextImpl::ClearSessionOnlyOrigins(
     const base::FilePath& indexeddb_path,
     scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy) {
   // TODO(jsbell): DCHECK that this is running on an IndexedDB sequence,
@@ -102,8 +105,6 @@ void ClearSessionOnlyOrigins(
     base::DeleteFile(*file_path, true);
   }
 }
-
-}  // namespace
 
 IndexedDBContextImpl::IndexedDBContextImpl(
     const base::FilePath& data_path,
@@ -290,7 +291,7 @@ int IndexedDBContextImpl::GetOriginBlobFileCount(const Origin& origin) {
 
 // TODO(jsbell): Update callers to use url::Origin overload and remove.
 int64_t IndexedDBContextImpl::GetOriginDiskUsage(const GURL& origin_url) {
-  return GetOriginDiskUsage(Origin(origin_url));
+  return GetOriginDiskUsage(Origin::Create(origin_url));
 }
 
 int64_t IndexedDBContextImpl::GetOriginDiskUsage(const Origin& origin) {
@@ -314,7 +315,7 @@ base::Time IndexedDBContextImpl::GetOriginLastModified(const Origin& origin) {
 
 // TODO(jsbell): Update callers to use url::Origin overload and remove.
 void IndexedDBContextImpl::DeleteForOrigin(const GURL& origin_url) {
-  DeleteForOrigin(Origin(origin_url));
+  DeleteForOrigin(Origin::Create(origin_url));
 }
 
 void IndexedDBContextImpl::DeleteForOrigin(const Origin& origin) {
@@ -347,7 +348,7 @@ void IndexedDBContextImpl::DeleteForOrigin(const Origin& origin) {
 // TODO(jsbell): Update callers to use url::Origin overload and remove.
 void IndexedDBContextImpl::CopyOriginData(const GURL& origin_url,
                                           IndexedDBContext* dest_context) {
-  CopyOriginData(Origin(origin_url), dest_context);
+  CopyOriginData(Origin::Create(origin_url), dest_context);
 }
 
 void IndexedDBContextImpl::CopyOriginData(const Origin& origin,
@@ -418,7 +419,7 @@ std::vector<base::FilePath> IndexedDBContextImpl::GetStoragePaths(
 // TODO(jsbell): Update callers to use url::Origin overload and remove.
 base::FilePath IndexedDBContextImpl::GetFilePathForTesting(
     const GURL& origin_url) const {
-  return GetFilePathForTesting(Origin(origin_url));
+  return GetFilePathForTesting(Origin::Create(origin_url));
 }
 
 base::FilePath IndexedDBContextImpl::GetFilePathForTesting(
@@ -467,6 +468,36 @@ void IndexedDBContextImpl::TransactionComplete(const Origin& origin) {
 
 void IndexedDBContextImpl::DatabaseDeleted(const Origin& origin) {
   AddToOriginSet(origin);
+  QueryDiskAndUpdateQuotaUsage(origin);
+}
+
+void IndexedDBContextImpl::AddObserver(
+    IndexedDBContextImpl::Observer* observer) {
+  DCHECK(!observers_.HasObserver(observer));
+  observers_.AddObserver(observer);
+}
+
+void IndexedDBContextImpl::RemoveObserver(
+    IndexedDBContextImpl::Observer* observer) {
+  observers_.RemoveObserver(observer);
+}
+
+void IndexedDBContextImpl::NotifyIndexedDBListChanged(const Origin& origin) {
+  for (auto& observer : observers_)
+    observer.OnIndexedDBListChanged(origin);
+}
+
+void IndexedDBContextImpl::NotifyIndexedDBContentChanged(
+    const Origin& origin,
+    const base::string16& database_name,
+    const base::string16& object_store_name) {
+  for (auto& observer : observers_) {
+    observer.OnIndexedDBContentChanged(origin, database_name,
+                                       object_store_name);
+  }
+}
+
+void IndexedDBContextImpl::BlobFilesCleaned(const url::Origin& origin) {
   QueryDiskAndUpdateQuotaUsage(origin);
 }
 
@@ -551,6 +582,7 @@ void IndexedDBContextImpl::QueryDiskAndUpdateQuotaUsage(const Origin& origin) {
     quota_manager_proxy()->NotifyStorageModified(
         storage::QuotaClient::kIndexedDatabase, origin.GetURL(),
         storage::kStorageTypeTemporary, difference);
+    NotifyIndexedDBListChanged(origin);
   }
 }
 

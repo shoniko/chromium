@@ -49,8 +49,6 @@
 #include "platform/weborigin/KURL.h"
 #include "platform/wtf/Deque.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/PassRefPtr.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
@@ -143,7 +141,7 @@ class MODULES_EXPORT DOMWebSocket : public EventTargetWithInlineData,
                 unsigned short code,
                 const String& reason) override;
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
   static bool IsValidSubprotocolString(const String&);
 
@@ -170,7 +168,7 @@ class MODULES_EXPORT DOMWebSocket : public EventTargetWithInlineData,
     void Resume();
     void ContextDestroyed();
 
-    DECLARE_TRACE();
+    void Trace(blink::Visitor*);
 
    private:
     enum State {

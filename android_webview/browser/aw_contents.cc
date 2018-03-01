@@ -45,6 +45,7 @@
 #include "base/command_line.h"
 #include "base/json/json_writer.h"
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/memory/memory_pressure_listener.h"
 #include "base/memory/ptr_util.h"
 #include "base/pickle.h"
@@ -108,9 +109,15 @@ namespace {
 
 bool g_should_download_favicons = false;
 
-std::string g_locale;
+std::string* g_locale() {
+  CR_DEFINE_STATIC_LOCAL(std::string, locale, ());
+  return &locale;
+}
 
-std::string g_locale_list;
+std::string* g_locale_list() {
+  CR_DEFINE_STATIC_LOCAL(std::string, locale_list, ());
+  return &locale_list;
+}
 
 const void* const kAwContentsUserDataKey = &kAwContentsUserDataKey;
 const void* const kComputedRendererPriorityUserDataKey =
@@ -170,18 +177,18 @@ void UpdateDefaultLocale(JNIEnv* env,
                          const JavaParamRef<jclass>&,
                          const JavaParamRef<jstring>& locale,
                          const JavaParamRef<jstring>& locale_list) {
-  g_locale = ConvertJavaStringToUTF8(env, locale);
-  g_locale_list = ConvertJavaStringToUTF8(env, locale_list);
+  *g_locale() = ConvertJavaStringToUTF8(env, locale);
+  *g_locale_list() = ConvertJavaStringToUTF8(env, locale_list);
 }
 
 // static
 std::string AwContents::GetLocale() {
-  return g_locale;
+  return *g_locale();
 }
 
 // static
 std::string AwContents::GetLocaleList() {
-  return g_locale_list;
+  return *g_locale_list();
 }
 
 // static
@@ -224,9 +231,10 @@ AwContents::AwContents(std::unique_ptr<WebContents> web_contents)
   browser_view_renderer_.RegisterWithWebContents(web_contents_.get());
 
   CompositorID compositor_id;
-  if (web_contents_->GetRenderProcessHost() &&
-      web_contents_->GetRenderViewHost()) {
-    compositor_id.process_id = web_contents_->GetRenderProcessHost()->GetID();
+  if (web_contents_->GetRenderViewHost() &&
+      web_contents_->GetRenderViewHost()->GetProcess()) {
+    compositor_id.process_id =
+        web_contents_->GetRenderViewHost()->GetProcess()->GetID();
     compositor_id.routing_id =
         web_contents_->GetRenderViewHost()->GetRoutingID();
   }
@@ -888,6 +896,7 @@ void AwContents::OnSizeChanged(JNIEnv* env,
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   gfx::Size size(w, h);
   web_contents_->GetNativeView()->OnPhysicalBackingSizeChanged(size);
+  web_contents_->GetNativeView()->OnSizeChanged(w, h);
   browser_view_renderer_.OnSizeChanged(w, h);
 }
 
@@ -940,12 +949,9 @@ base::android::ScopedJavaLocalRef<jbyteArray> AwContents::GetOpaqueState(
     return ScopedJavaLocalRef<jbyteArray>();
 
   base::Pickle pickle;
-  if (!WriteToPickle(*web_contents_, &pickle)) {
-    return ScopedJavaLocalRef<jbyteArray>();
-  } else {
-    return base::android::ToJavaByteArray(
-        env, reinterpret_cast<const uint8_t*>(pickle.data()), pickle.size());
-  }
+  WriteToPickle(*web_contents_, &pickle);
+  return base::android::ToJavaByteArray(
+      env, reinterpret_cast<const uint8_t*>(pickle.data()), pickle.size());
 }
 
 jboolean AwContents::RestoreFromOpaqueState(
@@ -1214,7 +1220,9 @@ void AwContents::InsertVisualStateCallback(
 jint AwContents::GetEffectivePriority(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& obj) {
-  switch (web_contents_->GetRenderProcessHost()->ComputeEffectiveImportance()) {
+  switch (web_contents_->GetMainFrame()
+              ->GetProcess()
+              ->ComputeEffectiveImportance()) {
     case content::ChildProcessImportance::NORMAL:
       return static_cast<jint>(RendererPriority::WAIVED);
     case content::ChildProcessImportance::MODERATE:
@@ -1286,7 +1294,7 @@ void AwContents::GrantFileSchemeAccesstoChildProcess(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
   content::ChildProcessSecurityPolicy::GetInstance()->GrantScheme(
-      web_contents_->GetRenderProcessHost()->GetID(), url::kFileScheme);
+      web_contents_->GetMainFrame()->GetProcess()->GetID(), url::kFileScheme);
 }
 
 void AwContents::ResumeLoadingCreatedPopupWebContents(
@@ -1333,9 +1341,10 @@ void AwContents::DidDetachInterstitialPage() {
   CompositorID compositor_id;
   if (!web_contents_)
     return;
-  if (web_contents_->GetRenderProcessHost() &&
-      web_contents_->GetRenderViewHost()) {
-    compositor_id.process_id = web_contents_->GetRenderProcessHost()->GetID();
+  if (web_contents_->GetRenderViewHost() &&
+      web_contents_->GetRenderViewHost()->GetProcess()) {
+    compositor_id.process_id =
+        web_contents_->GetRenderViewHost()->GetProcess()->GetID();
     compositor_id.routing_id =
         web_contents_->GetRenderViewHost()->GetRoutingID();
   } else {

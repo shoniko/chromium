@@ -42,7 +42,7 @@
 #include "ui/views/views_export.h"
 
 #if defined(OS_WIN)
-#include "base/win/scoped_comptr.h"
+#include <wrl/client.h>
 #endif
 
 using ui::OSExchangeData;
@@ -1288,7 +1288,8 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Overridden from ui::LayerDelegate:
   void OnPaintLayer(const ui::PaintContext& context) override;
   void OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) override;
-  void OnDeviceScaleFactorChanged(float device_scale_factor) override;
+  void OnDeviceScaleFactorChanged(float old_device_scale_factor,
+                                  float new_device_scale_factor) override;
 
   // Finds the layer that this view paints to (it may belong to an ancestor
   // view), then reorders the immediate children of that layer to match the
@@ -1384,8 +1385,8 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   friend class internal::ScopedChildrenLock;
   friend class FocusManager;
   friend class ViewLayerTest;
+  friend class ViewLayerPixelCanvasTest;
   friend class Widget;
-
   FRIEND_TEST_ALL_PREFIXES(ViewTest, PaintWithMovedViewUsesCache);
   FRIEND_TEST_ALL_PREFIXES(ViewTest, PaintWithMovedViewUsesCacheInRTL);
   FRIEND_TEST_ALL_PREFIXES(ViewTest, PaintWithUnknownInvalidation);
@@ -1412,10 +1413,6 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // check ancestors recursively; rather, it's used to prune subtrees of views
   // during painting.
   bool ShouldPaint() const;
-
-  // Returns the bounds that should be used when constructing the |PaintInfo|
-  // for this view.
-  gfx::Rect GetPaintRecordingBounds() const;
 
   // Adjusts the transform of |recorder| in advance of painting.
   void SetupTransformRecorderForPainting(
@@ -1628,7 +1625,8 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Used to propagate device scale factor changed notifications from the root
   // view to all views in the hierarchy.
-  void PropagateDeviceScaleFactorChanged(float device_scale_factor);
+  void PropagateDeviceScaleFactorChanged(float old_device_scale_factor,
+                                         float new_device_scale_factor);
 
   // Tooltips ------------------------------------------------------------------
 

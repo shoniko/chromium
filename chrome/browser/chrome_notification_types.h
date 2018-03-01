@@ -233,11 +233,6 @@ enum NotificationType {
 
   // Non-history storage services --------------------------------------------
 
-  // A safe browsing database update completed.  Source is the
-  // SafeBrowsingService and the details are a bool indicating whether the
-  // update was successful.
-  NOTIFICATION_SAFE_BROWSING_UPDATE_COMPLETE,
-
   // Autocomplete ------------------------------------------------------------
 
   // Sent by the autocomplete controller when done.  The source is the
@@ -327,9 +322,6 @@ enum NotificationType {
   //    NOTIFICATION_KIOSK_APP_LAUNCHED
   NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
 
-  // Sent when proxy dialog is closed.
-  NOTIFICATION_LOGIN_PROXY_CHANGED,
-
   // Send when kiosk auto-launch warning screen is visible.
   NOTIFICATION_KIOSK_AUTOLAUNCH_WARNING_VISIBLE,
 
@@ -397,7 +389,7 @@ enum NotificationType {
   // which was installed.
   NOTIFICATION_APP_INSTALLED_TO_NTP,
 
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
   // Sent when wallpaper show animation has finished.
   NOTIFICATION_WALLPAPER_ANIMATION_FINISHED,
 #endif

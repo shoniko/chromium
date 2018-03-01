@@ -25,8 +25,9 @@
 
 #include "modules/webaudio/MediaElementAudioSourceNode.h"
 
+#include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/TaskRunnerHelper.h"
-#include "core/html/HTMLMediaElement.h"
+#include "core/html/media/HTMLMediaElement.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "modules/webaudio/AudioNodeOutput.h"
 #include "modules/webaudio/BaseAudioContext.h"
@@ -60,10 +61,10 @@ MediaElementAudioSourceHandler::MediaElementAudioSourceHandler(
   Initialize();
 }
 
-PassRefPtr<MediaElementAudioSourceHandler>
+scoped_refptr<MediaElementAudioSourceHandler>
 MediaElementAudioSourceHandler::Create(AudioNode& node,
                                        HTMLMediaElement& media_element) {
-  return AdoptRef(new MediaElementAudioSourceHandler(node, media_element));
+  return WTF::AdoptRef(new MediaElementAudioSourceHandler(node, media_element));
 }
 
 MediaElementAudioSourceHandler::~MediaElementAudioSourceHandler() {
@@ -114,7 +115,7 @@ void MediaElementAudioSourceHandler::SetFormat(size_t number_of_channels,
 
     {
       // The context must be locked when changing the number of output channels.
-      BaseAudioContext::AutoLocker context_locker(Context());
+      BaseAudioContext::GraphAutoLocker context_locker(Context());
 
       // Do any necesssary re-configuration to the output's number of channels.
       Output(0).SetNumberOfChannels(number_of_channels);
@@ -203,7 +204,7 @@ void MediaElementAudioSourceHandler::Process(size_t number_of_frames) {
               ->PostTask(BLINK_FROM_HERE,
                          CrossThreadBind(
                              &MediaElementAudioSourceHandler::PrintCORSMessage,
-                             WrapPassRefPtr(this), current_src_string_));
+                             WrapRefCounted(this), current_src_string_));
         }
       }
       output_bus->Zero();
@@ -276,7 +277,7 @@ MediaElementAudioSourceNode* MediaElementAudioSourceNode::Create(
   return Create(*context, *options.mediaElement(), exception_state);
 }
 
-DEFINE_TRACE(MediaElementAudioSourceNode) {
+void MediaElementAudioSourceNode::Trace(blink::Visitor* visitor) {
   AudioSourceProviderClient::Trace(visitor);
   AudioNode::Trace(visitor);
 }

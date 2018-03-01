@@ -63,7 +63,6 @@
 #endif
 
 class SkBitmap;
-struct WorkerProcessMsg_CreateWorker_Params;
 
 namespace blink {
 namespace scheduler {
@@ -130,21 +129,28 @@ class AudioRendererMixerManager;
 class BlobMessageFilter;
 class BrowserPluginManager;
 class CacheStorageDispatcher;
+class CategorizedWorkerPool;
+class ChildResourceMessageFilter;
 class CompositorForwardingMessageFilter;
 class DevToolsAgentFilter;
 class DomStorageDispatcher;
+class FileSystemDispatcher;
 class FrameSwapMessageQueue;
+class GpuVideoAcceleratorFactoriesImpl;
 class IndexedDBDispatcher;
 class InputHandlerManager;
 class MidiMessageFilter;
+class NotificationDispatcher;
 class P2PSocketDispatcher;
 class PeerConnectionDependencyFactory;
 class PeerConnectionTracker;
-class CategorizedWorkerPool;
+class QuotaDispatcher;
+class QuotaMessageFilter;
 class RenderThreadObserver;
 class RendererBlinkPlatformImpl;
-class GpuVideoAcceleratorFactoriesImpl;
+class ResourceDispatcher;
 class ResourceDispatchThrottler;
+class ServiceWorkerMessageFilter;
 class VideoCaptureImplManager;
 
 #if defined(OS_ANDROID)
@@ -224,12 +230,11 @@ class CONTENT_EXPORT RenderThreadImpl
   bool ResolveProxy(const GURL& url, std::string* proxy_list) override;
   base::WaitableEvent* GetShutdownEvent() override;
   int32_t GetClientId() override;
-  scoped_refptr<base::SingleThreadTaskRunner> GetTimerTaskRunner() override;
-  scoped_refptr<base::SingleThreadTaskRunner> GetLoadingTaskRunner() override;
   void SetRendererProcessType(
       blink::scheduler::RendererProcessType type) override;
 
   // IPC::Listener implementation via ChildThreadImpl:
+  bool OnMessageReceived(const IPC::Message& msg) override;
   void OnAssociatedInterfaceRequest(
       const std::string& name,
       mojo::ScopedInterfaceEndpointHandle handle) override;
@@ -327,8 +332,24 @@ class CONTENT_EXPORT RenderThreadImpl
     return audio_input_message_filter_.get();
   }
 
+  FileSystemDispatcher* file_system_dispatcher() const {
+    return file_system_dispatcher_.get();
+  }
+
   MidiMessageFilter* midi_message_filter() {
     return midi_message_filter_.get();
+  }
+
+  QuotaDispatcher* quota_dispatcher() const {
+    return quota_dispatcher_.get();
+  }
+
+  QuotaMessageFilter* quota_message_filter() const {
+    return quota_message_filter_.get();
+  }
+
+  ResourceDispatcher* resource_dispatcher() const {
+    return resource_dispatcher_.get();
   }
 
 #if defined(OS_ANDROID)
@@ -370,6 +391,10 @@ class CONTENT_EXPORT RenderThreadImpl
   viz::ClientSharedBitmapManager* shared_bitmap_manager() const {
     DCHECK(shared_bitmap_manager_);
     return shared_bitmap_manager_.get();
+  }
+
+  NotificationDispatcher* notification_dispatcher() const {
+    return notification_dispatcher_.get();
   }
 
   mojom::RenderFrameMessageFilter* render_frame_message_filter();
@@ -582,8 +607,6 @@ class CONTENT_EXPORT RenderThreadImpl
   void OnMemoryPressure(
       base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level);
 
-  void OnCreateNewSharedWorker(
-      const WorkerProcessMsg_CreateWorker_Params& params);
   bool RendererIsHidden() const;
   void OnRendererHidden();
   void OnRendererVisible();
@@ -616,14 +639,20 @@ class CONTENT_EXPORT RenderThreadImpl
   std::unique_ptr<IndexedDBDispatcher> main_thread_indexed_db_dispatcher_;
   std::unique_ptr<blink::scheduler::RendererScheduler> renderer_scheduler_;
   std::unique_ptr<RendererBlinkPlatformImpl> blink_platform_impl_;
+  std::unique_ptr<ResourceDispatcher> resource_dispatcher_;
   std::unique_ptr<ResourceDispatchThrottler> resource_dispatch_throttler_;
   std::unique_ptr<CacheStorageDispatcher> main_thread_cache_storage_dispatcher_;
+  std::unique_ptr<FileSystemDispatcher> file_system_dispatcher_;
+  std::unique_ptr<QuotaDispatcher> quota_dispatcher_;
 
   // Used on the renderer and IPC threads.
   scoped_refptr<BlobMessageFilter> blob_message_filter_;
   scoped_refptr<AudioInputMessageFilter> audio_input_message_filter_;
   scoped_refptr<MidiMessageFilter> midi_message_filter_;
   scoped_refptr<DevToolsAgentFilter> devtools_agent_message_filter_;
+  scoped_refptr<ServiceWorkerMessageFilter> service_worker_message_filter_;
+  scoped_refptr<ChildResourceMessageFilter> resource_message_filter_;
+  scoped_refptr<QuotaMessageFilter> quota_message_filter_;
 
   std::unique_ptr<BrowserPluginManager> browser_plugin_manager_;
 
@@ -653,6 +682,8 @@ class CONTENT_EXPORT RenderThreadImpl
   std::unique_ptr<VideoCaptureImplManager> vc_manager_;
 
   std::unique_ptr<viz::ClientSharedBitmapManager> shared_bitmap_manager_;
+
+  scoped_refptr<NotificationDispatcher> notification_dispatcher_;
 
   // The time Blink was initialized. Used for UMA.
   base::TimeTicks blink_initialized_time_;

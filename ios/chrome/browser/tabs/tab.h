@@ -12,14 +12,12 @@
 
 #import "components/signin/ios/browser/manage_accounts_delegate.h"
 #import "ios/chrome/browser/web/page_placeholder_tab_helper_delegate.h"
-#import "ios/chrome/browser/web/sad_tab_tab_helper_delegate.h"
 #include "ios/net/request_tracker.h"
 #include "ios/web/public/user_agent.h"
 #include "ui/base/page_transition_types.h"
 
 @protocol ApplicationCommands;
 @class AutofillController;
-@class AutoReloadBridge;
 @protocol BrowserCommands;
 @protocol IOSCaptivePortalBlockingPageDelegate;
 @class CastController;
@@ -86,27 +84,17 @@ extern NSString* const kProxyPassthroughHeaderValue;
 // Chrome's WebContents in that it encapsulates rendering. Acts as the
 // delegate for the WebState in order to process info about pages having
 // loaded.
-@interface Tab : NSObject<ManageAccountsDelegate,
-                          PagePlaceholderTabHelperDelegate,
-                          SadTabTabHelperDelegate>
+@interface Tab
+    : NSObject<ManageAccountsDelegate, PagePlaceholderTabHelperDelegate>
 
 // Browser state associated with this Tab.
 @property(nonatomic, readonly) ios::ChromeBrowserState* browserState;
-
-// Returns the URL of the last committed NavigationItem for this Tab.
-@property(nonatomic, readonly) const GURL& lastCommittedURL;
-
-// Returns the URL of the visible NavigationItem for this Tab.
-@property(nonatomic, readonly) const GURL& visibleURL;
 
 // The Passkit Dialog provider used to show the UI to download a passkit object.
 @property(nonatomic, weak) id<PassKitDialogProvider> passKitDialogProvider;
 
 // The current title of the tab.
 @property(nonatomic, readonly) NSString* title;
-
-// Original page title or nil if the page did not provide one.
-@property(nonatomic, readonly) NSString* originalTitle;
 
 @property(nonatomic, readonly) NSString* urlDisplayString;
 
@@ -146,7 +134,6 @@ extern NSString* const kProxyPassthroughHeaderValue;
 // TODO(crbug.com/661663): Should this property abstract away the concept of
 // prerendering?  Maybe this can move to the TabDelegate interface.
 @property(nonatomic, assign) BOOL isPrerenderTab;
-@property(nonatomic, assign) BOOL isLinkLoadingPrerenderTab;
 @property(nonatomic, assign) BOOL isVoiceSearchResultsTab;
 
 // |YES| if the tab has finished loading.
@@ -165,15 +152,6 @@ extern NSString* const kProxyPassthroughHeaderValue;
 // not already have a parent tab model set.
 // TODO(crbug.com/228575): Create a delegate interface and remove this.
 - (void)setParentTabModel:(TabModel*)model;
-
-// Triggers the asynchronous loading of the tab's favicon. This will be done
-// automatically when a page loads, but this can be used to trigger favicon
-// fetch earlier (e.g., for a tab that will be shown without loading).
-- (void)fetchFavicon;
-
-// Returns the favicon for the page currently being shown in this Tab, or |nil|
-// if the current page has no favicon.
-- (UIImage*)favicon;
 
 // The view to display in the view hierarchy based on the current URL. Won't be
 // nil. It is up to the caller to size the view and confirm |webUsageEnabled|.
@@ -255,6 +233,9 @@ extern NSString* const kProxyPassthroughHeaderValue;
 
 // Called when the snapshot of the content will be taken.
 - (void)willUpdateSnapshot;
+
+// Requests deletion of the Tab snapshot.
+- (void)removeSnapshot;
 
 // Called when this tab is shown.
 - (void)wasShown;

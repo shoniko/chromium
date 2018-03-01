@@ -62,7 +62,7 @@ class PLATFORM_EXPORT CachingWordShapeIterator final {
       spacing_.SetSpacingAndExpansion(font->GetFontDescription());
   }
 
-  bool Next(RefPtr<const ShapeResult>* word_result) {
+  bool Next(scoped_refptr<const ShapeResult>* word_result) {
     if (UNLIKELY(text_run_.AllowTabs()))
       return NextForAllowTabs(word_result);
 
@@ -71,26 +71,26 @@ class PLATFORM_EXPORT CachingWordShapeIterator final {
         return false;
       *word_result = ShapeWord(text_run_, font_);
       start_index_ = 1;
-      return word_result->Get();
+      return word_result->get();
     }
 
     return NextWord(word_result);
   }
 
  private:
-  PassRefPtr<const ShapeResult> ShapeWordWithoutSpacing(const TextRun&,
-                                                        const Font*);
+  scoped_refptr<const ShapeResult> ShapeWordWithoutSpacing(const TextRun&,
+                                                    const Font*);
 
-  PassRefPtr<const ShapeResult> ShapeWord(const TextRun& word_run,
-                                          const Font* font) {
+  scoped_refptr<const ShapeResult> ShapeWord(const TextRun& word_run,
+                                      const Font* font) {
     if (LIKELY(!spacing_.HasSpacing()))
       return ShapeWordWithoutSpacing(word_run, font);
 
-    RefPtr<const ShapeResult> result = ShapeWordWithoutSpacing(word_run, font);
+    scoped_refptr<const ShapeResult> result = ShapeWordWithoutSpacing(word_run, font);
     return result->ApplySpacingToCopy(spacing_, word_run);
   }
 
-  bool NextWord(RefPtr<const ShapeResult>* word_result) {
+  bool NextWord(scoped_refptr<const ShapeResult>* word_result) {
     return ShapeToEndIndex(word_result, NextWordEndIndex());
   }
 
@@ -151,7 +151,7 @@ class PLATFORM_EXPORT CachingWordShapeIterator final {
     return length;
   }
 
-  bool ShapeToEndIndex(RefPtr<const ShapeResult>* result, unsigned end_index) {
+  bool ShapeToEndIndex(scoped_refptr<const ShapeResult>* result, unsigned end_index) {
     if (!end_index || end_index <= start_index_)
       return false;
 
@@ -165,7 +165,7 @@ class PLATFORM_EXPORT CachingWordShapeIterator final {
       *result = ShapeWord(sub_run, font_);
     }
     start_index_ = end_index;
-    return result->Get();
+    return result->get();
   }
 
   unsigned EndIndexUntil(UChar ch) const {
@@ -177,7 +177,7 @@ class PLATFORM_EXPORT CachingWordShapeIterator final {
     }
   }
 
-  bool NextForAllowTabs(RefPtr<const ShapeResult>* word_result) {
+  bool NextForAllowTabs(scoped_refptr<const ShapeResult>* word_result) {
     unsigned length = text_run_.length();
     if (start_index_ >= length)
       return false;

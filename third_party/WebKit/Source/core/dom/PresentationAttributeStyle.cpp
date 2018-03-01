@@ -34,7 +34,7 @@
 #include "core/css/StylePropertySet.h"
 #include "core/dom/Attribute.h"
 #include "core/dom/Element.h"
-#include "core/html/HTMLInputElement.h"
+#include "core/html/forms/HTMLInputElement.h"
 #include "platform/Timer.h"
 #include "platform/scheduler/child/web_scheduler.h"
 #include "platform/wtf/HashFunctions.h"
@@ -63,7 +63,7 @@ static bool operator!=(const PresentationAttributeCacheKey& a,
 struct PresentationAttributeCacheEntry final
     : public GarbageCollectedFinalized<PresentationAttributeCacheEntry> {
  public:
-  DEFINE_INLINE_TRACE() { visitor->Trace(value); }
+  void Trace(blink::Visitor* visitor) { visitor->Trace(value); }
 
   PresentationAttributeCacheKey key;
   Member<StylePropertySet> value;
@@ -140,7 +140,7 @@ static void MakePresentationAttributeCacheKey(
     return;
   // Interpretation of the size attributes on <input> depends on the type
   // attribute.
-  if (isHTMLInputElement(element))
+  if (IsHTMLInputElement(element))
     return;
   AttributeCollection attributes = element.AttributesWithoutUpdate();
   for (const Attribute& attr : attributes) {

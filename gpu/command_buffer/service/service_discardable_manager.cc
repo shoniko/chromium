@@ -11,30 +11,16 @@
 
 namespace gpu {
 namespace {
-// TODO(ericrk): AmountOfPhysicalMemoryMB is broken in the GPU proc on Linux.
-// Use 0 on Linux for now, causing us to pick our normal cache sizes. GPU
-// discardable is currently only used in production by GPU raster, which is not
-// enabled on Linux. crbug.com/743271
-#if !defined(OS_ANDROID)
-int AmountOfPhysicalMemoryWithWorkaround() {
-#if defined(OS_LINUX)
-  return 0;
-#else
-  return base::SysInfo::AmountOfPhysicalMemoryMB();
-#endif
-}
-#endif  // !defined(OS_ANDROID)
-
 size_t CacheSizeLimit() {
 // Cache size values are designed to roughly correspond to existing image cache
-// sizes for 2-3 renderers. These will be updated as more types of data are
+// sizes for 1-1.5 renderers. These will be updated as more types of data are
 // moved to this cache.
 #if defined(OS_ANDROID)
   const size_t kLowEndCacheSizeBytes = 512 * 1024;
   const size_t kNormalCacheSizeBytes = 128 * 1024 * 1024;
 #else
-  const size_t kNormalCacheSizeBytes = 384 * 1024 * 1024;
-  const size_t kLargeCacheSizeBytes = 512 * 1024 * 1024;
+  const size_t kNormalCacheSizeBytes = 192 * 1024 * 1024;
+  const size_t kLargeCacheSizeBytes = 256 * 1024 * 1024;
   // Device ram threshold at which we move from a normal cache to a large cache.
   // While this is a GPU memory cache, we can't read GPU memory reliably, so we
   // use system ram as a proxy.
@@ -48,7 +34,7 @@ size_t CacheSizeLimit() {
     return kNormalCacheSizeBytes;
   }
 #else
-  if (AmountOfPhysicalMemoryWithWorkaround() <
+  if (base::SysInfo::AmountOfPhysicalMemoryMB() <
       kLargeCacheSizeMemoryThresholdMB) {
     return kNormalCacheSizeBytes;
   } else {

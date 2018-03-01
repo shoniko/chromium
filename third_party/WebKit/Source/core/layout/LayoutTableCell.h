@@ -37,7 +37,7 @@
 
 namespace blink {
 
-#define BITS_OF_ABSOLUTE_COLUMN_INDEX 26
+#define BITS_OF_ABSOLUTE_COLUMN_INDEX 25
 static const unsigned kUnsetColumnIndex =
     (1u << BITS_OF_ABSOLUTE_COLUMN_INDEX) - 1;
 static const unsigned kMaxColumnIndex = kUnsetColumnIndex - 1;
@@ -345,10 +345,13 @@ class CORE_EXPORT LayoutTableCell final : public LayoutBlockFlow {
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
   void ComputePreferredLogicalWidths() override;
 
-  void AddLayerHitTestRects(LayerHitTestRects&,
-                            const PaintLayer* current_composited_layer,
-                            const LayoutPoint& layer_offset,
-                            const LayoutRect& container_rect) const override;
+  void AddLayerHitTestRects(
+      LayerHitTestRects&,
+      const PaintLayer* current_composited_layer,
+      const LayoutPoint& layer_offset,
+      TouchAction supported_fast_actions,
+      const LayoutRect& container_rect,
+      TouchAction container_whitelisted_touch_action) const override;
 
   PaintInvalidationReason InvalidatePaint(
       const PaintInvalidatorContext&) const override;
@@ -493,8 +496,9 @@ class CORE_EXPORT LayoutTableCell final : public LayoutBlockFlow {
   unsigned is_spanning_collapsed_row_ : 1;
   unsigned is_spanning_collapsed_column_ : 1;
 
-  // This is set when collapsed_border_values_ needs recalculation.
+  // This is set to false when |collapsed_border_values_| needs update.
   mutable unsigned collapsed_border_values_valid_ : 1;
+  mutable unsigned collapsed_borders_need_paint_invalidation_ : 1;
   mutable std::unique_ptr<CollapsedBorderValues> collapsed_border_values_;
 
   // The intrinsic padding.

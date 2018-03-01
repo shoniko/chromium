@@ -13,6 +13,7 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "mojo/edk/system/channel.h"
+#include "mojo/edk/system/configuration.h"
 #include "mojo/edk/system/request_context.h"
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
@@ -517,11 +518,8 @@ void NodeChannel::OnChannelMessage(const void* payload,
   // RELAY_EVENT_MESSAGE.
   {
     MachPortRelay* relay = delegate_->GetMachPortRelay();
-    if (handles && !relay) {
-      if (!MachPortRelay::ReceivePorts(handles.get())) {
-        LOG(ERROR) << "Error receiving mach ports.";
-      }
-    }
+    if (handles && !relay)
+      MachPortRelay::ReceivePorts(handles.get());
   }
 #endif  // defined(OS_WIN)
 
@@ -818,11 +816,7 @@ void NodeChannel::ProcessPendingMessagesWithMachPorts() {
   while (!pending_writes.empty()) {
     Channel::MessagePtr message = std::move(pending_writes.front());
     pending_writes.pop();
-    if (!relay->SendPortsToProcess(message.get(), remote_process_handle)) {
-      LOG(ERROR) << "Error on sending mach ports. Remote process is likely "
-                 << "gone. Dropping message.";
-      return;
-    }
+    relay->SendPortsToProcess(message.get(), remote_process_handle);
 
     base::AutoLock lock(channel_lock_);
     if (!channel_) {
@@ -898,14 +892,16 @@ void NodeChannel::WriteChannelMessage(Channel::MessagePtr message) {
         }
       }
 
-      if (!relay->SendPortsToProcess(message.get(), remote_process_handle)) {
-        LOG(ERROR) << "Error on sending mach ports. Remote process is likely "
-                   << "gone. Dropping message.";
-        return;
-      }
+      relay->SendPortsToProcess(message.get(), remote_process_handle);
     }
   }
 #endif
+
+  // Force a crash if this process attempts to send a message larger than the
+  // maximum allowed size. This is more useful than killing a Channel when we
+  // *receive* an oversized message, as we should consider oversized message
+  // transmission to be a bug and this helps easily identify offending code.
+  CHECK(message->data_num_bytes() < GetConfiguration().max_message_num_bytes);
 
   base::AutoLock lock(channel_lock_);
   if (!channel_)

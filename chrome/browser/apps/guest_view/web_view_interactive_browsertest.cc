@@ -309,8 +309,10 @@ class WebViewInteractiveTestBase : public extensions::PlatformAppBrowserTest {
     guest_observer.Wait();
     content::Source<content::NavigationController> source =
         guest_observer.source();
-    EXPECT_TRUE(source->GetWebContents()->GetRenderProcessHost()->
-        IsForGuestsOnly());
+    EXPECT_TRUE(source->GetWebContents()
+                    ->GetMainFrame()
+                    ->GetProcess()
+                    ->IsForGuestsOnly());
 
     guest_web_contents_ = source->GetWebContents();
     embedder_web_contents_ =
@@ -617,6 +619,17 @@ class WebViewPointerLockInteractiveTest : public WebViewInteractiveTest {};
 
 // The tests below aren't needed in --use-cross-process-frames-for-guests.
 class WebViewContextMenuInteractiveTest : public WebViewInteractiveTestBase {};
+class WebViewBrowserPluginInteractiveTest : public WebViewInteractiveTestBase {
+ public:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    WebViewInteractiveTestBase::SetUpCommandLine(command_line);
+    scoped_feature_list_.InitAndDisableFeature(
+        features::kGuestViewCrossProcessFrames);
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
 
 // The following class of tests do not work for OOPIF <webview>.
 // TODO(ekaramad): Make this tests work with OOPIF and replace the test classes
@@ -1195,6 +1208,57 @@ IN_PROC_BROWSER_TEST_F(WebViewContextMenuInteractiveTest,
   }
 }
 
+// https://crbug.com/754890: The embedder could become out of sync and think
+// that the guest is not focused when the guest actually was.
+IN_PROC_BROWSER_TEST_F(WebViewBrowserPluginInteractiveTest, EnsureFocusSynced) {
+  LoadAndLaunchPlatformApp("web_view/focus_sync", "WebViewTest.LAUNCHED");
+
+  content::WebContents* embedder_web_contents = GetFirstAppWindowWebContents();
+  content::WebContents* guest_web_contents =
+      GetGuestViewManager()->WaitForSingleGuestCreated();
+
+  content::MainThreadFrameObserver embedder_observer(
+      embedder_web_contents->GetMainFrame()->GetView()->GetRenderWidgetHost());
+  content::MainThreadFrameObserver guest_observer(
+      guest_web_contents->GetMainFrame()->GetView()->GetRenderWidgetHost());
+  embedder_observer.Wait();
+  guest_observer.Wait();
+
+  ExtensionTestMessageListener listener{"WebViewTest.WEBVIEW_LOADED", false};
+  EXPECT_TRUE(ui_test_utils::ShowAndFocusNativeWindow(GetPlatformAppWindow()));
+  EXPECT_TRUE(content::ExecuteScript(embedder_web_contents,
+                                     "chrome.app.window.getAll()[0].focus()"));
+
+  // Embedder should be focused.
+  EXPECT_EQ(guest_web_contents,
+            content::GetFocusedWebContents(guest_web_contents));
+  listener.WaitUntilSatisfied();
+
+  // Check that the inner contents is correctly focused.
+  bool result;
+  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
+      guest_web_contents,
+      "window.requestAnimationFrame(function() {"
+      "  window.domAutomationController.send(checkValid());"
+      "});",
+      &result));
+  EXPECT_TRUE(result);
+
+  listener.Reset();
+  EXPECT_TRUE(
+      content::ExecuteScript(embedder_web_contents, "reloadWebview();"));
+  listener.WaitUntilSatisfied();
+
+  // Check that the inner contents is correctly focused after a reload.
+  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
+      guest_web_contents,
+      "window.requestAnimationFrame(function() {"
+      "  window.domAutomationController.send(checkValid());"
+      "});",
+      &result));
+  EXPECT_TRUE(result);
+}
+
 IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, ExecuteCode) {
   ASSERT_TRUE(RunPlatformAppTestWithArg(
       "platform_apps/web_view/common", "execute_code")) << message_;
@@ -1483,7 +1547,7 @@ IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, TextSelection) {
       guest_web_contents()->GetRenderWidgetHostView();
   ASSERT_TRUE(guest_rwhv);
   std::string selected_text = base::UTF16ToUTF8(guest_rwhv->GetSelectedText());
-  ASSERT_TRUE(selected_text.size() >= 10u);
+  ASSERT_GE(selected_text.size(), 10u);
   ASSERT_EQ("AAAAAAAAAA", selected_text.substr(0, 10));
 }
 
@@ -1502,7 +1566,7 @@ IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, WordLookup) {
 
   auto guest_message_filter =
       browser_client.GetTextInputClientMessageFilterForProcess(
-          guest_web_contents()->GetRenderProcessHost());
+          guest_web_contents()->GetMainFrame()->GetProcess());
   ASSERT_TRUE(guest_message_filter);
 
   // Lookup some string through context menu.

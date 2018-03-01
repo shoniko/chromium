@@ -13,7 +13,6 @@
 #include "base/base64.h"
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
@@ -125,7 +124,7 @@ std::unique_ptr<HttpResponse> HandleFileRequest(
     const HttpRequest& request) {
   // This is a test-only server. Ignore I/O thread restrictions.
   // TODO(svaldez): Figure out why thread is I/O restricted in the first place.
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
 
   // A proxy request will have an absolute path. Simulate the proxy by stripping
   // the scheme, host, and port.

@@ -603,7 +603,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest,
 // a handler accepts "".
 IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest,
                        LaunchWithFileEmptyExtension) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   base::FilePath test_file;
@@ -618,7 +618,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest,
 // a handler accepts *.
 IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest,
                        LaunchWithFileEmptyExtensionAcceptAny) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   base::FilePath test_file;
@@ -727,7 +727,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest, GetDisplayPath) {
 // Tests that the file is created if the file does not exist and the app has the
 // fileSystem.write permission.
 IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest, LaunchNewFile) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   ASSERT_TRUE(RunPlatformAppTestWithFile(
@@ -752,9 +752,10 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MutationEventsDisabled) {
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/mutation_events")) << message_;
 }
 
-// This appears to be unreliable on linux.
+// This appears to be unreliable.
 // TODO(stevenjb): Investigate and enable
-#if defined(OS_LINUX) && !defined(USE_ASH)
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS) || defined(OS_WIN) || \
+    defined(OS_MACOSX)
 #define MAYBE_AppWindowRestoreState DISABLED_AppWindowRestoreState
 #else
 #define MAYBE_AppWindowRestoreState AppWindowRestoreState
@@ -1222,7 +1223,15 @@ class PlatformAppIncognitoBrowserTest : public PlatformAppBrowserTest,
   std::set<std::string> opener_app_ids_;
 };
 
-IN_PROC_BROWSER_TEST_F(PlatformAppIncognitoBrowserTest, IncognitoComponentApp) {
+// Seen to fail repeatedly on CrOS; crbug.com/774011.
+#ifndef OS_CHROMEOS
+#define MAYBE_IncognitoComponentApp IncognitoComponentApp
+#else
+#define MAYBE_IncognitoComponentApp DISABLED_IncognitoComponentApp
+#endif
+
+IN_PROC_BROWSER_TEST_F(PlatformAppIncognitoBrowserTest,
+                       MAYBE_IncognitoComponentApp) {
   // Get the file manager app.
   const Extension* file_manager = extension_service()->GetExtensionById(
       "hhaomjibdihmijegdhdafkllkbggdgoj", false);

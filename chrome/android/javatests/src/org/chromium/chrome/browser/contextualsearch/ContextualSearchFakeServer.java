@@ -355,8 +355,9 @@ class ContextualSearchFakeServer
      */
     public class OverlayPanelContentWrapper extends OverlayPanelContent {
         OverlayPanelContentWrapper(OverlayContentDelegate contentDelegate,
-                OverlayContentProgressObserver progressObserver, ChromeActivity activity) {
-            super(contentDelegate, progressObserver, activity);
+                OverlayContentProgressObserver progressObserver, ChromeActivity activity,
+                float barHeight) {
+            super(contentDelegate, progressObserver, activity, barHeight);
         }
 
         @Override
@@ -466,7 +467,8 @@ class ContextualSearchFakeServer
 
     @Override
     public OverlayPanelContent createNewOverlayPanelContent() {
-        return new OverlayPanelContentWrapper(mContentDelegate, mProgressObserver, mActivity);
+        return new OverlayPanelContentWrapper(mContentDelegate, mProgressObserver, mActivity,
+                mManagerTest.getPanel().getBarHeight());
     }
 
     /**
@@ -638,6 +640,10 @@ class ContextualSearchFakeServer
         registerFakeTapSearch(new FakeTapSearch("german", false, 200, "Deutsche", "Deutsche",
                 "alternate-term", "", false, 0, 0, "de", "", "", "", QuickActionCategory.NONE));
 
+        // Register a resolving search of "States" that expands to "United States".
+        registerFakeSlowResolveSearch(new FakeSlowResolveSearch("states", false, 200, "States",
+                "States", "alternate-term", "", false, -7, 0, "", "", "", "",
+                QuickActionCategory.NONE));
         registerFakeSlowResolveSearch(new FakeSlowResolveSearch(
                 "search", false, 200, "Search", "Search", "alternate-term", "", false, 0, 0, "",
                 "", "", "", QuickActionCategory.NONE));

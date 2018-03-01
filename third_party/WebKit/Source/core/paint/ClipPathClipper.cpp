@@ -9,13 +9,13 @@
 #include "core/layout/svg/SVGLayoutSupport.h"
 #include "core/layout/svg/SVGResources.h"
 #include "core/layout/svg/SVGResourcesCache.h"
-#include "core/paint/LayoutObjectDrawingRecorder.h"
 #include "core/paint/PaintInfo.h"
 #include "core/paint/TransformRecorder.h"
 #include "core/style/ClipPathOperation.h"
 #include "platform/graphics/paint/ClipPathDisplayItem.h"
 #include "platform/graphics/paint/ClipPathRecorder.h"
 #include "platform/graphics/paint/DrawingDisplayItem.h"
+#include "platform/graphics/paint/DrawingRecorder.h"
 #include "platform/graphics/paint/PaintController.h"
 #include "platform/graphics/paint/PaintRecordBuilder.h"
 
@@ -51,7 +51,7 @@ LayoutSVGResourceClipper* ResolveElementReference(
     return nullptr;
   SVGElement* element =
       reference_clip_path_operation.FindElement(target_node->GetTreeScope());
-  if (!isSVGClipPathElement(element) || !element->GetLayoutObject())
+  if (!IsSVGClipPathElement(element) || !element->GetLayoutObject())
     return nullptr;
   return ToLayoutSVGResourceClipper(
       ToLayoutSVGResourceContainer(element->GetLayoutObject()));
@@ -68,7 +68,7 @@ ClipPathClipper::ClipPathClipper(GraphicsContext& context,
       clipper_state_(ClipperState::kNotApplied),
       layout_object_(layout_object),
       context_(context) {
-  if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled())
+  if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled())
     return;
   if (clip_path_operation.GetType() == ClipPathOperation::SHAPE) {
     ShapeClipPathOperation& shape =
@@ -106,7 +106,7 @@ ClipPathClipper::ClipPathClipper(GraphicsContext& context,
 }
 
 ClipPathClipper::~ClipPathClipper() {
-  if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled())
+  if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled())
     return;
   if (resource_clipper_)
     FinishEffect();
@@ -126,7 +126,7 @@ bool ClipPathClipper::PrepareEffect(const FloatRect& target_bounding_box,
   SVGClipExpansionCycleHelper in_clip_expansion_change(*resource_clipper_);
 
   AffineTransform animated_local_transform =
-      toSVGClipPathElement(resource_clipper_->GetElement())
+      ToSVGClipPathElement(resource_clipper_->GetElement())
           ->CalculateTransform(SVGElement::kIncludeMotionTransform);
   // When drawing a clip for non-SVG elements, the CTM does not include the zoom
   // factor.  In this case, we need to apply the zoom scale explicitly - but
@@ -178,8 +178,8 @@ bool ClipPathClipper::DrawClipAsMask(const FloatRect& target_bounding_box,
                                      const FloatRect& target_visual_rect,
                                      const AffineTransform& local_transform,
                                      const FloatPoint& layer_position_offset) {
-  if (LayoutObjectDrawingRecorder::UseCachedDrawingIfPossible(
-          context_, layout_object_, DisplayItem::kSVGClip))
+  if (DrawingRecorder::UseCachedDrawingIfPossible(context_, layout_object_,
+                                                  DisplayItem::kSVGClip))
     return true;
 
   PaintRecordBuilder mask_builder(target_visual_rect, nullptr, &context_);
@@ -215,8 +215,8 @@ bool ClipPathClipper::DrawClipAsMask(const FloatRect& target_bounding_box,
     }
   }
 
-  LayoutObjectDrawingRecorder drawing_recorder(
-      context_, layout_object_, DisplayItem::kSVGClip, target_visual_rect);
+  DrawingRecorder recorder(context_, layout_object_, DisplayItem::kSVGClip,
+                           target_visual_rect);
   context_.DrawRecord(mask_builder.EndRecording());
   return true;
 }

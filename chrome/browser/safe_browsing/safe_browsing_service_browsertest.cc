@@ -49,7 +49,6 @@
 #include "chrome/browser/safe_browsing/safe_browsing_database.h"
 #include "chrome/browser/safe_browsing/test_safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/ui_manager.h"
-#include "chrome/browser/safe_browsing/v4_test_utils.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -61,14 +60,16 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/common/safebrowsing_switches.h"
-#include "components/safe_browsing_db/database_manager.h"
-#include "components/safe_browsing_db/metadata.pb.h"
-#include "components/safe_browsing_db/test_database_manager.h"
-#include "components/safe_browsing_db/util.h"
-#include "components/safe_browsing_db/v4_database.h"
-#include "components/safe_browsing_db/v4_feature_list.h"
-#include "components/safe_browsing_db/v4_get_hash_protocol_manager.h"
-#include "components/safe_browsing_db/v4_protocol_manager_util.h"
+#include "components/safe_browsing/db/database_manager.h"
+#include "components/safe_browsing/db/metadata.pb.h"
+#include "components/safe_browsing/db/notification_types.h"
+#include "components/safe_browsing/db/test_database_manager.h"
+#include "components/safe_browsing/db/util.h"
+#include "components/safe_browsing/db/v4_database.h"
+#include "components/safe_browsing/db/v4_feature_list.h"
+#include "components/safe_browsing/db/v4_get_hash_protocol_manager.h"
+#include "components/safe_browsing/db/v4_protocol_manager_util.h"
+#include "components/safe_browsing/db/v4_test_util.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
@@ -322,9 +323,6 @@ class TestSafeBrowsingDatabase : public SafeBrowsingDatabase {
     return true;
   }
   bool ContainsDownloadWhitelistedUrl(const GURL& url) override { return true; }
-  bool ContainsModuleWhitelistedString(const std::string& str) override {
-    return true;
-  }
   bool ContainsExtensionPrefixes(const std::vector<SBPrefix>& prefixes,
                                  std::vector<SBPrefix>* prefix_hits) override {
     return false;
@@ -452,8 +450,7 @@ class TestSafeBrowsingDatabaseFactory : public SafeBrowsingDatabaseFactory {
       bool enable_download_whitelist,
       bool enable_extension_blacklist,
       bool enable_ip_blacklist,
-      bool enabled_unwanted_software_list,
-      bool enable_module_whitelist) override {
+      bool enabled_unwanted_software_list) override {
     db_ = new TestSafeBrowsingDatabase();
     return base::WrapUnique(db_);
   }
@@ -1513,7 +1510,7 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingServiceTest, StartAndStop) {
   EXPECT_TRUE(csd_service->enabled());
 
   // Add a new Profile. SBS should keep running.
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   ASSERT_TRUE(temp_profile_dir_.CreateUniqueTempDir());
   std::unique_ptr<Profile> profile2(Profile::CreateProfile(
       temp_profile_dir_.GetPath(), nullptr, Profile::CREATE_MODE_SYNCHRONOUS));
@@ -1707,7 +1704,7 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingServiceShutdownTest,
   // the profile will get destroyed in the normal browser shutdown process.
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     ASSERT_TRUE(temp_profile_dir_.CreateUniqueTempDir());
   }
   profile_manager->CreateProfileAsync(
@@ -1875,7 +1872,7 @@ class SafeBrowsingDatabaseManagerCookieTest : public InProcessBrowserTest {
 IN_PROC_BROWSER_TEST_F(SafeBrowsingDatabaseManagerCookieTest,
                        TestSBUpdateCookies) {
   content::WindowedNotificationObserver observer(
-      chrome::NOTIFICATION_SAFE_BROWSING_UPDATE_COMPLETE,
+      NOTIFICATION_SAFE_BROWSING_UPDATE_COMPLETE,
       content::Source<SafeBrowsingDatabaseManager>(
           sb_factory_->test_safe_browsing_service()->database_manager().get()));
   BrowserThread::PostTask(
@@ -1924,8 +1921,10 @@ class V4SafeBrowsingServiceTest : public SafeBrowsingServiceTest {
   void MarkUrlForListIdUnexpired(const GURL& bad_url,
                                  const ListIdentifier& list_id,
                                  ThreatPatternType threat_pattern_type) {
+    ThreatMetadata metadata;
+    metadata.threat_pattern_type = threat_pattern_type;
     FullHashInfo full_hash_info =
-        GetFullHashInfoWithMetadata(bad_url, list_id, threat_pattern_type);
+        GetFullHashInfoWithMetadata(bad_url, list_id, metadata);
     v4_db_factory_->MarkPrefixAsBad(list_id, full_hash_info.full_hash);
     v4_get_hash_factory_->AddToFullHashCache(full_hash_info);
   }

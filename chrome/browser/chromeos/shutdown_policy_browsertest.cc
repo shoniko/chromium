@@ -27,7 +27,6 @@
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
 #include "chrome/browser/chromeos/policy/device_policy_builder.h"
 #include "chrome/browser/chromeos/policy/device_policy_cros_browser_test.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
@@ -35,6 +34,7 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_session_manager_client.h"
 #include "chromeos/dbus/session_manager_client.h"
+#include "components/policy/proto/chrome_device_policy.pb.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -146,7 +146,7 @@ class ShutdownPolicyInSessionTest
   // Opens the system tray menu. This creates the tray views.
   void OpenSystemTrayMenu() {
     ash::Shell::Get()->GetPrimarySystemTray()->ShowDefaultView(
-        ash::BUBBLE_CREATE_NEW);
+        ash::BUBBLE_CREATE_NEW, false /* show_by_click */);
   }
 
   // Closes the system tray menu. This deletes the tray views.
@@ -249,6 +249,11 @@ class ShutdownPolicyLockerTest : public ShutdownPolicyBaseTest {
 
     // Wait for the login UI to be ready.
     WaitUntilOobeUIIsReady(web_ui_screen_locker->GetOobeUI());
+  }
+
+  void TearDownOnMainThread() override {
+    ScreenLocker::Hide();
+    ShutdownPolicyBaseTest::TearDownOnMainThread();
   }
 
  private:

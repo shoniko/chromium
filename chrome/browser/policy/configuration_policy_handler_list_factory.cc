@@ -36,6 +36,7 @@
 #include "components/network_time/network_time_pref_names.h"
 #include "components/ntp_snippets/pref_names.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
+#include "components/policy/core/browser/autofill_credit_card_policy_handler.h"
 #include "components/policy/core/browser/autofill_policy_handler.h"
 #include "components/policy/core/browser/configuration_policy_handler.h"
 #include "components/policy/core/browser/configuration_policy_handler_list.h"
@@ -73,6 +74,7 @@
 #include "chrome/browser/policy/default_geolocation_policy_handler.h"
 #include "chromeos/chromeos_pref_names.h"
 #include "chromeos/dbus/power_policy_controller.h"
+#include "components/arc/arc_prefs.h"
 #include "components/drive/drive_pref_names.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
@@ -281,6 +283,11 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kAllowCrossOriginAuthPrompt,
     prefs::kAllowCrossOriginAuthPrompt,
     base::Value::Type::BOOLEAN },
+#if defined(OS_POSIX)
+  { key::kNtlmV2Enabled,
+    prefs::kNtlmV2Enabled,
+    base::Value::Type::BOOLEAN },
+#endif  // defined(OS_POSIX)
   { key::kDisable3DAPIs,
     prefs::kDisable3DAPIs,
     base::Value::Type::BOOLEAN },
@@ -313,6 +320,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     base::Value::Type::BOOLEAN },
   { key::kAllowOutdatedPlugins,
     prefs::kPluginsAllowOutdated,
+    base::Value::Type::BOOLEAN },
+  { key::kRunAllFlashInAllowMode,
+    prefs::kRunAllFlashInAllowMode,
     base::Value::Type::BOOLEAN },
   { key::kAlwaysAuthorizePlugins,
     prefs::kPluginsAlwaysAuthorize,
@@ -572,13 +582,13 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     prefs::kUnifiedDesktopEnabledByDefault,
     base::Value::Type::BOOLEAN },
   { key::kArcEnabled,
-    prefs::kArcEnabled,
+    arc::prefs::kArcEnabled,
     base::Value::Type::BOOLEAN },
   { key::kArcBackupRestoreEnabled,
-    prefs::kArcBackupRestoreEnabled,
+    arc::prefs::kArcBackupRestoreEnabled,
     base::Value::Type::BOOLEAN },
   { key::kArcLocationServiceEnabled,
-    prefs::kArcLocationServiceEnabled,
+    arc::prefs::kArcLocationServiceEnabled,
     base::Value::Type::BOOLEAN },
   { key::kReportArcStatusEnabled,
     prefs::kReportArcStatusEnabled,
@@ -587,7 +597,7 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     prefs::kRecommendedNativePrinters,
     base::Value::Type::LIST },
   { key::kEcryptfsMigrationStrategy,
-    prefs::kEcryptfsMigrationStrategy,
+    arc::prefs::kEcryptfsMigrationStrategy,
     base::Value::Type::INTEGER },
   { key::kNativePrintersBulkAccessMode,
     prefs::kRecommendedNativePrintersAccessMode,
@@ -877,6 +887,7 @@ std::unique_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
         kSimplePolicyMap[i].value_type));
   }
 
+  handlers->AddHandler(base::MakeUnique<AutofillCreditCardPolicyHandler>());
   handlers->AddHandler(base::MakeUnique<AutofillPolicyHandler>());
   handlers->AddHandler(base::MakeUnique<DefaultSearchPolicyHandler>());
   handlers->AddHandler(base::MakeUnique<ForceSafeSearchPolicyHandler>());

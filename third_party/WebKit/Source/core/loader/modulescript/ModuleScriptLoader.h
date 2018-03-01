@@ -62,7 +62,7 @@ class CORE_EXPORT ModuleScriptLoader final
   bool IsInitialState() const { return state_ == State::kInitial; }
   bool HasFinished() const { return state_ == State::kFinished; }
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   ModuleScriptLoader(Modulator*,
@@ -76,8 +76,7 @@ class CORE_EXPORT ModuleScriptLoader final
 
   Member<Modulator> modulator_;
   State state_ = State::kInitial;
-  String nonce_;
-  ParserDisposition parser_state_;
+  ScriptFetchOptions options_;
   Member<ModuleScript> module_script_;
   Member<ModuleScriptLoaderRegistry> registry_;
   Member<ModuleScriptLoaderClient> client_;

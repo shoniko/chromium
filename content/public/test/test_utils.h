@@ -59,10 +59,7 @@ void RunAllPendingInMessageLoop(BrowserThread::ID thread_id);
 
 // Runs until the blocking pool, task scheduler, and the current message loop
 // are all empty (have no more scheduled tasks) and no tasks are running.
-//
-// TODO(fdoray): Rename to RunAllTaskSchedulerTasksUntilIdle() once the blocking
-// pool is fully deprecated. https://crbug.com/667892
-void RunAllBlockingPoolTasksUntilIdle();
+void RunAllTasksUntilIdle();
 
 // Get task to quit the given RunLoop. It allows a few generations of pending
 // tasks to run as opposed to run_loop->QuitClosure().
@@ -94,10 +91,12 @@ void ResetSchemesAndOriginsWhitelist();
 //
 // Note that a dummy trial and trial group will be registered behind the scenes.
 // See also variations::testing::VariationsParamsManager class.
-void EnableFeatureWithParam(const base::Feature& feature,
-                            const std::string& param_name,
-                            const std::string& param_value,
-                            base::CommandLine* command_line);
+// This method is deprecated because we want to unify the FeatureList change to
+// ScopedFeatureList. See crbug.com/713390
+void DeprecatedEnableFeatureWithParam(const base::Feature& feature,
+                                      const std::string& param_name,
+                                      const std::string& param_value,
+                                      base::CommandLine* command_line);
 
 // Helper class to Run and Quit the message loop. Run and Quit can only happen
 // once per instance. Make a new instance for each use. Calling Quit after Run

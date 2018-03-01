@@ -19,11 +19,11 @@ namespace blink {
 
 class SVGPathNonInterpolableValue : public NonInterpolableValue {
  public:
-  virtual ~SVGPathNonInterpolableValue() {}
+  ~SVGPathNonInterpolableValue() override {}
 
-  static RefPtr<SVGPathNonInterpolableValue> Create(
+  static scoped_refptr<SVGPathNonInterpolableValue> Create(
       Vector<SVGPathSegType>& path_seg_types) {
-    return AdoptRef(new SVGPathNonInterpolableValue(path_seg_types));
+    return WTF::AdoptRef(new SVGPathNonInterpolableValue(path_seg_types));
   }
 
   const Vector<SVGPathSegType>& PathSegTypes() const { return path_seg_types_; }
@@ -128,7 +128,7 @@ InterpolationValue PathInterpolationFunctions::MaybeConvertNeutral(
                                   ->CloneAndZero());
   result->Set(kPathNeutralIndex, InterpolableNumber::Create(1));
   return InterpolationValue(std::move(result),
-                            underlying.non_interpolable_value.Get());
+                            underlying.non_interpolable_value.get());
 }
 
 static bool PathSegTypesMatch(const Vector<SVGPathSegType>& a,
@@ -183,7 +183,7 @@ void PathInterpolationFunctions::Composite(
   underlying_value_owner.MutableValue().interpolable_value->ScaleAndAdd(
       neutral_component, *value.interpolable_value);
   underlying_value_owner.MutableValue().non_interpolable_value =
-      value.non_interpolable_value.Get();
+      value.non_interpolable_value.get();
 }
 
 std::unique_ptr<SVGPathByteStream> PathInterpolationFunctions::AppliedValue(

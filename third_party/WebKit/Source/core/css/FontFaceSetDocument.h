@@ -103,7 +103,8 @@ class CORE_EXPORT FontFaceSetDocument final
 
   void AddFontFacesToFontFaceCache(FontFaceCache*);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
+  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  private:
   FontFaceSetIterable::IterationSource* StartIteration(

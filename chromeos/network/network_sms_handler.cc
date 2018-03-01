@@ -8,12 +8,12 @@
 #include <stdint.h>
 
 #include <algorithm>
-#include <deque>
+#include <memory>
 #include <vector>
 
 #include "base/bind.h"
+#include "base/containers/circular_deque.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/gsm_sms_client.h"
@@ -197,7 +197,7 @@ class NetworkSmsHandler::ModemManager1NetworkSmsDeviceHandler
   bool deleting_messages_;
   bool retrieving_messages_;
   std::vector<dbus::ObjectPath> delete_queue_;
-  std::deque<dbus::ObjectPath> retrieval_queue_;
+  base::circular_deque<dbus::ObjectPath> retrieval_queue_;
   base::WeakPtrFactory<ModemManager1NetworkSmsDeviceHandler> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ModemManager1NetworkSmsDeviceHandler);
@@ -471,11 +471,11 @@ void NetworkSmsHandler::DevicePropertiesCallback(
   dbus::ObjectPath object_path(object_path_string);
   if (service_name == modemmanager::kModemManager1ServiceName) {
     device_handlers_.push_back(
-        base::MakeUnique<ModemManager1NetworkSmsDeviceHandler>(
+        std::make_unique<ModemManager1NetworkSmsDeviceHandler>(
             this, service_name, object_path));
   } else {
     device_handlers_.push_back(
-        base::MakeUnique<ModemManagerNetworkSmsDeviceHandler>(
+        std::make_unique<ModemManagerNetworkSmsDeviceHandler>(
             this, service_name, object_path));
   }
 }

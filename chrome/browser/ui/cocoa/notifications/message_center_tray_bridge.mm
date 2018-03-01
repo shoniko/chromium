@@ -40,7 +40,7 @@ void MessageCenterTrayBridge::HidePopups() {
   popup_collection_.reset();
 }
 
-bool MessageCenterTrayBridge::ShowMessageCenter() {
+bool MessageCenterTrayBridge::ShowMessageCenter(bool show_by_click) {
   return false;
 }
 
@@ -48,10 +48,6 @@ void MessageCenterTrayBridge::HideMessageCenter() {
 }
 
 bool MessageCenterTrayBridge::ShowNotifierSettings() {
-  return false;
-}
-
-bool MessageCenterTrayBridge::IsContextMenuEnabled() const {
   return false;
 }
 

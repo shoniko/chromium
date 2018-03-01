@@ -66,9 +66,9 @@ class MODULES_EXPORT ServiceWorkerContainer final
 
   static ServiceWorkerContainer* Create(ExecutionContext*,
                                         NavigatorServiceWorker*);
-  ~ServiceWorkerContainer();
+  ~ServiceWorkerContainer() override;
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
   ServiceWorker* controller() { return controller_; }
   ScriptPromise ready(ScriptState*);
@@ -92,7 +92,7 @@ class MODULES_EXPORT ServiceWorkerContainer final
                      bool should_notify_controller_change) override;
   void DispatchMessageEvent(std::unique_ptr<WebServiceWorker::Handle>,
                             const WebString& message,
-                            WebMessagePortChannelArray) override;
+                            WebVector<MessagePortChannel>) override;
   void CountFeature(uint32_t feature) override;
 
   // EventTarget overrides.

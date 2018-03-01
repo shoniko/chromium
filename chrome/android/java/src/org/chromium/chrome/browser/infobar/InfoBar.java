@@ -103,7 +103,10 @@ public abstract class InfoBar implements InfoBarView {
         return mView;
     }
 
-    /** If this returns true, the infobar contents will be replaced with a one-line layout. */
+    /**
+     * If this returns true, the infobar contents will be replaced with a one-line layout.
+     * When overriding this, also override {@link #getAccessibilityMessage}.
+     */
     protected boolean usesCompactLayout() {
         return false;
     }
@@ -133,23 +136,29 @@ public abstract class InfoBar implements InfoBarView {
     }
 
     /**
-     * Returns the accessibility message from the view to announce when this infobar is first shown.
+     * Returns the accessibility message to announce when this infobar is first shown.
+     * Override this if the InfoBar doesn't have {@link R.id.infobar_message}. It is usually the
+     * case when it is in CompactLayout.
      */
-    protected CharSequence getAccessibilityMessage(TextView messageView) {
-        return messageView.getText();
+    protected CharSequence getAccessibilityMessage(CharSequence defaultTitle) {
+        return defaultTitle == null ? "" : defaultTitle;
     }
 
     @Override
     public CharSequence getAccessibilityText() {
         if (mView == null) return "";
-        // Compact layout doesn't have a proper view to provide meaningful message, so we return a
-        // general message to let users know there is a bar on the bottom.
-        // TODO(googleo): Fetch the accessibility message from the compact layout.
-        if (usesCompactLayout()) return mContext.getString(R.string.bottom_bar_screen_position);
+
+        CharSequence title = null;
         TextView messageView = (TextView) mView.findViewById(R.id.infobar_message);
-        if (messageView == null) return "";
-        return getAccessibilityMessage(messageView)
-                + mContext.getString(R.string.bottom_bar_screen_position);
+        if (messageView != null) {
+            title = messageView.getText();
+        }
+        title = getAccessibilityMessage(title);
+        if (title.length() > 0) {
+            title = title + " ";
+        }
+        // TODO(crbug/773717): Avoid string concatenation due to i18n.
+        return title + mContext.getString(R.string.bottom_bar_screen_position);
     }
 
     @Override

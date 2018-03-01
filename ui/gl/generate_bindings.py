@@ -27,6 +27,7 @@ UNCONDITIONALLY_BOUND_EXTENSIONS = set([
   'GL_CHROMIUM_gles_depth_binding_hack', # crbug.com/448206
   'GL_CHROMIUM_glgetstringi_hack', # crbug.com/470396
   'GL_CHROMIUM_egl_khr_fence_sync_hack', # crbug.com/504758
+  'GL_CHROMIUM_egl_android_native_fence_sync_hack', # crbug.com/775707
 ])
 
 """Function binding conditions can be specified manually by supplying a versions
@@ -1936,6 +1937,28 @@ EGL_FUNCTIONS = [
                    'GL_CHROMIUM_egl_khr_fence_sync_hack'
                  ] }],
   'arguments': 'EGLDisplay dpy, EGLSyncKHR sync' },
+{ 'return_type': 'EGLint',
+  # At least some Android O devices such as Pixel implement this
+  # but don't export the EGL_ANDROID_native_fence_sync extension.
+  'versions': [{ 'name': 'eglDupNativeFenceFDANDROID',
+                 'extensions': [
+                     'EGL_ANDROID_native_fence_sync',
+                     'GL_CHROMIUM_egl_android_native_fence_sync_hack']}],
+  'arguments':
+      'EGLDisplay dpy, EGLSyncKHR sync' },
+{ 'return_type': 'EGLBoolean',
+  'versions': [{ 'name': 'eglGetCompositorTimingANDROID',
+                 'extensions': [
+                   'EGL_ANDROID_get_frame_timestamps'
+                 ] }],
+  'arguments': 'EGLDisplay dpy, EGLSurface surface, EGLint numTimestamps, '
+               'EGLint* names, EGLnsecsANDROID* values', },
+{ 'return_type': 'EGLBoolean',
+  'versions': [{ 'name': 'eglGetCompositorTimingSupportedANDROID',
+                 'extensions': [
+                   'EGL_ANDROID_get_frame_timestamps'
+                 ] }],
+  'arguments': 'EGLDisplay dpy, EGLSurface surface, EGLint timestamp', },
 { 'return_type': 'EGLBoolean',
   'names': ['eglGetConfigAttrib'],
   'arguments':
@@ -1959,6 +1982,30 @@ EGL_FUNCTIONS = [
 { 'return_type': 'EGLint',
   'names': ['eglGetError'],
   'arguments': 'void', },
+ { 'return_type': 'EGLBoolean',
+  'versions': [{ 'name': 'eglGetFrameTimestampsANDROID',
+                 'extensions': [
+                   'EGL_ANDROID_get_frame_timestamps'
+                 ] }],
+  'arguments': 'EGLDisplay dpy, EGLSurface surface, EGLuint64KHR frameId, '
+               'EGLint numTimestamps, EGLint* timestamps, '
+               'EGLnsecsANDROID* values', },
+{ 'return_type': 'EGLBoolean',
+  'versions': [{ 'name': 'eglGetFrameTimestampSupportedANDROID',
+                 'extensions': [
+                   'EGL_ANDROID_get_frame_timestamps'
+                 ] }],
+  'arguments': 'EGLDisplay dpy, EGLSurface surface, EGLint timestamp', },
+{ 'return_type': 'EGLClientBuffer',
+  'versions': [{ 'name': 'eglGetNativeClientBufferANDROID',
+                 'extensions': ['EGL_ANDROID_get_native_client_buffer'], }],
+  'arguments': 'const struct AHardwareBuffer* ahardwarebuffer', },
+{ 'return_type': 'EGLBoolean',
+  'versions': [{ 'name': 'eglGetNextFrameIdANDROID',
+                 'extensions': [
+                   'EGL_ANDROID_get_frame_timestamps'
+                 ] }],
+  'arguments': 'EGLDisplay dpy, EGLSurface surface, EGLuint64KHR* frameId', },
 { 'return_type': 'EGLDisplay',
   'known_as': 'eglGetPlatformDisplayEXT',
   'versions': [{ 'name': 'eglGetPlatformDisplayEXT',

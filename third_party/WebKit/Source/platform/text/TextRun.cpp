@@ -25,7 +25,7 @@
 
 #include "platform/text/TextRun.h"
 
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/text/Character.h"
 
 namespace blink {
@@ -47,7 +47,7 @@ static_assert(sizeof(TextRun) == sizeof(ExpectedTextRunSize),
 void TextRun::SetText(const String& string) {
   len_ = string.length();
   if (!len_) {
-    data_.characters8 = 0;
+    data_.characters8 = nullptr;
     is8_bit_ = true;
     return;
   }

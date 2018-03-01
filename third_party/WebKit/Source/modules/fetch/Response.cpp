@@ -16,7 +16,7 @@
 #include "core/dom/ExecutionContext.h"
 #include "core/fileapi/Blob.h"
 #include "core/frame/UseCounter.h"
-#include "core/html/FormData.h"
+#include "core/html/forms/FormData.h"
 #include "core/streams/ReadableStreamOperations.h"
 #include "core/typed_arrays/DOMArrayBuffer.h"
 #include "core/typed_arrays/DOMArrayBufferView.h"
@@ -25,13 +25,13 @@
 #include "modules/fetch/BodyStreamBuffer.h"
 #include "modules/fetch/FormDataBytesConsumer.h"
 #include "modules/fetch/ResponseInit.h"
-#include "platform/HTTPNames.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/bindings/V8PrivateProperty.h"
 #include "platform/loader/fetch/FetchUtils.h"
 #include "platform/network/EncodedFormData.h"
 #include "platform/network/HTTPHeaderMap.h"
 #include "platform/network/NetworkUtils.h"
+#include "platform/network/http_names.h"
 #include "platform/wtf/RefPtr.h"
 #include "public/platform/WebCORS.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerResponse.h"
@@ -144,7 +144,7 @@ Response* Response::Create(ScriptState* script_state,
     // Note: The IDL processor cannot handle this situation. See
     // https://crbug.com/335871.
   } else if (V8Blob::hasInstance(body, isolate)) {
-    Blob* blob = V8Blob::toImpl(body.As<v8::Object>());
+    Blob* blob = V8Blob::ToImpl(body.As<v8::Object>());
     body_buffer = new BodyStreamBuffer(
         script_state,
         new BlobBytesConsumer(execution_context, blob->GetBlobDataHandle()));
@@ -152,19 +152,19 @@ Response* Response::Create(ScriptState* script_state,
   } else if (body->IsArrayBuffer()) {
     // Avoid calling into V8 from the following constructor parameters, which
     // is potentially unsafe.
-    DOMArrayBuffer* array_buffer = V8ArrayBuffer::toImpl(body.As<v8::Object>());
+    DOMArrayBuffer* array_buffer = V8ArrayBuffer::ToImpl(body.As<v8::Object>());
     body_buffer = new BodyStreamBuffer(script_state,
                                        new FormDataBytesConsumer(array_buffer));
   } else if (body->IsArrayBufferView()) {
     // Avoid calling into V8 from the following constructor parameters, which
     // is potentially unsafe.
     DOMArrayBufferView* array_buffer_view =
-        V8ArrayBufferView::toImpl(body.As<v8::Object>());
+        V8ArrayBufferView::ToImpl(body.As<v8::Object>());
     body_buffer = new BodyStreamBuffer(
         script_state, new FormDataBytesConsumer(array_buffer_view));
   } else if (V8FormData::hasInstance(body, isolate)) {
-    RefPtr<EncodedFormData> form_data =
-        V8FormData::toImpl(body.As<v8::Object>())->EncodeMultiPartFormData();
+    scoped_refptr<EncodedFormData> form_data =
+        V8FormData::ToImpl(body.As<v8::Object>())->EncodeMultiPartFormData();
     // Here we handle formData->boundary() as a C-style string. See
     // FormDataEncoder::generateUniqueBoundaryString.
     content_type = AtomicString("multipart/form-data; boundary=") +
@@ -173,8 +173,8 @@ Response* Response::Create(ScriptState* script_state,
         script_state,
         new FormDataBytesConsumer(execution_context, std::move(form_data)));
   } else if (V8URLSearchParams::hasInstance(body, isolate)) {
-    RefPtr<EncodedFormData> form_data =
-        V8URLSearchParams::toImpl(body.As<v8::Object>())->ToEncodedFormData();
+    scoped_refptr<EncodedFormData> form_data =
+        V8URLSearchParams::ToImpl(body.As<v8::Object>())->ToEncodedFormData();
     body_buffer = new BodyStreamBuffer(
         script_state,
         new FormDataBytesConsumer(execution_context, std::move(form_data)));
@@ -467,7 +467,7 @@ void Response::RefreshBody(ScriptState* script_state) {
       .Set(response.As<v8::Object>(), body_buffer);
 }
 
-DEFINE_TRACE(Response) {
+void Response::Trace(blink::Visitor* visitor) {
   Body::Trace(visitor);
   visitor->Trace(response_);
   visitor->Trace(headers_);

@@ -26,7 +26,7 @@
 #ifndef AXMenuListOption_h
 #define AXMenuListOption_h
 
-#include "core/html/HTMLOptionElement.h"
+#include "core/html/forms/HTMLOptionElement.h"
 #include "modules/accessibility/AXMockObject.h"
 
 namespace blink {
@@ -45,7 +45,7 @@ class AXMenuListOption final : public AXMockObject {
 
  private:
   AXMenuListOption(HTMLOptionElement*, AXObjectCacheImpl&);
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   bool IsMenuListOption() const override { return true; }
 

@@ -8,7 +8,6 @@
 #include <memory>
 #include <utility>
 #include "platform/PlatformExport.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/geometry/LayoutPoint.h"
 #include "platform/graphics/ContiguousContainer.h"
@@ -19,6 +18,7 @@
 #include "platform/graphics/paint/PaintChunker.h"
 #include "platform/graphics/paint/RasterInvalidationTracking.h"
 #include "platform/graphics/paint/Transform3DDisplayItem.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/Alignment.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/HashMap.h"
@@ -65,7 +65,9 @@ class PLATFORM_EXPORT PaintController {
     DCHECK(new_display_item_list_.IsEmpty());
   }
 
+  // For SPv1 only.
   void InvalidateAll();
+  bool CacheIsAllInvalid() const;
 
   // These methods are called during painting.u
 
@@ -102,7 +104,7 @@ class PLATFORM_EXPORT PaintController {
   // item construction is disabled, no list mutations will be performed.
   template <typename DisplayItemClass, typename... Args>
   void EndItem(Args&&... args) {
-    DCHECK(!RuntimeEnabledFeatures::SlimmingPaintV2Enabled());
+    DCHECK(!RuntimeEnabledFeatures::SlimmingPaintV175Enabled());
 
     if (DisplayItemConstructionIsDisabled())
       return;
@@ -156,7 +158,6 @@ class PLATFORM_EXPORT PaintController {
   }
 
   bool ClientCacheIsValid(const DisplayItemClient&) const;
-  bool CacheIsEmpty() const { return current_paint_artifact_.IsEmpty(); }
 
   // For micro benchmarking of record time.
   bool DisplayItemConstructionIsDisabled() const {
@@ -181,8 +182,9 @@ class PLATFORM_EXPORT PaintController {
   DisplayItemList& NewDisplayItemList() { return new_display_item_list_; }
 
   void AppendDebugDrawingAfterCommit(const DisplayItemClient&,
-                                     sk_sp<PaintRecord>,
-                                     const FloatRect& record_bounds);
+                                     sk_sp<const PaintRecord>,
+                                     const FloatRect& record_bounds,
+                                     const PropertyTreeState*);
 
   void ShowDebugData() const;
 #ifndef NDEBUG
@@ -198,7 +200,6 @@ class PLATFORM_EXPORT PaintController {
 #endif
 
   void SetTracksRasterInvalidations(bool);
-  void SetupRasterUnderInvalidationChecking();
 
   bool LastDisplayItemIsSubsequenceEnd() const;
 
@@ -233,6 +234,9 @@ class PLATFORM_EXPORT PaintController {
  private:
   friend class PaintControllerTestBase;
   friend class PaintControllerPaintTestBase;
+
+  void InvalidateAllForTesting() { InvalidateAllInternal(); }
+  void InvalidateAllInternal();
 
   bool LastDisplayItemIsNoopBegin() const;
 
@@ -289,6 +293,7 @@ class PLATFORM_EXPORT PaintController {
                                     PaintChunk&,
                                     const FloatRect&,
                                     PaintInvalidationReason);
+  void EnsureRasterInvalidationTracking();
   void TrackRasterInvalidation(const DisplayItemClient&,
                                PaintChunk&,
                                PaintInvalidationReason);
@@ -306,9 +311,8 @@ class PLATFORM_EXPORT PaintController {
 
   void CheckUnderInvalidation();
   bool IsCheckingUnderInvalidation() const {
-    return under_invalidation_checking_end_ -
-               under_invalidation_checking_begin_ >
-           0;
+    return under_invalidation_checking_end_ >
+           under_invalidation_checking_begin_;
   }
 
   struct SubsequenceMarkers {

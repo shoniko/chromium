@@ -37,7 +37,6 @@
 namespace blink {
 
 class ExceptionState;
-class Navigator;
 
 class MODULES_EXPORT NavigatorContentUtils final
     : public GarbageCollectedFinalized<NavigatorContentUtils>,
@@ -66,7 +65,7 @@ class MODULES_EXPORT NavigatorContentUtils final
 
   static void ProvideTo(Navigator&, NavigatorContentUtilsClient*);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   void SetClientForTest(NavigatorContentUtilsClient* client) {
     client_ = client;

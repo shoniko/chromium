@@ -446,6 +446,19 @@
     ]
   },
 
+  "AutofillCreditCardEnabled": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "can_be_recommended": true,
+    "test_policy": { "AutofillCreditCardEnabled": false },
+    "pref_mappings": [
+      { "pref": "autofill.credit_card_enabled",
+        "indicator_tests": [
+          { "policy": { "AutofillCreditCardEnabled": false } }
+        ]
+      }
+    ]
+  },
+
   "DisabledPlugins.0": {
     "note": "This policy is deprecated. This test tests its migration path.",
     "os": ["win", "linux", "mac", "chromeos"],
@@ -841,6 +854,16 @@
     "test_policy": { "AllowCrossOriginAuthPrompt": true },
     "pref_mappings": [
       { "pref": "auth.allow_cross_origin_prompt",
+        "local_state": true
+      }
+    ]
+  },
+
+  "NtlmV2Enabled": {
+    "os": ["linux", "mac", "chromeos", "android"],
+    "test_policy": { "NtlmV2Enabled": true },
+    "pref_mappings": [
+      { "pref": "auth.ntlm_v2_enabled",
         "local_state": true
       }
     ]
@@ -1654,6 +1677,14 @@
     "test_policy": { "AlwaysAuthorizePlugins": true },
     "pref_mappings": [
       { "pref": "plugins.always_authorize" }
+    ]
+  },
+
+  "RunAllFlashInAllowMode": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "RunAllFlashInAllowMode": true },
+    "pref_mappings": [
+      { "pref": "plugins.run_all_flash_in_allow_mode" }
     ]
   },
 
@@ -3249,6 +3280,26 @@
     ]
   },
 
+  "TPMFirmwareUpdateSettings": {
+    "os": ["chromeos"],
+    "test_policy": {
+      "allow-user-initiated-powerwash": true
+    },
+    "pref_mappings": [
+      { "pref": "cros.tpm_firmware_update_settings" }
+    ]
+  },
+
+
+  "MinimumRequiredChromeVersion": {
+    "os": ["chromeos"],
+    "test_policy": {
+      "MinimumRequiredChromeVersion": "61.0.3163.120"
+    },
+    "pref_mappings": [
+      { "pref": "cros.min_version.chrome"}
+    ]
+  },
 
   "----- Chrome Frame policies -------------------------------------------": {},
 
@@ -3278,6 +3329,6 @@
 
   "DeviceOffHours": {
     "os": ["chromeos"],
-    "test_policy": {"DeviceOffHours": {"intervals": [{"start" : {"day_of_week" : 1, "time": 12840000}, "end": {"day_of_week" : 1, "time": 21720000}}], "timezone" : "GMT", "ignored_policies": ["allow_new_users", "guest_mode_enabled"]}}
+    "test_policy": {"DeviceOffHours": {"intervals": [{"start" : {"day_of_week" : 1, "time": 12840000}, "end": {"day_of_week" : 1, "time": 21720000}}], "timezone" : "GMT", "ignored_policy_proto_tags": [8, 3]}}
   }
 }

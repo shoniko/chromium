@@ -25,7 +25,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/pending_extension_manager.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
-#include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/profiles/profile.h"
@@ -54,6 +53,7 @@
 #include "extensions/common/one_shot_event.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/message_center/notification.h"
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/audio/cras_audio_handler.h"
@@ -219,11 +219,10 @@ const char kHotwordNotifierId[] = "hotword.notification";
 }  // namespace hotword_internal
 
 // Delegate for the hotword notification.
-class HotwordNotificationDelegate : public NotificationDelegate {
+class HotwordNotificationDelegate
+    : public message_center::NotificationDelegate {
  public:
-  explicit HotwordNotificationDelegate(Profile* profile)
-      : profile_(profile) {
-  }
+  explicit HotwordNotificationDelegate(Profile* profile) : profile_(profile) {}
 
   // Overridden from NotificationDelegate:
   void ButtonClick(int button_index) override {
@@ -251,12 +250,8 @@ class HotwordNotificationDelegate : public NotificationDelegate {
     // Close the notification after it's been clicked on to remove it
     // from the notification tray.
     g_browser_process->notification_ui_manager()->CancelById(
-        id(), NotificationUIManager::GetProfileID(profile_));
-  }
-
-  // Overridden from NotificationDelegate:
-  std::string id() const override {
-    return hotword_internal::kHotwordNotificationId;
+        hotword_internal::kHotwordNotificationId,
+        NotificationUIManager::GetProfileID(profile_));
   }
 
  private:
@@ -435,16 +430,17 @@ void HotwordService::ShowHotwordNotification() {
         IDS_HOTWORD_NOTIFICATION_BUTTON);
   data.buttons.push_back(message_center::ButtonInfo(label));
 
-  Notification notification(
+  message_center::Notification notification(
       message_center::NOTIFICATION_TYPE_SIMPLE,
+      hotword_internal::kHotwordNotificationId,
       l10n_util::GetStringUTF16(IDS_HOTWORD_NOTIFICATION_TITLE),
       l10n_util::GetStringUTF16(IDS_HOTWORD_NOTIFICATION_DESCRIPTION),
       ui::ResourceBundle::GetSharedInstance().GetImageNamed(
           IDR_HOTWORD_NOTIFICATION_ICON),
+      base::string16(), GURL(),
       message_center::NotifierId(message_center::NotifierId::SYSTEM_COMPONENT,
                                  hotword_internal::kHotwordNotifierId),
-      base::string16(), GURL(), std::string(), data,
-      new HotwordNotificationDelegate(profile_));
+      data, new HotwordNotificationDelegate(profile_));
 
   g_browser_process->notification_ui_manager()->Add(notification, profile_);
   profile_->GetPrefs()->SetBoolean(

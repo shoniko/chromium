@@ -7,13 +7,13 @@
 #include <map>
 #include <set>
 
+#include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "components/guest_view/common/guest_view_constants.h"
 #include "components/guest_view/common/guest_view_messages.h"
-#include "content/public/child/v8_value_converter.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
-#include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_constants.h"
+#include "content/public/renderer/v8_value_converter.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/guest_view/extensions_guest_view_messages.h"
 #include "gin/arguments.h"
@@ -195,6 +195,13 @@ void MimeHandlerViewContainer::DidResizeElement(const gfx::Size& new_size) {
   element_size_ = new_size;
 
   CreateMimeHandlerViewGuestIfNecessary();
+
+  // Don't try to resize a guest that hasn't been created yet. It is enough to
+  // initialise |element_size_| here and then we'll send that to the browser
+  // during guest creation.
+  if (!guest_created_)
+    return;
+
   render_frame()->Send(new ExtensionsGuestViewHostMsg_ResizeGuest(
       render_frame()->GetRoutingID(), element_instance_id(), new_size));
 }
@@ -309,7 +316,7 @@ void MimeHandlerViewContainer::OnMimeHandlerViewGuestOnLoadCompleted(
 }
 
 void MimeHandlerViewContainer::CreateMimeHandlerViewGuestIfNecessary() {
-  if (guest_created_ || element_size_.IsEmpty() || view_id_.empty())
+  if (guest_created_ || !element_size_.has_value() || view_id_.empty())
     return;
 
   // The loader has completed loading |view_id_| so we can dispose it.
@@ -326,7 +333,7 @@ void MimeHandlerViewContainer::CreateMimeHandlerViewGuestIfNecessary() {
   render_frame()->Send(
       new ExtensionsGuestViewHostMsg_CreateMimeHandlerViewGuest(
           render_frame()->GetRoutingID(), view_id_, element_instance_id(),
-          element_size_));
+          *element_size_));
 
   guest_created_ = true;
 }

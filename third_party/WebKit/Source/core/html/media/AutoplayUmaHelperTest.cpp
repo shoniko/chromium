@@ -5,9 +5,9 @@
 #include "core/html/media/AutoplayUmaHelper.h"
 
 #include "core/dom/Document.h"
-#include "core/html/HTMLMediaElement.h"
-#include "core/html/HTMLVideoElement.h"
 #include "core/html/media/AutoplayPolicy.h"
+#include "core/html/media/HTMLMediaElement.h"
+#include "core/html/media/HTMLVideoElement.h"
 #include "core/testing/DummyPageHolder.h"
 
 #include "testing/gmock/include/gmock/gmock.h"
@@ -43,7 +43,7 @@ class AutoplayUmaHelperTest : public ::testing::Test {
   HTMLMediaElement& MediaElement() {
     Element* element = GetDocument().getElementById("video");
     DCHECK(element);
-    return toHTMLVideoElement(*element);
+    return ToHTMLVideoElement(*element);
   }
 
   MockAutoplayUmaHelper& UmaHelper() { return *uma_helper_; }
@@ -53,8 +53,8 @@ class AutoplayUmaHelperTest : public ::testing::Test {
  private:
   void SetUp() override {
     page_holder_ = DummyPageHolder::Create(IntSize(800, 600));
-    GetDocument().documentElement()->setInnerHTML("<video id=video></video>",
-                                                  ASSERT_NO_EXCEPTION);
+    GetDocument().documentElement()->SetInnerHTMLFromString(
+        "<video id=video></video>", ASSERT_NO_EXCEPTION);
     HTMLMediaElement& element = MediaElement();
     uma_helper_ = new MockAutoplayUmaHelper(&element);
     element.autoplay_policy_->autoplay_uma_helper_ = uma_helper_;

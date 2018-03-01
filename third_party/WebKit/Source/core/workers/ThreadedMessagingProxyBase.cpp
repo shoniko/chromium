@@ -14,8 +14,8 @@
 #include "core/loader/WorkerFetchContext.h"
 #include "core/workers/GlobalScopeCreationParams.h"
 #include "core/workers/WorkerInspectorProxy.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/CurrentTime.h"
 #include "public/platform/WebWorkerFetchContext.h"
 #include "public/web/WebFrameClient.h"
@@ -68,7 +68,7 @@ int ThreadedMessagingProxyBase::ProxyCount() {
   return g_live_messaging_proxy_count;
 }
 
-DEFINE_TRACE(ThreadedMessagingProxyBase) {
+void ThreadedMessagingProxyBase::Trace(blink::Visitor* visitor) {
   visitor->Trace(execution_context_);
   visitor->Trace(worker_clients_);
   visitor->Trace(worker_inspector_proxy_);
@@ -83,8 +83,10 @@ void ThreadedMessagingProxyBase::InitializeWorkerThread(
   Document* document = ToDocument(GetExecutionContext());
 
   worker_thread_ = CreateWorkerThread();
-  worker_thread_->Start(std::move(global_scope_creation_params),
-                        thread_startup_data, GetParentFrameTaskRunners());
+  worker_thread_->Start(
+      std::move(global_scope_creation_params), thread_startup_data,
+      GetWorkerInspectorProxy()->ShouldPauseOnWorkerStart(document),
+      GetParentFrameTaskRunners());
   WorkerThreadCreated();
   GetWorkerInspectorProxy()->WorkerThreadCreated(document, GetWorkerThread(),
                                                  script_url);

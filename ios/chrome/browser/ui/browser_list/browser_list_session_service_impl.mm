@@ -44,6 +44,7 @@ class BrowserListSessionServiceWebStateObserver : public web::WebStateObserver {
 
   // web::WebStateObserver implementation.
   void NavigationItemCommitted(
+      web::WebState* web_state,
       const web::LoadCommittedDetails& load_details) override;
 
  private:
@@ -68,6 +69,7 @@ void BrowserListSessionServiceWebStateObserver::ObserveWebState(
 }
 
 void BrowserListSessionServiceWebStateObserver::NavigationItemCommitted(
+    web::WebState* web_state,
     const web::LoadCommittedDetails& load_details) {
   closure_.Run();
 }
@@ -157,7 +159,7 @@ BrowserListSessionServiceBrowserListObserver::
         const base::RepeatingClosure& closure)
     : browser_list_(browser_list), closure_(closure) {
   DCHECK(!closure_.is_null());
-  for (int index = 0; index < browser_list_->count(); ++index)
+  for (int index = 0; index < browser_list_->GetCount(); ++index)
     OnBrowserCreated(browser_list_, browser_list_->GetBrowserAtIndex(index));
   browser_list_->AddObserver(this);
 }
@@ -223,7 +225,7 @@ bool BrowserListSessionServiceImpl::RestoreSession() {
   DCHECK_LE(session.sessionWindows.count, static_cast<NSUInteger>(INT_MAX));
   for (NSUInteger index = 0; index < session.sessionWindows.count; ++index) {
     Browser* browser =
-        static_cast<int>(index) < browser_list_->count()
+        static_cast<int>(index) < browser_list_->GetCount()
             ? browser_list_->GetBrowserAtIndex(static_cast<int>(index))
             : browser_list_->CreateNewBrowser();
 
@@ -256,7 +258,7 @@ bool BrowserListSessionServiceImpl::RestoreSession() {
     if (navigation_item->GetURL() != kChromeUINewTabURL)
       continue;
 
-    web_state_list.CloseWebStateAt(0);
+    web_state_list.CloseWebStateAt(0, WebStateList::CLOSE_USER_ACTION);
   }
 
   return true;
@@ -269,7 +271,7 @@ void BrowserListSessionServiceImpl::ScheduleLastSessionDeletion() {
 
 void BrowserListSessionServiceImpl::ScheduleSaveSession(bool immediately) {
   DCHECK(browser_list_) << "ScheduleSaveSession called after Shutdown.";
-  DCHECK_GE(browser_list_->count(), 0);
+  DCHECK_GE(browser_list_->GetCount(), 0);
 
   base::WeakPtr<BrowserListSessionServiceImpl> weak_ptr =
       weak_factory_.GetWeakPtr();
@@ -278,7 +280,7 @@ void BrowserListSessionServiceImpl::ScheduleSaveSession(bool immediately) {
     if (!weak_ptr)
       return nil;
 
-    const int count = service->browser_list_->count();
+    const int count = service->browser_list_->GetCount();
     NSMutableArray<SessionWindowIOS*>* windows =
         [NSMutableArray arrayWithCapacity:static_cast<NSUInteger>(count)];
     for (int index = 0; index < count; ++index) {

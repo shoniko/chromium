@@ -7,6 +7,7 @@
 #include "chrome/browser/media/router/discovery/dial/dial_device_data.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
+#include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 
 using content::BrowserThread;
@@ -35,6 +36,8 @@ void DialMediaSinkServiceImpl::Start() {
 
   dial_registry_ =
       test_dial_registry_ ? test_dial_registry_ : DialRegistry::GetInstance();
+  dial_registry_->SetNetLog(
+      request_context_->GetURLRequestContext()->net_log());
   dial_registry_->RegisterObserver(this);
   dial_registry_->OnListenerAdded();
   MediaSinkServiceBase::StartTimer();
@@ -49,6 +52,20 @@ void DialMediaSinkServiceImpl::Stop() {
   dial_registry_->UnregisterObserver(this);
   dial_registry_ = nullptr;
   MediaSinkServiceBase::StopTimer();
+}
+
+void DialMediaSinkServiceImpl::OnUserGesture() {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  // Re-sync sinks to CastMediaSinkService. It's possible that a DIAL-discovered
+  // sink was added to CastMediaSinkService earlier, but was removed due to
+  // flaky network. This gives CastMediaSinkService an opportunity to recover
+  // even if mDNS is not working for some reason.
+  DVLOG(2) << "OnUserGesture: re-syncing " << current_sinks_.size()
+           << " sinks to CastMediaSinkService";
+  if (observer_) {
+    for (const auto& sink : current_sinks_)
+      observer_->OnDialSinkAdded(sink);
+  }
 }
 
 DeviceDescriptionService* DialMediaSinkServiceImpl::GetDescriptionService() {
@@ -69,8 +86,7 @@ void DialMediaSinkServiceImpl::SetObserver(
   observer_ = observer;
 }
 
-void DialMediaSinkServiceImpl::ClearObserver(
-    DialMediaSinkServiceObserver* observer) {
+void DialMediaSinkServiceImpl::ClearObserver() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   observer_ = nullptr;
 }

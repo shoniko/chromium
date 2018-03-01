@@ -14,11 +14,6 @@
 <translation id="1074497978438210769">Not secure</translation>
 <translation id="1080116354587839789">Fit to width</translation>
 <translation id="1088860948719068836">Add Name on Card</translation>
-<translation id="1092563096751750415">'<ph name="SOFTWARE_NAME" />' wasn’t installed properly on your computer or the network:
-    &lt;ul&gt;
-    &lt;li&gt;Try uninstalling '<ph name="SOFTWARE_NAME" />'&lt;/li&gt;
-    &lt;li&gt;Try connecting to another Wi-Fi network&lt;/li&gt;
-    &lt;/ul&gt;</translation>
 <translation id="1103523840287552314">Always translate <ph name="LANGUAGE" /></translation>
 <translation id="1107591249535594099">If ticked, Chrome will store a copy of your card on this device for faster form filling.</translation>
 <translation id="1111153019813902504">Recent bookmarks</translation>
@@ -36,6 +31,7 @@
 <translation id="1175364870820465910">&amp;Print...</translation>
 <translation id="1181037720776840403">Remove</translation>
 <translation id="1184214524891303587"><ph name="BEGIN_WHITEPAPER_LINK" />Automatically report<ph name="END_WHITEPAPER_LINK" /> details of possible security incidents to Google. <ph name="PRIVACY_PAGE_LINK" /></translation>
+<translation id="1193706408197842297">Payment Not Completed</translation>
 <translation id="1201402288615127009">Next</translation>
 <translation id="1201895884277373915">More from this site</translation>
 <translation id="1206967143813997005">Bad initial signature</translation>
@@ -146,6 +142,7 @@
 <translation id="2079545284768500474">Undo</translation>
 <translation id="20817612488360358">System proxy settings are set to be used but an explicit proxy configuration is also specified.</translation>
 <translation id="2086652334978798447">To get personalised content suggested by Google, sign in to Chrome.</translation>
+<translation id="2091887806945687916">Sound</translation>
 <translation id="2094505752054353250">Domain mismatch</translation>
 <translation id="2096368010154057602">Department</translation>
 <translation id="2108755909498034140">Restart your computer</translation>
@@ -172,7 +169,6 @@
 <translation id="225207911366869382">This value is deprecated for this policy.</translation>
 <translation id="2262243747453050782">HTTP error</translation>
 <translation id="2270484714375784793">Phone number</translation>
-<translation id="2282872951544483773">Unavailable Experiments</translation>
 <translation id="2292556288342944218">Your Internet access is blocked</translation>
 <translation id="230155334948463882">New card?</translation>
 <translation id="2316887270356262533">Frees up less than 1 MB. Some sites may load more slowly on your next visit.</translation>
@@ -215,6 +211,7 @@
 <translation id="2609632851001447353">Variations</translation>
 <translation id="262424810616849754">{COUNT,plural, =0{None}=1{1 app ($1)}=2{2 apps ($1, $2)}other{# apps ($1, $2, $3)}}</translation>
 <translation id="2625385379895617796">Your clock is ahead</translation>
+<translation id="2634124572758952069"><ph name="HOST_NAME" />’s server IP address could not be found.</translation>
 <translation id="2639739919103226564">Status:</translation>
 <translation id="2649204054376361687"><ph name="CITY" />, <ph name="COUNTRY" /></translation>
 <translation id="2650446666397867134">Access to the file was denied</translation>
@@ -234,7 +231,6 @@
 <translation id="2721148159707890343">Request succeeded</translation>
 <translation id="2728127805433021124">Server's certificate is signed using a weak signature algorithm.</translation>
 <translation id="2730326759066348565"><ph name="BEGIN_LINK" />Running Connectivity Diagnostics<ph name="END_LINK" /></translation>
-<translation id="2734765935192287616">'<ph name="SOFTWARE_NAME" />' wasn’t installed properly on your computer or network. Ask your administrator to resolve this issue.</translation>
 <translation id="2740531572673183784">OK</translation>
 <translation id="2742870351467570537">Remove selected items</translation>
 <translation id="277133753123645258">Delivery method</translation>
@@ -251,7 +247,6 @@
 <translation id="2856444702002559011">Attackers might be trying to steal your information from <ph name="BEGIN_BOLD" /><ph name="SITE" /><ph name="END_BOLD" /> (for example, passwords, messages or credit cards). <ph name="BEGIN_LEARN_MORE_LINK" />Learn more<ph name="END_LEARN_MORE_LINK" /></translation>
 <translation id="2889159643044928134">Don't reload</translation>
 <translation id="2909946352844186028">A network change was detected.</translation>
-<translation id="2910057247648935477">'<ph name="SOFTWARE_NAME" />' isn’t configured correctly. Uninstalling '<ph name="SOFTWARE_NAME" />' usually fixes the problem. Applications that can cause this error includes antivirus, firewall and web-filtering or proxy software.</translation>
 <translation id="2916038427272391327">Close other programmes</translation>
 <translation id="2922350208395188000">Server's certificate cannot be checked.</translation>
 <translation id="2925673989565098301">Delivery Method</translation>
@@ -313,6 +308,7 @@
 <translation id="3282497668470633863">Add name on card</translation>
 <translation id="3286538390144397061">Restart Now</translation>
 <translation id="3287510313208355388">Download when online</translation>
+<translation id="3293642807462928945">Learn more about <ph name="POLICY_NAME" /> policy</translation>
 <translation id="3303855915957856445">No search results found</translation>
 <translation id="3305707030755673451">Your data was encrypted with your sync passphrase on <ph name="TIME" />. Enter it to start sync.</translation>
 <translation id="3320021301628644560">Add billing address</translation>
@@ -371,7 +367,6 @@
 <translation id="3623476034248543066">Show value</translation>
 <translation id="3630155396527302611">If it is already listed as a program allowed to access the network, try
       removing it from the list and adding it again.</translation>
-<translation id="3648607100222897006">These experimental features may change, break or disappear at any time. We make absolutely no guarantees about what may happen if you turn one of these experiments on, and your browser may even spontaneously combust. Jokes aside, your browser may delete all your data or your security and privacy could be compromised in unexpected ways. Any experiments that you enable will be enabled for all users of this browser. Please proceed with caution.</translation>
 <translation id="3650584904733503804">Validation successful</translation>
 <translation id="3655670868607891010">If you're seeing this frequently, try these <ph name="HELP_LINK" />.</translation>
 <translation id="3658742229777143148">Revision</translation>
@@ -387,6 +382,7 @@
 <translation id="3714780639079136834">Turning on mobile data or Wi-Fi</translation>
 <translation id="3715597595485130451">Connect to Wi-Fi</translation>
 <translation id="3717027428350673159"><ph name="BEGIN_LINK" />Checking the proxy, firewall and DNS configuration<ph name="END_LINK" /></translation>
+<translation id="372429172604983730">Applications that can cause this error include antivirus, firewall and web-filtering or proxy software.</translation>
 <translation id="3736520371357197498">If you understand the risks to your security, you may <ph name="BEGIN_LINK" />visit this unsafe site<ph name="END_LINK" /> before the dangerous programs have been removed.</translation>
 <translation id="3739623965217189342">Link that you copied</translation>
 <translation id="3744899669254331632">You cannot visit <ph name="SITE" /> right now because the website sent scrambled credentials that Chromium cannot process. Network errors and attacks are usually temporary, so this page will probably work later.</translation>
@@ -416,9 +412,7 @@
 <translation id="3973234410852337861"><ph name="HOST_NAME" /> is blocked</translation>
 <translation id="3987940399970879459">Less than 1 MB</translation>
 <translation id="40103911065039147">{URL_count,plural, =1{1 web page nearby}other{# web pages nearby}}</translation>
-<translation id="4021036232240155012">DNS is the network service that translates a website’s name to its Internet address.</translation>
 <translation id="4030383055268325496">&amp;Undo add</translation>
-<translation id="404928562651467259">WARNING</translation>
 <translation id="4058922952496707368">Key "<ph name="SUBKEY" />": <ph name="ERROR" /></translation>
 <translation id="4067947977115446013">Add Valid Address</translation>
 <translation id="4072486802667267160">There was an error processing your order. Please try again.</translation>
@@ -454,7 +448,6 @@
 <translation id="4269787794583293679">(No username)</translation>
 <translation id="4275830172053184480">Restart your device</translation>
 <translation id="4280429058323657511">, exp <ph name="EXPIRATION_DATE_ABBR" /></translation>
-<translation id="4300246636397505754">Parent suggestions</translation>
 <translation id="4304224509867189079">Log In</translation>
 <translation id="4312866146174492540">Block (default)</translation>
 <translation id="4325863107915753736">Failed to find article</translation>
@@ -531,6 +524,7 @@
 <translation id="5019198164206649151">Backing store in bad state</translation>
 <translation id="5023310440958281426">Check your administrator's policies</translation>
 <translation id="5029568752722684782">Clear copy</translation>
+<translation id="503069730517007720">A root certificate for '<ph name="SOFTWARE_NAME" />' is required but isn’t installed. Your IT administrator should look at configuration instructions for '<ph name="SOFTWARE_NAME" />' to fix this problem. <ph name="FURTHER_EXPLANATION" /></translation>
 <translation id="5031870354684148875">About Google Translate</translation>
 <translation id="5039804452771397117">Allow</translation>
 <translation id="5040262127954254034">Privacy</translation>
@@ -568,7 +562,6 @@
     <ph name="LIST_ITEM" />Click <ph name="BEGIN_BOLD" />Apply<ph name="END_BOLD" />, then click <ph name="BEGIN_BOLD" />OK<ph name="END_BOLD" />
     <ph name="LIST_ITEM" />Visit the <ph name="BEGIN_LEARN_MORE_LINK" />Chrome help centre<ph name="END_LEARN_MORE_LINK" /> to learn how to permanently remove the software from your computer
     <ph name="END_LIST" /></translation>
-<translation id="5297526204711817721">Your connection to this site is not private. To exit VR mode at any time, remove headset and press back.</translation>
 <translation id="5299298092464848405">Error parsing policy</translation>
 <translation id="5308380583665731573">Connect</translation>
 <translation id="5308689395849655368">Crash reporting is disabled.</translation>
@@ -602,6 +595,7 @@
 <translation id="5540224163453853">Could not find the requested article.</translation>
 <translation id="5541546772353173584">Add Email</translation>
 <translation id="5544037170328430102">An embedded page at <ph name="SITE" /> says:</translation>
+<translation id="5545756402275714221">Articles for You</translation>
 <translation id="5556459405103347317">Reload</translation>
 <translation id="5560088892362098740">Expiry Date</translation>
 <translation id="5565735124758917034">Active</translation>
@@ -619,10 +613,10 @@
 <translation id="5631439013527180824">Invalid device management token</translation>
 <translation id="5633066919399395251">Attackers currently on <ph name="BEGIN_BOLD" /><ph name="SITE" /><ph name="END_BOLD" /> might attempt to install dangerous programs on your computer that steal or delete your information (for example, photos, passwords, messages and credit cards). <ph name="BEGIN_LEARN_MORE_LINK" />Learn more<ph name="END_LEARN_MORE_LINK" /></translation>
 <translation id="563324245173044180">Deceptive content blocked.</translation>
-<translation id="5646376287012673985">Location</translation>
 <translation id="5659593005791499971">Email</translation>
 <translation id="5669703222995421982">Get personalised content</translation>
 <translation id="5675650730144413517">This page isn’t working</translation>
+<translation id="5689199277474810259">Export to JSON</translation>
 <translation id="5710435578057952990">The identity of this website has not been verified.</translation>
 <translation id="5719499550583120431">Prepaid cards are accepted.</translation>
 <translation id="5720705177508910913">Current user</translation>
@@ -640,10 +634,10 @@
 <translation id="5866257070973731571">Add Phone Number</translation>
 <translation id="5869405914158311789">This site can’t be reached</translation>
 <translation id="5869522115854928033">Saved passwords</translation>
-<translation id="5872918882028971132">Parent Suggestions</translation>
 <translation id="5893752035575986141">Credit cards are accepted.</translation>
 <translation id="5908541034548427511"><ph name="TYPE_1" /> (synced)</translation>
 <translation id="5920262536204764679">{NUM_COOKIES,plural, =1{1 in use}other{# in use}}</translation>
+<translation id="5939518447894949180">Reset</translation>
 <translation id="5959728338436674663">Automatically send some <ph name="BEGIN_WHITEPAPER_LINK" />system information and page content<ph name="END_WHITEPAPER_LINK" /> to Google to help detect dangerous apps and sites. <ph name="PRIVACY_PAGE_LINK" /></translation>
 <translation id="5967592137238574583">Edit Contact Info</translation>
 <translation id="5967867314010545767">Remove from history</translation>
@@ -657,11 +651,11 @@
 <translation id="6017850046339264347">Attackers on <ph name="BEGIN_BOLD" /><ph name="SITE" /><ph name="END_BOLD" /> could install deceptive apps that pretend to be something else or collect data that may be used to track you. <ph name="BEGIN_LEARN_MORE_LINK" />Learn more<ph name="END_LEARN_MORE_LINK" /></translation>
 <translation id="6025416945513303461"><ph name="TYPE_1" />, <ph name="TYPE_2" />, <ph name="TYPE_3" /> (synced)</translation>
 <translation id="6027201098523975773">Enter a name</translation>
+<translation id="6039846035001940113">If the problem continues, contact the site owner.</translation>
 <translation id="6040143037577758943">Close</translation>
 <translation id="6047233362582046994">If you understand the risks to your security, you may <ph name="BEGIN_LINK" />visit this site<ph name="END_LINK" /> before the harmful apps have been removed.</translation>
 <translation id="6047927260846328439">This content might try to trick you into installing software or revealing personal information. <ph name="BEGIN_LINK" />Show anyway<ph name="END_LINK" /></translation>
 <translation id="6051221802930200923">You cannot visit <ph name="SITE" /> right now because the website uses certificate pinning. Network errors and attacks are usually temporary, so this page will probably work later.</translation>
-<translation id="6060685159320643512">Careful, these experiments may bite</translation>
 <translation id="6080696365213338172">You have accessed content using an administrator-provided certificate. Data you provide to <ph name="DOMAIN" /> can be intercepted by your administrator.</translation>
 <translation id="6144381551823904650">{COUNT,plural, =0{None}=1{1 password (synced)}other{# passwords (synced)}}</translation>
 <translation id="6146055958333702838">Check any cables and reboot any routers, modems or other network
@@ -697,7 +691,6 @@
 <translation id="6355080345576803305">Public session override</translation>
 <translation id="6358450015545214790">What do these mean?</translation>
 <translation id="6386120369904791316">{COUNT,plural, =1{1 other suggestion}other{# other suggestions}}</translation>
-<translation id="6387478394221739770">Interested in cool new Chrome features? Try our beta channel at chrome.com/beta.</translation>
 <translation id="6397451950548600259">Software on your computer is stopping Chrome from safely connecting to the web</translation>
 <translation id="6404511346730675251">Edit bookmark</translation>
 <translation id="6410264514553301377">Enter the expiry date and CVC for <ph name="CREDIT_CARD" /></translation>
@@ -743,7 +736,6 @@
 <translation id="6820686453637990663">CVC</translation>
 <translation id="6824266427216888781">Failed loading regions data</translation>
 <translation id="6825578344716086703">You attempted to reach <ph name="DOMAIN" />, but the server presented a certificate signed using a weak signature algorithm (such as SHA-1). This means that the security credentials that the server presented could have been forged, and the server may not be the server that you expected (you may be communicating with an attacker).</translation>
-<translation id="6830728435402077660">Not secure</translation>
 <translation id="6831043979455480757">Translate</translation>
 <translation id="6839929833149231406">Area</translation>
 <translation id="6874604403660855544">&amp;Redo add</translation>
@@ -845,12 +837,10 @@
 <translation id="7667346355482952095">Returned policy token is empty or doesn't match current token</translation>
 <translation id="7668654391829183341">Unknown device</translation>
 <translation id="7669271284792375604">Attackers on this site might try to trick you into installing programs that harm your browsing experience (for example, by changing your homepage or showing extra ads on sites that you visit).</translation>
-<translation id="7674629440242451245">Interested in cool new Chrome features? Try our dev channel at chrome.com/dev.</translation>
 <translation id="7682287625158474539">Shipping</translation>
 <translation id="7699293099605015246">Articles aren't available at the moment.</translation>
 <translation id="7701040980221191251">None</translation>
 <translation id="7704050614460855821"><ph name="BEGIN_LINK" />Proceed to <ph name="SITE" /> (unsafe)<ph name="END_LINK" /></translation>
-<translation id="7708490115678445973">A root certificate for '<ph name="SOFTWARE_NAME" />' is required but isn’t installed. Your network administrator should look at configuration instructions for '<ph name="SOFTWARE_NAME" />' to fix this problem. Applications that can cause this error includes antivirus, firewall and web-filtering or proxy software.</translation>
 <translation id="7714464543167945231">Certificate</translation>
 <translation id="7716147886133743102">Blocked by your administrator</translation>
 <translation id="7716424297397655342">This site can’t be loaded from the cache</translation>
@@ -896,13 +886,14 @@
 <translation id="8037357227543935929">Ask (default)</translation>
 <translation id="8041089156583427627">Send Feedback</translation>
 <translation id="8041940743680923270">Use global default (Ask)</translation>
+<translation id="8057711352706143257">'<ph name="SOFTWARE_NAME" />' isn’t configured correctly. Uninstalling '<ph name="SOFTWARE_NAME" />' usually fixes the problem. <ph name="FURTHER_EXPLANATION" /></translation>
 <translation id="8088680233425245692">Failed to view article.</translation>
 <translation id="8091372947890762290">Activation is pending on the server</translation>
 <translation id="8094917007353911263">The network that you are using may require you to visit <ph name="BEGIN_BOLD" /><ph name="LOGIN_URL" /><ph name="END_BOLD" />.</translation>
 <translation id="8103161714697287722">Payment Method</translation>
 <translation id="8118489163946903409">Payment method</translation>
+<translation id="8127301229239896662">'<ph name="SOFTWARE_NAME" />' wasn’t installed properly on your computer or network. Ask your IT administrator to resolve this issue.</translation>
 <translation id="8131740175452115882">Confirm</translation>
-<translation id="8134994873729925007"><ph name="HOST_NAME" />’s server <ph name="BEGIN_ABBR" />DNS address<ph name="END_ABBR" /> could not be found.</translation>
 <translation id="8149426793427495338">Your computer went to sleep.</translation>
 <translation id="8150722005171944719">The file at <ph name="URL" /> is not readable.  It may have been removed, moved or file permissions may be preventing access.</translation>
 <translation id="8184538546369750125">Use global default (Allow)</translation>
@@ -920,6 +911,7 @@
 <translation id="8249320324621329438">Last fetched:</translation>
 <translation id="8253091569723639551">Billing address required</translation>
 <translation id="8261506727792406068">Delete</translation>
+<translation id="8267698848189296333">Signing in as <ph name="USERNAME" /></translation>
 <translation id="8289355894181816810">Contact your network administrator if you're not sure what this means.</translation>
 <translation id="8293206222192510085">Add Bookmark</translation>
 <translation id="8294431847097064396">Source</translation>
@@ -955,6 +947,7 @@
 <translation id="8620436878122366504">Your parents haven't approved it yet</translation>
 <translation id="8647750283161643317">Reset all to default</translation>
 <translation id="8660471606262461360">From Google Payments</translation>
+<translation id="8688672835843460752">Available</translation>
 <translation id="8703575177326907206">Your connection to <ph name="DOMAIN" /> is not encrypted.</translation>
 <translation id="8718314106902482036">Payment not completed</translation>
 <translation id="8725066075913043281">Try again</translation>
@@ -977,7 +970,6 @@
 <translation id="8874824191258364635">Enter a valid card number</translation>
 <translation id="8876793034577346603">Network configuration failed to be parsed.</translation>
 <translation id="8891727572606052622">Invalid proxy mode.</translation>
-<translation id="889901481107108152">Sorry, this experiment is not available on your platform.</translation>
 <translation id="8903921497873541725">Zoom in</translation>
 <translation id="8931333241327730545">Do you want to save this card to your Google Account?</translation>
 <translation id="8932102934695377596">Your clock is behind</translation>
@@ -1031,4 +1023,9 @@
 <translation id="988159990683914416">Developer Build</translation>
 <translation id="989988560359834682">Edit Address</translation>
 <translation id="992115559265932548"><ph name="MICROSOFT_ACTIVE_DIRECTORY" /></translation>
+<translation id="992432478773561401">'<ph name="SOFTWARE_NAME" />' wasn’t installed properly on your computer or the network:
+    &lt;ul&gt;
+    &lt;li&gt;Try uninstalling or disabling '<ph name="SOFTWARE_NAME" />'&lt;/li&gt;
+    &lt;li&gt;Try connecting to another network&lt;/li&gt;
+    &lt;/ul&gt;</translation>
 </translationbundle>

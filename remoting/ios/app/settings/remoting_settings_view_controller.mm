@@ -13,6 +13,7 @@
 #import "remoting/ios/app/app_delegate.h"
 #import "remoting/ios/app/remoting_theme.h"
 #import "remoting/ios/app/settings/setting_option.h"
+#import "remoting/ios/app/view_utils.h"
 
 #include "base/logging.h"
 #include "remoting/base/string_resources.h"
@@ -34,26 +35,20 @@ static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
 @synthesize inputMode = _inputMode;
 @synthesize shouldResizeHostToFit = _shouldResizeHostToFit;
 
-- (id)init {
-  self = [super init];
-  if (self) {
-    _appBar = [[MDCAppBar alloc] init];
-    [self addChildViewController:_appBar.headerViewController];
-
-    self.view.backgroundColor = RemotingTheme.menuBlueColor;
-    _appBar.headerViewController.headerView.backgroundColor =
-        RemotingTheme.menuBlueColor;
-    _appBar.navigationBar.tintColor = [UIColor whiteColor];
-    _appBar.navigationBar.titleTextAttributes =
-        @{NSForegroundColorAttributeName : [UIColor whiteColor]};
-  }
-  return self;
-}
-
 #pragma mark - UIViewController
 
 - (void)viewDidLoad {
   [super viewDidLoad];
+
+  _appBar = [[MDCAppBar alloc] init];
+  [self addChildViewController:_appBar.headerViewController];
+
+  self.view.backgroundColor = RemotingTheme.menuBlueColor;
+  _appBar.headerViewController.headerView.backgroundColor =
+      RemotingTheme.menuBlueColor;
+  MDCNavigationBarTextColorAccessibilityMutator* mutator =
+      [[MDCNavigationBarTextColorAccessibilityMutator alloc] init];
+  [mutator mutate:_appBar.navigationBar];
 
   _appBar.headerViewController.headerView.trackingScrollView =
       self.collectionView;
@@ -61,12 +56,12 @@ static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
 
   self.collectionView.backgroundColor = RemotingTheme.menuBlueColor;
 
-  // TODO(nicholss): X should be an image.
   UIBarButtonItem* closeButton =
       [[UIBarButtonItem alloc] initWithImage:RemotingTheme.closeIcon
                                        style:UIBarButtonItemStyleDone
                                       target:self
                                       action:@selector(didTapClose:)];
+  remoting::SetAccessibilityInfoFromImage(closeButton);
   self.navigationItem.leftBarButtonItem = nil;
   self.navigationItem.rightBarButtonItem = closeButton;
 
@@ -120,12 +115,15 @@ static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
                                 forIndexPath:indexPath];
   cell.contentView.backgroundColor = RemotingTheme.menuBlueColor;
   cell.textLabel.text = setting.title;
-  cell.textLabel.textColor = [UIColor whiteColor];
+  cell.textLabel.textColor = RemotingTheme.menuTextColor;
   cell.textLabel.numberOfLines = 1;
   cell.detailTextLabel.text = setting.subtext;
-  cell.detailTextLabel.textColor = [UIColor whiteColor];
+  cell.detailTextLabel.textColor = RemotingTheme.menuTextColor;
   cell.detailTextLabel.numberOfLines = 1;
   cell.tintColor = RemotingTheme.menuBlueColor;
+  cell.isAccessibilityElement = YES;
+  cell.accessibilityLabel =
+      [NSString stringWithFormat:@"%@\n%@", setting.title, setting.subtext];
 
   switch (setting.style) {
     case OptionCheckbox:
@@ -208,7 +206,9 @@ static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
   if ([kind isEqualToString:UICollectionElementKindSectionHeader]) {
     supplementaryView.contentView.backgroundColor = RemotingTheme.menuBlueColor;
     supplementaryView.textLabel.text = _sections[(NSUInteger)indexPath.section];
-    supplementaryView.textLabel.textColor = [UIColor whiteColor];
+    supplementaryView.textLabel.textColor = RemotingTheme.menuTextColor;
+    supplementaryView.isAccessibilityElement = YES;
+    supplementaryView.accessibilityLabel = supplementaryView.textLabel.text;
   }
   return supplementaryView;
 }
@@ -300,6 +300,7 @@ static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
   ctrlAltDelOption.action = ^{
     if ([weakSelf.delegate respondsToSelector:@selector(sendCtrAltDel)]) {
       [weakSelf.delegate sendCtrAltDel];
+      [weakSelf dismissViewControllerAnimated:YES completion:nil];
     }
   };
 
@@ -309,6 +310,7 @@ static NSString* const kFeedbackContext = @"InSessionFeedbackContext";
   printScreenOption.action = ^{
     if ([weakSelf.delegate respondsToSelector:@selector(sendPrintScreen)]) {
       [weakSelf.delegate sendPrintScreen];
+      [weakSelf dismissViewControllerAnimated:YES completion:nil];
     }
   };
 

@@ -96,13 +96,13 @@ class CORE_EXPORT HTMLCanvasElement final
   ~HTMLCanvasElement() override;
 
   // Attributes and functions exposed to script
-  int width() const { return Size().Width(); }
-  int height() const { return Size().Height(); }
+  unsigned width() const { return Size().Width(); }
+  unsigned height() const { return Size().Height(); }
 
   const IntSize& Size() const override { return size_; }
 
-  void setWidth(int, ExceptionState&);
-  void setHeight(int, ExceptionState&);
+  void setWidth(unsigned, ExceptionState&);
+  void setHeight(unsigned, ExceptionState&);
 
   void SetSize(const IntSize& new_size);
 
@@ -148,9 +148,9 @@ class CORE_EXPORT HTMLCanvasElement final
   CanvasRenderingContext* RenderingContext() const { return context_.Get(); }
 
   void EnsureUnacceleratedImageBuffer();
-  RefPtr<Image> CopiedImage(SourceDrawingBuffer,
-                            AccelerationHint,
-                            SnapshotReason);
+  scoped_refptr<Image> CopiedImage(SourceDrawingBuffer,
+                                   AccelerationHint,
+                                   SnapshotReason);
   void ClearCopiedImage();
 
   bool OriginClean() const;
@@ -189,17 +189,15 @@ class CORE_EXPORT HTMLCanvasElement final
   void PageVisibilityChanged() override;
 
   // CanvasImageSource implementation
-  RefPtr<Image> GetSourceImageForCanvas(SourceImageStatus*,
-                                        AccelerationHint,
-                                        SnapshotReason,
-                                        const FloatSize&) override;
+  scoped_refptr<Image> GetSourceImageForCanvas(SourceImageStatus*,
+                                               AccelerationHint,
+                                               SnapshotReason,
+                                               const FloatSize&) override;
   bool WouldTaintOrigin(SecurityOrigin*) const override;
   FloatSize ElementSize(const FloatSize&) const override;
   bool IsCanvasElement() const override { return true; }
   bool IsOpaque() const override;
   bool IsAccelerated() const override;
-  int SourceWidth() override { return size_.Width(); }
-  int SourceHeight() override { return size_.Height(); }
 
   // SurfaceLayerBridgeObserver implementation
   void OnWebLayerReplaced() override;
@@ -218,13 +216,13 @@ class CORE_EXPORT HTMLCanvasElement final
                                   const ImageBitmapOptions&) override;
 
   // OffscreenCanvasPlaceholder implementation.
-  void SetPlaceholderFrame(RefPtr<StaticBitmapImage>,
+  void SetPlaceholderFrame(scoped_refptr<StaticBitmapImage>,
                            WeakPtr<OffscreenCanvasFrameDispatcher>,
-                           RefPtr<WebTaskRunner>,
+                           scoped_refptr<WebTaskRunner>,
                            unsigned resource_id) override;
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
-  DECLARE_VIRTUAL_TRACE_WRAPPERS();
+  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
 
   void CreateImageBufferUsingSurfaceForTesting(
       std::unique_ptr<ImageBufferSurface>);
@@ -265,7 +263,9 @@ class CORE_EXPORT HTMLCanvasElement final
     return DispatchEvent(event);
   }
 
-  bool IsWebGLAllowed() const override;
+  bool IsWebGL1Enabled() const override;
+  bool IsWebGL2Enabled() const override;
+  bool IsWebGLBlocked() const override;
 
  protected:
   void DidMoveToNewDocument(Document& old_document) override;
@@ -291,13 +291,10 @@ class CORE_EXPORT HTMLCanvasElement final
 
   void Reset();
 
-  std::unique_ptr<ImageBufferSurface> CreateWebGLImageBufferSurface(
-      OpacityMode);
+  std::unique_ptr<ImageBufferSurface> CreateWebGLImageBufferSurface();
   std::unique_ptr<ImageBufferSurface> CreateAcceleratedImageBufferSurface(
-      OpacityMode,
       int* msaa_sample_count);
-  std::unique_ptr<ImageBufferSurface> CreateUnacceleratedImageBufferSurface(
-      OpacityMode);
+  std::unique_ptr<ImageBufferSurface> CreateUnacceleratedImageBufferSurface();
   void CreateImageBuffer();
   void CreateImageBufferInternal(
       std::unique_ptr<ImageBufferSurface> external_surface);
@@ -306,7 +303,7 @@ class CORE_EXPORT HTMLCanvasElement final
   void SetSurfaceSize(const IntSize&);
 
   bool PaintsIntoCanvasBuffer() const;
-  CanvasColorParams GetCanvasColorParams() const;
+  CanvasColorParams ColorParams() const;
 
   ImageData* ToImageData(SourceDrawingBuffer, SnapshotReason) const;
 
@@ -335,7 +332,7 @@ class CORE_EXPORT HTMLCanvasElement final
 
   // FIXME: This is temporary for platforms that have to copy the image buffer
   // to render (and for CSSCanvasValue).
-  mutable RefPtr<Image> copied_image_;
+  mutable scoped_refptr<Image> copied_image_;
 
   // Used for OffscreenCanvas that controls this HTML canvas element
   std::unique_ptr<::blink::SurfaceLayerBridge> surface_layer_bridge_;

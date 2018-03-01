@@ -21,41 +21,21 @@ class ContextualSearchRankerLoggerImpl;
 class DocumentWritePageLoadMetricsObserver;
 class FromGWSPageLoadMetricsLogger;
 class PluginInfoMessageFilter;
-class ProcessMemoryMetricsEmitter;
 class ServiceWorkerPageLoadMetricsObserver;
 class SubresourceFilterMetricsObserver;
 class UkmPageLoadMetricsObserver;
 class LocalNetworkRequestsPageLoadMetricsObserver;
-class MediaEngagementContentsObserver;
 
-namespace autofill {
-class AutofillMetrics;
+namespace blink {
+class AutoplayUmaHelper;
 }
 
 namespace content {
-class RenderFrameImpl;
 class RenderWidgetHostLatencyTracker;
 }  // namespace content
 
-namespace media {
-class WatchTimeRecorder;
-}
-
-namespace resource_coordinator {
-class CoordinationUnitManager;
-}
-
-namespace translate {
-class TranslateRankerImpl;
-}
-
-namespace payments {
-class JourneyLogger;
-}
-
 namespace password_manager {
 class PasswordManagerMetricsRecorder;
-class PasswordFormMetricsRecorder;
 }  // namespace password_manager
 
 namespace previews {
@@ -64,6 +44,7 @@ class PreviewsUKMObserver;
 
 namespace ukm {
 
+class DelegatingUkmRecorder;
 class UkmEntryBuilder;
 class UkmInterface;
 class TestRecordingHelper;
@@ -81,14 +62,10 @@ class METRICS_EXPORT UkmRecorder {
   UkmRecorder();
   virtual ~UkmRecorder();
 
-  // Sets an instance of UkmRecorder to provided by Get().
-  // TODO(holte): Migrate callers away from using Get, to using a context
-  // specific getter, or a MojoUkmRecorder.
-  static void Set(UkmRecorder* recorder);
-
-  // Provides access to a previously constructed UkmRecorder instance. Only one
-  // instance exists per process and must have been constructed prior to any
-  // calls to this method.
+  // Provides access to a global UkmRecorder instance for recording metrics.
+  // This is typically passed to the Record() method of a entry object from
+  // ukm_builders.h.
+  // Use TestAutoSetUkmRecorder for capturing data written this way in tests.
   static UkmRecorder* Get();
 
   // Get the new source ID, which is unique for the duration of a browser
@@ -100,10 +77,8 @@ class METRICS_EXPORT UkmRecorder {
   virtual void UpdateSourceURL(SourceId source_id, const GURL& url) = 0;
 
  private:
-  friend autofill::AutofillMetrics;
-  friend payments::JourneyLogger;
+  friend blink::AutoplayUmaHelper;
   friend ContextualSearchRankerLoggerImpl;
-  friend ProcessMemoryMetricsEmitter;
   friend PluginInfoMessageFilter;
   friend UkmPageLoadMetricsObserver;
   friend LocalNetworkRequestsPageLoadMetricsObserver;
@@ -111,18 +86,13 @@ class METRICS_EXPORT UkmRecorder {
   friend FromGWSPageLoadMetricsLogger;
   friend ServiceWorkerPageLoadMetricsObserver;
   friend SubresourceFilterMetricsObserver;
-  friend translate::TranslateRankerImpl;
   friend TestRecordingHelper;
   friend UkmInterface;
-  friend content::RenderFrameImpl;
   friend content::RenderWidgetHostLatencyTracker;
-  friend media::WatchTimeRecorder;
   friend password_manager::PasswordManagerMetricsRecorder;
-  friend password_manager::PasswordFormMetricsRecorder;
   friend previews::PreviewsUKMObserver;
-  friend resource_coordinator::CoordinationUnitManager;
-  friend MediaEngagementContentsObserver;
   friend internal::UkmEntryBuilderBase;
+  friend DelegatingUkmRecorder;
   FRIEND_TEST_ALL_PREFIXES(UkmServiceTest, AddEntryWithEmptyMetrics);
   FRIEND_TEST_ALL_PREFIXES(UkmServiceTest, EntryBuilderAndSerialization);
   FRIEND_TEST_ALL_PREFIXES(UkmServiceTest,

@@ -46,6 +46,7 @@ namespace blink {
 class WebDevToolsAgentImpl;
 class WebLocalFrameImpl;
 class WebSpellCheckPanelHostClient;
+struct WebRemoteScrollProperties;
 
 class LocalFrameClientImpl final : public LocalFrameClient {
  public:
@@ -53,7 +54,7 @@ class LocalFrameClientImpl final : public LocalFrameClient {
 
   ~LocalFrameClientImpl() override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   WebLocalFrameImpl* GetWebFrame() const override;
 
@@ -136,6 +137,7 @@ class LocalFrameClientImpl final : public LocalFrameClient {
   void DidDispatchPingLoader(const KURL&) override;
   void DidDisplayContentWithCertificateErrors(const KURL&) override;
   void DidRunContentWithCertificateErrors(const KURL&) override;
+  void ReportLegacySymantecCert(const KURL&, Time) override;
   void DidChangePerformanceTiming() override;
   void DidObserveLoadingBehavior(WebLoadingBehaviorFlag) override;
   void DidObserveNewFeatureUsage(mojom::WebFeature) override;
@@ -192,7 +194,7 @@ class LocalFrameClientImpl final : public LocalFrameClient {
   void DispatchWillStartUsingPeerConnectionHandler(
       WebRTCPeerConnectionHandler*) override;
 
-  bool AllowWebGL(bool enabled_per_settings) override;
+  bool ShouldBlockWebGL() override;
 
   void DispatchWillInsertBody() override;
 
@@ -216,6 +218,8 @@ class LocalFrameClientImpl final : public LocalFrameClient {
   BlameContext* GetFrameBlameContext() override;
 
   WebEffectiveConnectionType GetEffectiveConnectionType() override;
+  void SetEffectiveConnectionTypeForTesting(
+      WebEffectiveConnectionType) override;
 
   bool IsClientLoFiActiveForFrame() override;
 
@@ -225,22 +229,25 @@ class LocalFrameClientImpl final : public LocalFrameClient {
 
   void SetHasReceivedUserGesture(bool received_previously) override;
 
-  void SetDevToolsFrameId(const String& devtools_frame_id) override;
-
   void AbortClientNavigation() override;
 
   WebSpellCheckPanelHostClient* SpellCheckPanelHostClient() const override;
 
   TextCheckerClient& GetTextCheckerClient() const override;
 
-  std::unique_ptr<WebURLLoader> CreateURLLoader(const ResourceRequest&,
-                                                WebTaskRunner*) override;
+  std::unique_ptr<WebURLLoaderFactory> CreateURLLoaderFactory() override;
 
   service_manager::InterfaceProvider* GetInterfaceProvider() override;
 
   void AnnotatedRegionsChanged() override;
 
   void DidBlockFramebust(const KURL&) override;
+
+  String GetInstrumentationToken() override;
+
+  void ScrollRectToVisibleInParentFrame(
+      const WebRect&,
+      const WebRemoteScrollProperties&) override;
 
  private:
   explicit LocalFrameClientImpl(WebLocalFrameImpl*);
@@ -253,6 +260,12 @@ class LocalFrameClientImpl final : public LocalFrameClient {
   Member<WebLocalFrameImpl> web_frame_;
 
   String user_agent_;
+
+  // Used to cap the number of console messages that are printed to warn about
+  // legacy certificates that will be distrusted in future.
+  uint32_t num_certificate_warning_messages_;
+  // The hosts for which a legacy certificate warning has been printed.
+  HashSet<String> certificate_warning_hosts_;
 };
 
 DEFINE_TYPE_CASTS(LocalFrameClientImpl,

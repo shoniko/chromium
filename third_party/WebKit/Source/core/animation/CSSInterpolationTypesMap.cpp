@@ -27,6 +27,7 @@
 #include "core/animation/CSSPathInterpolationType.h"
 #include "core/animation/CSSPositionAxisListInterpolationType.h"
 #include "core/animation/CSSPositionInterpolationType.h"
+#include "core/animation/CSSRayInterpolationType.h"
 #include "core/animation/CSSResolutionInterpolationType.h"
 #include "core/animation/CSSRotateInterpolationType.h"
 #include "core/animation/CSSScaleInterpolationType.h"
@@ -39,7 +40,6 @@
 #include "core/animation/CSSTranslateInterpolationType.h"
 #include "core/animation/CSSVarCycleInterpolationType.h"
 #include "core/animation/CSSVisibilityInterpolationType.h"
-#include "core/css/CSSPropertyMetadata.h"
 #include "core/css/CSSSyntaxDescriptor.h"
 #include "core/css/PropertyRegistry.h"
 #include "core/css/properties/CSSPropertyAPI.h"
@@ -192,6 +192,10 @@ const InterpolationTypes& CSSInterpolationTypesMap::Get(
       applicable_types->push_back(
           WTF::MakeUnique<CSSPaintInterpolationType>(used_property));
       break;
+    case CSSPropertyOffsetPath:
+      applicable_types->push_back(
+          WTF::MakeUnique<CSSRayInterpolationType>(used_property));
+    // Fall through.
     case CSSPropertyD:
       applicable_types->push_back(
           WTF::MakeUnique<CSSPathInterpolationType>(used_property));

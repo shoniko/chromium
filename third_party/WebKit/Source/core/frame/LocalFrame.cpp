@@ -37,12 +37,15 @@
 #include "core/CoreProbeSink.h"
 #include "core/css/StyleChangeReason.h"
 #include "core/dom/ChildFrameDisconnector.h"
+#include "core/dom/DocumentParser.h"
 #include "core/dom/DocumentType.h"
 #include "core/dom/events/Event.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/Editor.h"
+#include "core/editing/EphemeralRange.h"
 #include "core/editing/FrameSelection.h"
-#include "core/editing/InputMethodController.h"
+#include "core/editing/VisiblePosition.h"
+#include "core/editing/ime/InputMethodController.h"
 #include "core/editing/serializers/Serialization.h"
 #include "core/editing/spellcheck/SpellChecker.h"
 #include "core/editing/suggestion/TextSuggestionController.h"
@@ -65,6 +68,7 @@
 #include "core/layout/api/LayoutViewItem.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/FrameLoadRequest.h"
+#include "core/loader/IdlenessDetector.h"
 #include "core/loader/NavigationScheduler.h"
 #include "core/page/DragController.h"
 #include "core/page/FocusController.h"
@@ -77,10 +81,8 @@
 #include "core/svg/SVGDocumentExtensions.h"
 #include "core/timing/Performance.h"
 #include "platform/Histogram.h"
-#include "platform/PluginScriptForbiddenScope.h"
-#include "platform/RuntimeEnabledFeatures.h"
-#include "platform/ScriptForbiddenScope.h"
 #include "platform/WebFrameScheduler.h"
+#include "platform/bindings/ScriptForbiddenScope.h"
 #include "platform/graphics/paint/ClipRecorder.h"
 #include "platform/graphics/paint/PaintCanvas.h"
 #include "platform/graphics/paint/PaintController.h"
@@ -92,6 +94,8 @@
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/loader/fetch/ResourceRequest.h"
 #include "platform/plugins/PluginData.h"
+#include "platform/plugins/PluginScriptForbiddenScope.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/scheduler/renderer/web_view_scheduler.h"
 #include "platform/text/TextStream.h"
 #include "platform/wtf/PtrUtil.h"
@@ -211,9 +215,10 @@ LocalFrame::~LocalFrame() {
   DCHECK(!view_);
 }
 
-DEFINE_TRACE(LocalFrame) {
+void LocalFrame::Trace(blink::Visitor* visitor) {
   visitor->Trace(probe_sink_);
   visitor->Trace(performance_monitor_);
+  visitor->Trace(idleness_detector_);
   visitor->Trace(loader_);
   visitor->Trace(navigation_scheduler_);
   visitor->Trace(view_);
@@ -267,6 +272,7 @@ void LocalFrame::Detach(FrameDetachType type) {
 
   if (IsLocalRoot())
     performance_monitor_->Shutdown();
+  idleness_detector_->Shutdown();
 
   PluginScriptForbiddenScope forbid_plugin_destructor_scripting;
   loader_.StopAllLoaders();
@@ -502,6 +508,7 @@ void LocalFrame::SetPrinting(bool printing,
   // Subframes of the one we're printing don't lay out to the page size.
   for (Frame* child = Tree().FirstChild(); child;
        child = child->Tree().NextSibling()) {
+    // TODO(tkent): Support remote frames. crbug.com/455764.
     if (child->IsLocalFrame())
       ToLocalFrame(child)->SetPrinting(printing, FloatSize(), FloatSize(), 0);
   }
@@ -635,7 +642,8 @@ String LocalFrame::SelectedTextForClipboard() const {
   return Selection().SelectedTextForClipboard();
 }
 
-PositionWithAffinity LocalFrame::PositionForPoint(const IntPoint& frame_point) {
+PositionWithAffinity LocalFrame::PositionForPoint(
+    const LayoutPoint& frame_point) {
   HitTestResult result = GetEventHandler().HitTestResultAtPoint(frame_point);
   Node* node = result.InnerNodeOrImageMapImage();
   if (!node)
@@ -646,15 +654,15 @@ PositionWithAffinity LocalFrame::PositionForPoint(const IntPoint& frame_point) {
   const PositionWithAffinity position =
       layout_object->PositionForPoint(result.LocalPoint());
   if (position.IsNull())
-    return PositionWithAffinity(FirstPositionInOrBeforeNode(node));
+    return PositionWithAffinity(FirstPositionInOrBeforeNode(*node));
   return position;
 }
 
-Document* LocalFrame::DocumentAtPoint(const IntPoint& point_in_root_frame) {
+Document* LocalFrame::DocumentAtPoint(const LayoutPoint& point_in_root_frame) {
   if (!View())
     return nullptr;
 
-  IntPoint pt = View()->RootFrameToContents(point_in_root_frame);
+  LayoutPoint pt = View()->RootFrameToContents(point_in_root_frame);
 
   if (ContentLayoutItem().IsNull())
     return nullptr;
@@ -739,7 +747,9 @@ inline LocalFrame::LocalFrame(LocalFrameClient* client,
                               InterfaceRegistry* interface_registry)
     : Frame(client, page, owner, LocalWindowProxyManager::Create(*this)),
       frame_scheduler_(page.GetChromeClient().CreateFrameScheduler(
-          client->GetFrameBlameContext())),
+          client->GetFrameBlameContext(),
+          IsMainFrame() ? WebFrameScheduler::FrameType::kMainFrame
+                        : WebFrameScheduler::FrameType::kSubframe)),
       loader_(this),
       navigation_scheduler_(NavigationScheduler::Create(this)),
       script_controller_(ScriptController::Create(
@@ -756,7 +766,8 @@ inline LocalFrame::LocalFrame(LocalFrameClient* client,
       page_zoom_factor_(ParentPageZoomFactor(this)),
       text_zoom_factor_(ParentTextZoomFactor(this)),
       in_view_source_mode_(false),
-      interface_registry_(interface_registry) {
+      interface_registry_(interface_registry),
+      instrumentation_token_(client->GetInstrumentationToken()) {
   if (IsLocalRoot()) {
     probe_sink_ = new CoreProbeSink();
     performance_monitor_ = new PerformanceMonitor(this);
@@ -768,6 +779,7 @@ inline LocalFrame::LocalFrame(LocalFrameClient* client,
     probe_sink_ = LocalFrameRoot().probe_sink_;
     performance_monitor_ = LocalFrameRoot().performance_monitor_;
   }
+  idleness_detector_ = new IdlenessDetector(this);
 }
 
 WebFrameScheduler* LocalFrame::FrameScheduler() {
@@ -787,7 +799,7 @@ bool LocalFrame::CanNavigate(const Frame& target_frame,
       CanNavigateWithoutFramebusting(target_frame, error_reason);
   const bool sandboxed =
       GetSecurityContext()->GetSandboxFlags() != kSandboxNone;
-  const bool has_user_gesture = HasReceivedUserGesture();
+  const bool has_user_gesture = HasBeenActivated();
 
   // Top navigation in sandbox with or w/o 'allow-top-navigation'.
   if (target_frame != this && sandboxed && target_frame == Tree().Top()) {
@@ -1076,10 +1088,10 @@ void LocalFrame::MaybeAllowImagePlaceholder(FetchParameters& params) const {
   }
 }
 
-std::unique_ptr<WebURLLoader> LocalFrame::CreateURLLoader(
-    const ResourceRequest& request,
-    WebTaskRunner* task_runner) {
-  return Client()->CreateURLLoader(request, task_runner);
+WebURLLoaderFactory* LocalFrame::GetURLLoaderFactory() {
+  if (!url_loader_factory_)
+    url_loader_factory_ = Client()->CreateURLLoaderFactory();
+  return url_loader_factory_.get();
 }
 
 WebPluginContainerImpl* LocalFrame::GetWebPluginContainer(Node* node) const {
@@ -1109,20 +1121,29 @@ void LocalFrame::SetViewportIntersectionFromParent(
   }
 }
 
-void LocalFrame::NotifyUserActivation() {
-  bool had_gesture = HasReceivedUserGesture();
-  if (!had_gesture)
-    UpdateUserActivationInFrameTree();
-  Client()->SetHasReceivedUserGesture(had_gesture);
-}
+void LocalFrame::ForceSynchronousDocumentInstall(
+    const AtomicString& mime_type,
+    scoped_refptr<SharedBuffer> data) {
+  CHECK(loader_.StateMachine()->IsDisplayingInitialEmptyDocument());
+  DCHECK(!Client()->IsLocalFrameClientImpl());
 
-// static
-std::unique_ptr<UserGestureIndicator> LocalFrame::CreateUserGesture(
-    LocalFrame* frame,
-    UserGestureToken::Status status) {
-  if (frame)
-    frame->NotifyUserActivation();
-  return WTF::MakeUnique<UserGestureIndicator>(status);
+  // Any Document requires Shutdown() before detach, even the initial empty
+  // document.
+  GetDocument()->Shutdown();
+
+  DomWindow()->InstallNewDocument(
+      mime_type, DocumentInit::Create().WithFrame(this), false);
+  loader_.StateMachine()->AdvanceTo(
+      FrameLoaderStateMachine::kCommittedFirstRealLoad);
+
+  GetDocument()->OpenForNavigation(kForceSynchronousParsing, mime_type,
+                                   AtomicString("UTF-8"));
+  data->ForEachSegment(
+      [this](const char* segment, size_t segment_size, size_t segment_offset) {
+        GetDocument()->Parser()->AppendBytes(segment, segment_size);
+        return true;
+      });
+  GetDocument()->Parser()->Finish();
 }
 
 }  // namespace blink

@@ -27,9 +27,15 @@ class ASH_EXPORT FastInkPointerController : public ui::EventHandler {
   FastInkPointerController();
   ~FastInkPointerController() override;
 
+  bool enabled() const { return enabled_; }
+
   // Enables/disables the pointer. The user still has to press to see
   // the pointer.
   virtual void SetEnabled(bool enabled);
+
+ protected:
+  // Whether the controller is ready to start handling a new gesture.
+  virtual bool CanStartNewGesture(ui::TouchEvent* event);
 
  private:
   // ui::EventHandler:

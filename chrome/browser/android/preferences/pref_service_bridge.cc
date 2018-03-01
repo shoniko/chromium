@@ -24,6 +24,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
+#include "chrome/browser/android/preferences/prefs.h"
 
 #include "chrome/browser/android/adblock/adblock_bridge.h"
 
@@ -46,6 +47,7 @@
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/metrics/metrics_pref_names.h"
+#include "components/omnibox/browser/omnibox_pref_names.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
@@ -134,6 +136,13 @@ browsing_data::ClearBrowsingDataTab ToTabEnum(jint clear_browsing_data_tab) {
 // ----------------------------------------------------------------------------
 // Native JNI methods
 // ----------------------------------------------------------------------------
+
+static jboolean GetBoolean(JNIEnv* env,
+                           const JavaParamRef<jobject>& obj,
+                           const jint j_pref_index) {
+  return GetPrefService()->GetBoolean(
+      PrefServiceBridge::GetPrefNameExposedToJava(j_pref_index));
+}
 
 static jboolean IsContentSettingManaged(JNIEnv* env,
                                         const JavaParamRef<jobject>& obj,
@@ -224,6 +233,10 @@ static jboolean GetAcceptCookiesManagedByCustodian(
 static jboolean GetAutoplayEnabled(JNIEnv* env,
                                    const JavaParamRef<jobject>& obj) {
   return GetBooleanForContentSetting(CONTENT_SETTINGS_TYPE_AUTOPLAY);
+}
+
+static jboolean GetSoundEnabled(JNIEnv* env, const JavaParamRef<jobject>& obj) {
+  return GetBooleanForContentSetting(CONTENT_SETTINGS_TYPE_SOUND);
 }
 
 static jboolean GetBackgroundSyncEnabled(JNIEnv* env,
@@ -587,11 +600,6 @@ static void MigrateBrowsingDataPreferences(JNIEnv* env,
   browsing_data::MigratePreferencesToBasic(GetOriginalProfile()->GetPrefs());
 }
 
-static jboolean CanDeleteBrowsingHistory(JNIEnv* env,
-                                         const JavaParamRef<jobject>& obj) {
-  return GetPrefService()->GetBoolean(prefs::kAllowDeletingBrowserHistory);
-}
-
 static void SetAutoplayEnabled(JNIEnv* env,
                                const JavaParamRef<jobject>& obj,
                                jboolean allow) {
@@ -599,6 +607,16 @@ static void SetAutoplayEnabled(JNIEnv* env,
       HostContentSettingsMapFactory::GetForProfile(GetOriginalProfile());
   host_content_settings_map->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_AUTOPLAY,
+      allow ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK);
+}
+
+static void SetSoundEnabled(JNIEnv* env,
+                            const JavaParamRef<jobject>& obj,
+                            jboolean allow) {
+  HostContentSettingsMap* host_content_settings_map =
+      HostContentSettingsMapFactory::GetForProfile(GetOriginalProfile());
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_SOUND,
       allow ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK);
 }
 
@@ -1069,4 +1087,18 @@ static void SetSupervisedUserId(JNIEnv* env,
                                 const JavaParamRef<jstring>& pref) {
   GetPrefService()->SetString(prefs::kSupervisedUserId,
                               ConvertJavaStringToUTF8(env, pref));
+}
+
+static void SetChromeHomePersonalizedOmniboxSuggestionsEnabled(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jboolean is_enabled) {
+  GetPrefService()->SetBoolean(omnibox::kZeroSuggestChromeHomePersonalized,
+                               is_enabled);
+}
+
+const char* PrefServiceBridge::GetPrefNameExposedToJava(int pref_index) {
+  DCHECK_GE(pref_index, 0);
+  DCHECK_LT(pref_index, Pref::PREF_NUM_PREFS);
+  return kPrefsExposedToJava[pref_index];
 }

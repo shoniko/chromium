@@ -11,10 +11,10 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 #include "chrome/browser/ui/app_list/search/omnibox_result.h"
-#include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
 #include "components/omnibox/browser/autocomplete_input.h"
+#include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "ui/app_list/search_result.h"
 #include "url/gurl.h"
 
@@ -35,10 +35,10 @@ OmniboxProvider::~OmniboxProvider() {}
 
 void OmniboxProvider::Start(bool is_voice_query, const base::string16& query) {
   is_voice_query_ = is_voice_query;
-  controller_->Start(AutocompleteInput(
-      query, base::string16::npos, std::string(), GURL(), base::string16(),
-      metrics::OmniboxEventProto::INVALID_SPEC, false, false, true, true, false,
-      ChromeAutocompleteSchemeClassifier(profile_)));
+  AutocompleteInput input =
+      AutocompleteInput(query, metrics::OmniboxEventProto::INVALID_SPEC,
+                        ChromeAutocompleteSchemeClassifier(profile_));
+  controller_->Start(input);
 }
 
 void OmniboxProvider::Stop() {

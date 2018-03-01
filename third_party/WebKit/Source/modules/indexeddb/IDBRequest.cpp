@@ -40,7 +40,7 @@
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/events/EventQueue.h"
-#include "modules/IndexedDBNames.h"
+#include "modules/indexed_db_names.h"
 #include "modules/indexeddb/IDBCursorWithValue.h"
 #include "modules/indexeddb/IDBDatabase.h"
 #include "modules/indexeddb/IDBEventDispatcher.h"
@@ -122,7 +122,7 @@ IDBRequest::~IDBRequest() {
          ready_state_ == kEarlyDeath || !GetExecutionContext());
 }
 
-DEFINE_TRACE(IDBRequest) {
+void IDBRequest::Trace(blink::Visitor* visitor) {
   visitor->Trace(transaction_);
   visitor->Trace(source_);
   visitor->Trace(result_);
@@ -254,12 +254,12 @@ IDBCursor* IDBRequest::GetResultCursor() const {
 void IDBRequest::SetResultCursor(IDBCursor* cursor,
                                  IDBKey* key,
                                  IDBKey* primary_key,
-                                 RefPtr<IDBValue>&& value) {
+                                 scoped_refptr<IDBValue>&& value) {
   DCHECK_EQ(ready_state_, PENDING);
   cursor_key_ = key;
   cursor_primary_key_ = primary_key;
   cursor_value_ = std::move(value);
-  AckReceivedBlobs(cursor_value_.Get());
+  AckReceivedBlobs(cursor_value_.get());
 
   EnqueueResultInternal(IDBAny::Create(cursor));
 }
@@ -272,9 +272,10 @@ void IDBRequest::AckReceivedBlobs(const IDBValue* value) {
     transaction_->BackendDB()->AckReceivedBlobs(uuids);
 }
 
-void IDBRequest::AckReceivedBlobs(const Vector<RefPtr<IDBValue>>& values) {
+void IDBRequest::AckReceivedBlobs(
+    const Vector<scoped_refptr<IDBValue>>& values) {
   for (size_t i = 0; i < values.size(); ++i)
-    AckReceivedBlobs(values[i].Get());
+    AckReceivedBlobs(values[i].get());
 }
 
 bool IDBRequest::ShouldEnqueueEvent() const {
@@ -344,10 +345,10 @@ void IDBRequest::HandleResponse() {
 void IDBRequest::HandleResponse(std::unique_ptr<WebIDBCursor> backend,
                                 IDBKey* key,
                                 IDBKey* primary_key,
-                                RefPtr<IDBValue>&& value) {
+                                scoped_refptr<IDBValue>&& value) {
   DCHECK(transit_blob_handles_.IsEmpty());
   DCHECK(transaction_);
-  bool is_wrapped = IDBValueUnwrapper::IsWrapped(value.Get());
+  bool is_wrapped = IDBValueUnwrapper::IsWrapped(value.get());
   if (!transaction_->HasQueuedResults() && !is_wrapped) {
     return EnqueueResponse(std::move(backend), key, primary_key,
                            std::move(value));
@@ -358,10 +359,10 @@ void IDBRequest::HandleResponse(std::unique_ptr<WebIDBCursor> backend,
                 WrapPersistent(transaction_.Get()))));
 }
 
-void IDBRequest::HandleResponse(RefPtr<IDBValue>&& value) {
+void IDBRequest::HandleResponse(scoped_refptr<IDBValue>&& value) {
   DCHECK(transit_blob_handles_.IsEmpty());
   DCHECK(transaction_);
-  bool is_wrapped = IDBValueUnwrapper::IsWrapped(value.Get());
+  bool is_wrapped = IDBValueUnwrapper::IsWrapped(value.get());
   if (!transaction_->HasQueuedResults() && !is_wrapped)
     return EnqueueResponse(std::move(value));
   transaction_->EnqueueResult(WTF::MakeUnique<IDBRequestQueueItem>(
@@ -370,7 +371,7 @@ void IDBRequest::HandleResponse(RefPtr<IDBValue>&& value) {
                 WrapPersistent(transaction_.Get()))));
 }
 
-void IDBRequest::HandleResponse(const Vector<RefPtr<IDBValue>>& values) {
+void IDBRequest::HandleResponse(const Vector<scoped_refptr<IDBValue>>& values) {
   DCHECK(transit_blob_handles_.IsEmpty());
   DCHECK(transaction_);
   bool is_wrapped = IDBValueUnwrapper::IsWrapped(values);
@@ -384,10 +385,10 @@ void IDBRequest::HandleResponse(const Vector<RefPtr<IDBValue>>& values) {
 
 void IDBRequest::HandleResponse(IDBKey* key,
                                 IDBKey* primary_key,
-                                RefPtr<IDBValue>&& value) {
+                                scoped_refptr<IDBValue>&& value) {
   DCHECK(transit_blob_handles_.IsEmpty());
   DCHECK(transaction_);
-  bool is_wrapped = IDBValueUnwrapper::IsWrapped(value.Get());
+  bool is_wrapped = IDBValueUnwrapper::IsWrapped(value.get());
   if (!transaction_->HasQueuedResults() && !is_wrapped)
     return EnqueueResponse(key, primary_key, std::move(value));
 
@@ -428,7 +429,7 @@ void IDBRequest::EnqueueResponse(const Vector<String>& string_list) {
 void IDBRequest::EnqueueResponse(std::unique_ptr<WebIDBCursor> backend,
                                  IDBKey* key,
                                  IDBKey* primary_key,
-                                 RefPtr<IDBValue>&& value) {
+                                 scoped_refptr<IDBValue>&& value) {
   IDB_TRACE1("IDBRequest::EnqueueResponse(IDBCursor)", "size",
              value ? value->DataSize() : 0);
   if (!ShouldEnqueueEvent()) {
@@ -470,7 +471,7 @@ void IDBRequest::EnqueueResponse(IDBKey* idb_key) {
 }
 
 namespace {
-size_t SizeOfValues(const Vector<RefPtr<IDBValue>>& values) {
+size_t SizeOfValues(const Vector<scoped_refptr<IDBValue>>& values) {
   size_t size = 0;
   for (const auto& value : values)
     size += value->DataSize();
@@ -478,7 +479,8 @@ size_t SizeOfValues(const Vector<RefPtr<IDBValue>>& values) {
 }
 }  // namespace
 
-void IDBRequest::EnqueueResponse(const Vector<RefPtr<IDBValue>>& values) {
+void IDBRequest::EnqueueResponse(
+    const Vector<scoped_refptr<IDBValue>>& values) {
   IDB_TRACE1("IDBRequest::EnqueueResponse([IDBValue])", "size",
              SizeOfValues(values));
   if (!ShouldEnqueueEvent()) {
@@ -503,7 +505,7 @@ static IDBObjectStore* EffectiveObjectStore(IDBAny* source) {
 }
 #endif  // DCHECK_IS_ON()
 
-void IDBRequest::EnqueueResponse(RefPtr<IDBValue>&& value) {
+void IDBRequest::EnqueueResponse(scoped_refptr<IDBValue>&& value) {
   IDB_TRACE1("IDBRequest::EnqueueResponse(IDBValue)", "size",
              value ? value->DataSize() : 0);
   if (!ShouldEnqueueEvent()) {
@@ -511,7 +513,7 @@ void IDBRequest::EnqueueResponse(RefPtr<IDBValue>&& value) {
     return;
   }
 
-  AckReceivedBlobs(value.Get());
+  AckReceivedBlobs(value.get());
 
   if (pending_cursor_) {
     // Value should be null, signifying the end of the cursor's range.
@@ -565,7 +567,7 @@ void IDBRequest::SetResult(IDBAny* result) {
 
 void IDBRequest::EnqueueResponse(IDBKey* key,
                                  IDBKey* primary_key,
-                                 RefPtr<IDBValue>&& value) {
+                                 scoped_refptr<IDBValue>&& value) {
   IDB_TRACE("IDBRequest::EnqueueResponse(IDBKey, IDBKey primaryKey, IDBValue)");
   if (!ShouldEnqueueEvent()) {
     metrics_.RecordAndReset();
@@ -757,7 +759,7 @@ void IDBRequest::EnqueueEvent(Event* event) {
 void IDBRequest::DequeueEvent(Event* event) {
   for (size_t i = 0; i < enqueued_events_.size(); ++i) {
     if (enqueued_events_[i].Get() == event)
-      enqueued_events_.erase(i);
+      enqueued_events_.EraseAt(i);
   }
 }
 

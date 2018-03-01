@@ -11,10 +11,12 @@
 #include "platform/fonts/NGTextFragmentPaintInfo.h"
 #include "platform/fonts/shaping/ShapeResult.h"
 #include "platform/wtf/text/StringView.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
 class ShapeResult;
+struct NGPhysicalOffsetRect;
 
 // In CSS Writing Modes Levle 4, line orientation for layout and line
 // orientation for paint are not always the same.
@@ -47,7 +49,7 @@ class CORE_EXPORT NGPhysicalTextFragment final : public NGPhysicalFragment {
                          int expansion,
                          NGLineOrientation line_orientation,
                          NGTextEndEffect end_effect,
-                         RefPtr<const ShapeResult> shape_result)
+                         scoped_refptr<const ShapeResult> shape_result)
       : NGPhysicalFragment(layout_object, style, size, kFragmentText),
         text_(text),
         item_index_(item_index),
@@ -61,7 +63,7 @@ class CORE_EXPORT NGPhysicalTextFragment final : public NGPhysicalFragment {
   unsigned Length() const { return end_offset_ - start_offset_; }
   StringView Text() const { return StringView(text_, start_offset_, Length()); }
 
-  const ShapeResult* TextShapeResult() const { return shape_result_.Get(); }
+  const ShapeResult* TextShapeResult() const { return shape_result_.get(); }
 
   // Deprecating ItemIndex in favor of storing and accessing each component;
   // e.g., text, style, ShapeResult, etc. Currently used for CreateBidiRuns and
@@ -85,12 +87,16 @@ class CORE_EXPORT NGPhysicalTextFragment final : public NGPhysicalFragment {
     return LineOrientation() == NGLineOrientation::kHorizontal;
   }
 
+  // The visual bounding box that includes glpyh bounding box and CSS
+  // properties, in local coordinates.
+  NGPhysicalOffsetRect LocalVisualRect() const;
+
   NGTextEndEffect EndEffect() const {
     return static_cast<NGTextEndEffect>(end_effect_);
   }
 
-  RefPtr<NGPhysicalFragment> CloneWithoutOffset() const {
-    return AdoptRef(new NGPhysicalTextFragment(
+  scoped_refptr<NGPhysicalFragment> CloneWithoutOffset() const {
+    return WTF::AdoptRef(new NGPhysicalTextFragment(
         layout_object_, Style(), text_, item_index_, start_offset_, end_offset_,
         size_, expansion_, LineOrientation(), EndEffect(), shape_result_));
   }
@@ -103,7 +109,7 @@ class CORE_EXPORT NGPhysicalTextFragment final : public NGPhysicalFragment {
  private:
   // The text of NGInlineNode; i.e., of a parent block. The text for this
   // fragment is a substring(start_offset_, end_offset_) of this string.
-  const String& text_;
+  const String text_;
 
   // Deprecating, ItemIndexDeprecated().
   unsigned item_index_;
@@ -112,7 +118,7 @@ class CORE_EXPORT NGPhysicalTextFragment final : public NGPhysicalFragment {
   unsigned start_offset_;
   unsigned end_offset_;
 
-  RefPtr<const ShapeResult> shape_result_;
+  scoped_refptr<const ShapeResult> shape_result_;
 
   int expansion_;
 

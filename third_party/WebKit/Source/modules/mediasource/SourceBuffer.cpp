@@ -41,8 +41,8 @@
 #include "core/dom/events/MediaElementEventQueue.h"
 #include "core/frame/Deprecation.h"
 #include "core/frame/UseCounter.h"
-#include "core/html/HTMLMediaElement.h"
 #include "core/html/TimeRanges.h"
+#include "core/html/media/HTMLMediaElement.h"
 #include "core/html/track/AudioTrack.h"
 #include "core/html/track/AudioTrackList.h"
 #include "core/html/track/VideoTrack.h"
@@ -51,8 +51,8 @@
 #include "core/typed_arrays/DOMArrayBufferView.h"
 #include "modules/mediasource/MediaSource.h"
 #include "modules/mediasource/SourceBufferTrackBaseSupplement.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/MathExtras.h"
 #include "public/platform/WebSourceBuffer.h"
 
@@ -1337,7 +1337,7 @@ void SourceBuffer::AppendError() {
   source_->EndOfStreamAlgorithm(WebMediaSource::kEndOfStreamStatusDecodeError);
 }
 
-DEFINE_TRACE(SourceBuffer) {
+void SourceBuffer::Trace(blink::Visitor* visitor) {
   visitor->Trace(source_);
   visitor->Trace(track_defaults_);
   visitor->Trace(async_event_queue_);

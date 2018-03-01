@@ -87,7 +87,7 @@ struct Timing {
             iteration_duration == other.iteration_duration) &&
            playback_rate == other.playback_rate &&
            direction == other.direction &&
-           DataEquivalent(timing_function.Get(), other.timing_function.Get());
+           DataEquivalent(timing_function.get(), other.timing_function.get());
   }
 
   bool operator!=(const Timing& other) const { return !(*this == other); }
@@ -102,7 +102,7 @@ struct Timing {
   // TODO(crbug.com/630915) Remove playbackRate
   double playback_rate;
   PlaybackDirection direction;
-  RefPtr<TimingFunction> timing_function;
+  scoped_refptr<TimingFunction> timing_function;
 };
 
 }  // namespace blink

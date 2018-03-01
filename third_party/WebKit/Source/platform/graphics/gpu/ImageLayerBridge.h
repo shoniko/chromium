@@ -29,7 +29,7 @@ class PLATFORM_EXPORT ImageLayerBridge
   ImageLayerBridge(OpacityMode);
   ~ImageLayerBridge();
 
-  void SetImage(PassRefPtr<StaticBitmapImage>);
+  void SetImage(RefPtr<StaticBitmapImage>);
   void Dispose();
 
   // cc::TextureLayerClient implementation.
@@ -56,7 +56,7 @@ class PLATFORM_EXPORT ImageLayerBridge
 
   bool IsAccelerated() { return image_->IsTextureBacked(); }
 
-  DEFINE_INLINE_TRACE() {}
+  void Trace(blink::Visitor* visitor) {}
 
  private:
   std::unique_ptr<viz::SharedBitmap> CreateOrRecycleBitmap();

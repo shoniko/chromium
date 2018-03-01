@@ -108,8 +108,8 @@ void AddResourceIcon(const gfx::ImageSkia* skia_image, void* data) {
 base::string16 PrepareForDisplay(const base::string16& message,
                                  bool bullet_point) {
   return bullet_point ? l10n_util::GetStringFUTF16(
-      IDS_EXTENSION_PERMISSION_LINE,
-      message) : message;
+                            IDS_EXTENSION_PERMISSION_LINE, message)
+                      : message;
 }
 
 void ShowExtensionInstallDialogImpl(
@@ -158,16 +158,10 @@ class CustomScrollableView : public views::View {
 BulletedView::BulletedView(views::View* view) {
   views::GridLayout* layout = views::GridLayout::CreateAndInstall(this);
   views::ColumnSet* column_set = layout->AddColumnSet(0);
-  column_set->AddColumn(views::GridLayout::CENTER,
-                        views::GridLayout::LEADING,
-                        0,
-                        views::GridLayout::FIXED,
-                        kBulletWidth,
-                        0);
-  column_set->AddColumn(views::GridLayout::LEADING,
-                        views::GridLayout::LEADING,
-                        0,
-                        views::GridLayout::USE_PREF,
+  column_set->AddColumn(views::GridLayout::CENTER, views::GridLayout::LEADING,
+                        0, views::GridLayout::FIXED, kBulletWidth, 0);
+  column_set->AddColumn(views::GridLayout::LEADING, views::GridLayout::LEADING,
+                        0, views::GridLayout::USE_PREF,
                         0,  // No fixed width.
                         0);
   layout->StartRow(0, 0);
@@ -445,15 +439,21 @@ views::GridLayout* ExtensionInstallDialogView::CreateLayout(
     int column_set_id) {
   container_ = new views::View();
   ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
-  const gfx::Insets content_insets =
-      provider->GetInsetsMetric(views::INSETS_DIALOG_CONTENTS);
+  const gfx::Insets dialog_insets =
+      provider->GetInsetsMetric(views::INSETS_DIALOG);
+  // TODO(crbug.com/702196): Give this dialog a standard title and use
+  // ChromeLayoutProvider::GetDialogInsetsForContentType instead.
+  const gfx::Insets content_insets(
+      dialog_insets.top(), dialog_insets.left(),
+      provider->GetDistanceMetric(
+          views::DISTANCE_DIALOG_CONTENT_MARGIN_BOTTOM_TEXT),
+      dialog_insets.right());
 
-  // This is views::GridLayout::CreatePanel(), but without a top or right
-  // margin. The empty dialog title will then become the top margin, and a
-  // padding column will be manually added to handle a right margin. This is
-  // done so that the extension icon can be shown on the right of the dialog
-  // title, but on the same y-axis, and the scroll view used to contain other
-  // content can have its scrollbar aligned with the right edge of the dialog.
+  // The empty dialog title will become the top margin, and a padding column
+  // will be manually added to handle a right margin. This is done so that the
+  // extension icon can be shown on the right of the dialog title, but on the
+  // same y-axis, and the scroll view used to contain other content can have its
+  // scrollbar aligned with the right edge of the dialog.
   views::GridLayout* layout = views::GridLayout::CreateAndInstall(container_);
   container_->SetBorder(views::CreateEmptyBorder(0, content_insets.left(),
                                                  content_insets.bottom(), 0));

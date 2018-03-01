@@ -434,7 +434,7 @@ Tab::Tab(TabController* controller, gfx::AnimationContainer* container)
       favicon_hiding_offset_(0),
       should_display_crashed_favicon_(false),
       pulse_animation_(this),
-      crash_icon_animation_(this),
+      crash_icon_animation_(base::MakeUnique<FaviconCrashAnimation>(this)),
       animation_container_(container),
       throbber_(nullptr),
       alert_indicator_button_(nullptr),
@@ -512,9 +512,10 @@ bool Tab::IsActive() const {
 }
 
 void Tab::ActiveStateChanged() {
-  // The attention indicator is only shown for inactive tabs. When transitioning
-  // between active and inactive always reset the state to enforce that.
-  SetTabNeedsAttention(false);
+  // Cancel the pinned tab title change attention indicator when a tab becomes
+  // activated.
+  if (IsActive())
+    current_attention_types_ &= ~AttentionType::kPinnedTabTitleChange;
   OnButtonColorMaybeChanged();
   alert_indicator_button_->UpdateEnabledForMuteToggle();
   Layout();
@@ -549,13 +550,13 @@ void Tab::SetData(const TabRendererData& data) {
   title_->SetText(title);
 
   if (!data_.IsCrashed()) {
-    crash_icon_animation_.Stop();
+    crash_icon_animation_->Stop();
     SetShouldDisplayCrashedFavicon(false);
     favicon_hiding_offset_ = 0;
   } else if (!should_display_crashed_favicon_ &&
-             !crash_icon_animation_.is_animating()) {
+             !crash_icon_animation_->is_animating()) {
     data_.alert_state = TabAlertState::NONE;
-    crash_icon_animation_.Start();
+    crash_icon_animation_->Start();
   }
 
   if (data_.alert_state != old.alert_state)
@@ -585,11 +586,16 @@ void Tab::StopPulse() {
   pulse_animation_.Stop();
 }
 
-void Tab::SetTabNeedsAttention(bool value) {
-  if (value == showing_attention_indicator_)
-    return;
+void Tab::TabTitleChangedNotLoading() {
+  current_attention_types_ |= AttentionType::kPinnedTabTitleChange;
+  SchedulePaint();
+}
 
-  showing_attention_indicator_ = value;
+void Tab::SetTabNeedsAttention(bool attention) {
+  if (attention)
+    current_attention_types_ |= AttentionType::kTabWantsAttentionStatus;
+  else
+    current_attention_types_ &= ~AttentionType::kTabWantsAttentionStatus;
   SchedulePaint();
 }
 
@@ -1055,9 +1061,9 @@ void Tab::DataChanged(const TabRendererData& old) {
     return;
 
   if (data().blocked)
-    StartPulse();
+    current_attention_types_ |= AttentionType::kBlockedWebContents;
   else
-    StopPulse();
+    current_attention_types_ &= ~AttentionType::kBlockedWebContents;
 }
 
 void Tab::PaintTab(gfx::Canvas* canvas, const gfx::Path& clip) {
@@ -1311,7 +1317,13 @@ void Tab::PaintIcon(gfx::Canvas* canvas) {
     }
   }
 
-  if (showing_attention_indicator_ && !should_display_crashed_favicon_) {
+  // Don't show the attention indicator for blocked WebContentses if the tab is
+  // active; it's distracting.
+  int actual_attention_types = current_attention_types_;
+  if (IsActive())
+    actual_attention_types &= ~AttentionType::kBlockedWebContents;
+
+  if (actual_attention_types != 0 && !should_display_crashed_favicon_) {
     PaintAttentionIndicatorAndIcon(canvas, bounds);
   } else if (!favicon_.isNull()) {
     canvas->DrawImageInt(favicon_, 0, 0, bounds.width(), bounds.height(),
@@ -1462,7 +1474,7 @@ void Tab::ScheduleIconPaint() {
     return;
 
   // Extends the area to the bottom when the crash animation is in progress.
-  if (crash_icon_animation_.is_animating())
+  if (crash_icon_animation_->is_animating())
     bounds.set_height(height() - bounds.y());
   SchedulePaintInRect(GetMirroredRect(bounds));
 }

@@ -173,9 +173,8 @@ void SharedModelTypeProcessor::ReportError(const ModelError& error) {
   }
 }
 
-void SharedModelTypeProcessor::ReportError(
-    const tracked_objects::Location& location,
-    const std::string& message) {
+void SharedModelTypeProcessor::ReportError(const base::Location& location,
+                                           const std::string& message) {
   ReportError(ModelError(location, message));
 }
 
@@ -186,7 +185,7 @@ void SharedModelTypeProcessor::ConnectSync(
 
   worker_ = std::move(worker);
 
-  FlushPendingCommitRequests();
+  NudgeForCommitIfNeeded();
 }
 
 void SharedModelTypeProcessor::DisconnectSync() {
@@ -234,7 +233,7 @@ void SharedModelTypeProcessor::Put(const std::string& storage_key,
   entity->MakeLocalChange(std::move(data));
   metadata_change_list->UpdateMetadata(storage_key, entity->metadata());
 
-  FlushPendingCommitRequests();
+  NudgeForCommitIfNeeded();
 }
 
 void SharedModelTypeProcessor::Delete(
@@ -260,7 +259,7 @@ void SharedModelTypeProcessor::Delete(
   entity->Delete();
 
   metadata_change_list->UpdateMetadata(storage_key, entity->metadata());
-  FlushPendingCommitRequests();
+  NudgeForCommitIfNeeded();
 }
 
 void SharedModelTypeProcessor::UpdateStorageKey(
@@ -292,9 +291,7 @@ void SharedModelTypeProcessor::UntrackEntity(const EntityData& entity_data) {
   entities_.erase(client_tag_hash);
 }
 
-void SharedModelTypeProcessor::FlushPendingCommitRequests() {
-  CommitRequestDataList commit_requests;
-
+void SharedModelTypeProcessor::NudgeForCommitIfNeeded() {
   // Don't bother sending anything if there's no one to send to.
   if (!IsConnected())
     return;
@@ -303,18 +300,18 @@ void SharedModelTypeProcessor::FlushPendingCommitRequests() {
   if (!model_type_state_.initial_sync_done())
     return;
 
-  // TODO(rlarocque): Do something smarter than iterate here.
+  // Nudge worker if there are any entities with local changes.0
+  bool has_local_changes = false;
   for (const auto& kv : entities_) {
     ProcessorEntityTracker* entity = kv.second.get();
     if (entity->RequiresCommitRequest() && !entity->RequiresCommitData()) {
-      CommitRequestData request;
-      entity->InitializeCommitRequestData(&request);
-      commit_requests.push_back(request);
+      has_local_changes = true;
+      break;
     }
   }
 
-  if (!commit_requests.empty())
-    worker_->EnqueueForCommit(commit_requests);
+  if (has_local_changes)
+    worker_->NudgeForCommit();
 }
 
 void SharedModelTypeProcessor::GetLocalChanges(
@@ -322,18 +319,33 @@ void SharedModelTypeProcessor::GetLocalChanges(
     const GetLocalChangesCallback& callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_GT(max_entries, 0U);
-  callback.Run(CommitRequestDataList());
+
+  CommitRequestDataList commit_requests;
+  // TODO(rlarocque): Do something smarter than iterate here.
+  for (const auto& kv : entities_) {
+    ProcessorEntityTracker* entity = kv.second.get();
+    if (entity->RequiresCommitRequest() && !entity->RequiresCommitData()) {
+      CommitRequestData request;
+      entity->InitializeCommitRequestData(&request);
+      commit_requests.push_back(request);
+      if (commit_requests.size() >= max_entries) {
+        break;
+      }
+    }
+  }
+
+  callback.Run(std::move(commit_requests));
 }
 
 void SharedModelTypeProcessor::OnCommitCompleted(
-    const sync_pb::ModelTypeState& type_state,
+    const sync_pb::ModelTypeState& model_type_state,
     const CommitResponseDataList& response_list) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   std::unique_ptr<MetadataChangeList> metadata_change_list =
       bridge_->CreateMetadataChangeList();
   EntityChangeList entity_change_list;
 
-  model_type_state_ = type_state;
+  model_type_state_ = model_type_state;
   metadata_change_list->UpdateModelTypeState(model_type_state_);
 
   for (const CommitResponseData& data : response_list) {
@@ -345,7 +357,7 @@ void SharedModelTypeProcessor::OnCommitCompleted(
       continue;
     }
 
-    entity->ReceiveCommitResponse(data);
+    entity->ReceiveCommitResponse(data, commit_only_);
 
     if (commit_only_) {
       if (!entity->IsUnsynced()) {
@@ -355,6 +367,11 @@ void SharedModelTypeProcessor::OnCommitCompleted(
         storage_key_to_tag_hash_.erase(entity->storage_key());
         entities_.erase(entity->metadata().client_tag_hash());
       }
+      // If unsynced, we could theoretically update persisted metadata to have
+      // more accurate bookkeeping. However, this wouldn't actually do anything
+      // useful, we still need to commit again, and we're not going to include
+      // any of the changing metadata in the commit message. So skip updating
+      // metadata.
     } else if (entity->CanClearMetadata()) {
       metadata_change_list->ClearMetadata(entity->storage_key());
       storage_key_to_tag_hash_.erase(entity->storage_key());
@@ -363,6 +380,18 @@ void SharedModelTypeProcessor::OnCommitCompleted(
       metadata_change_list->UpdateMetadata(entity->storage_key(),
                                            entity->metadata());
     }
+  }
+
+  // Entities not mentioned in response_list weren't committed. We should reset
+  // their commit_requested_sequence_number so they are committed again on next
+  // sync cycle.
+  // TODO(crbug.com/740757): Iterating over all entities is inefficient. It is
+  // better to remember in GetLocalChanges which entities are bieng committed
+  // and adjust only them. Alternatively we can make worker return commit status
+  // for all entities, not just successful ones and use that to lookup entities
+  // to clear.
+  for (auto& entity_kv : entities_) {
+    entity_kv.second->ClearTransientSyncState();
   }
 
   base::Optional<ModelError> error = bridge_->ApplySyncChanges(
@@ -443,7 +472,7 @@ void SharedModelTypeProcessor::OnUpdateReceived(
   // updated by bridge as part of ApplySyncChanges.
   DCHECK(AllStorageKeysPopulated());
   // There may be new reasons to commit by the time this function is done.
-  FlushPendingCommitRequests();
+  NudgeForCommitIfNeeded();
 }
 
 ProcessorEntityTracker* SharedModelTypeProcessor::ProcessUpdate(
@@ -654,7 +683,7 @@ void SharedModelTypeProcessor::OnInitialUpdateReceived(
   DCHECK(AllStorageKeysPopulated());
 
   // We may have new reasons to commit by the time this function is done.
-  FlushPendingCommitRequests();
+  NudgeForCommitIfNeeded();
 }
 
 void SharedModelTypeProcessor::OnInitialPendingDataLoaded(
@@ -678,7 +707,7 @@ void SharedModelTypeProcessor::OnDataLoadedForReEncryption(
   DCHECK(!waiting_for_pending_data_);
 
   ConsumeDataBatch(std::move(data_batch));
-  FlushPendingCommitRequests();
+  NudgeForCommitIfNeeded();
 }
 
 void SharedModelTypeProcessor::ConsumeDataBatch(
@@ -804,6 +833,7 @@ void SharedModelTypeProcessor::ExpireEntriesIfNeeded(
   if (has_expired_changes)
     bridge_->ApplySyncChanges(std::move(metadata_changes), EntityChangeList());
 }
+
 void SharedModelTypeProcessor::ClearMetadataForEntries(
     const std::vector<std::string>& storage_key_to_be_deleted,
     MetadataChangeList* metadata_changes) {
@@ -822,11 +852,11 @@ void SharedModelTypeProcessor::ExpireEntriesByVersion(
   DCHECK(metadata_changes);
 
   std::vector<std::string> storage_key_to_be_deleted;
-  for (const auto& kv : storage_key_to_tag_hash_) {
-    ProcessorEntityTracker* entity = GetEntityForTagHash(kv.second);
+  for (const auto& kv : entities_) {
+    ProcessorEntityTracker* entity = kv.second.get();
     if (entity && !entity->IsUnsynced() &&
         entity->metadata().server_version() < version_watermark) {
-      storage_key_to_be_deleted.push_back(kv.first);
+      storage_key_to_be_deleted.push_back(entity->storage_key());
     }
   }
 
@@ -841,12 +871,12 @@ void SharedModelTypeProcessor::ExpireEntriesByAge(
   base::Time to_be_expired =
       base::Time::Now() - base::TimeDelta::FromDays(age_watermark_in_days);
   std::vector<std::string> storage_key_to_be_deleted;
-  for (const auto& kv : storage_key_to_tag_hash_) {
-    ProcessorEntityTracker* entity = GetEntityForTagHash(kv.second);
+  for (const auto& kv : entities_) {
+    ProcessorEntityTracker* entity = kv.second.get();
     if (entity && !entity->IsUnsynced() &&
         ProtoTimeToTime(entity->metadata().modification_time()) <=
             to_be_expired) {
-      storage_key_to_be_deleted.push_back(kv.first);
+      storage_key_to_be_deleted.push_back(entity->storage_key());
     }
   }
 

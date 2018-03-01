@@ -8,6 +8,7 @@
 #include <oleacc.h>
 #include <shellapi.h>
 #include <tchar.h>
+#include <wrl/client.h>
 
 #include <utility>
 
@@ -21,7 +22,6 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
-#include "base/win/scoped_comptr.h"
 #include "base/win/scoped_gdi_object.h"
 #include "base/win/windows_version.h"
 #include "ui/accessibility/platform/ax_platform_node_win.h"
@@ -29,7 +29,7 @@
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/ime/text_input_type.h"
-#include "ui/base/ui_base_switches.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/base/view_prop.h"
 #include "ui/base/win/internal_constants.h"
 #include "ui/base/win/lock_state.h"
@@ -248,6 +248,9 @@ const int kTouchDownContextResetTimeout = 500;
 // between the touch/pen message and the mouse move is within 500 ms and at the
 // same location as the cursor.
 const int kSynthesizedMouseMessagesTimeDifference = 500;
+
+// Currently this flag is always false - see http://crbug.com/763223
+const bool kUsePointerEventsForTouch = false;
 
 }  // namespace
 
@@ -1578,15 +1581,16 @@ LRESULT HWNDMessageHandler::OnGetObject(UINT message,
   DWORD obj_id = static_cast<DWORD>(static_cast<DWORD_PTR>(l_param));
 
   // Accessibility readers will send an OBJID_CLIENT message
-  if (static_cast<DWORD>(OBJID_CLIENT) == obj_id) {
+  if (delegate_->GetNativeViewAccessible() &&
+      static_cast<DWORD>(OBJID_CLIENT) == obj_id) {
     // Retrieve MSAA dispatch object for the root view.
-    base::win::ScopedComPtr<IAccessible> root(
+    Microsoft::WRL::ComPtr<IAccessible> root(
         delegate_->GetNativeViewAccessible());
     reference_result = LresultFromObject(IID_IAccessible, w_param,
         static_cast<IAccessible*>(root.Detach()));
   } else if (::GetFocus() == hwnd() && ax_system_caret_ &&
              static_cast<DWORD>(OBJID_CARET) == obj_id) {
-    base::win::ScopedComPtr<IAccessible> ax_system_caret_accessible =
+    Microsoft::WRL::ComPtr<IAccessible> ax_system_caret_accessible =
         ax_system_caret_->GetCaret();
     reference_result = LresultFromObject(IID_IAccessible, w_param,
                                          ax_system_caret_accessible.Detach());
@@ -1741,10 +1745,12 @@ LRESULT HWNDMessageHandler::OnPointerEvent(UINT message,
   }
 
   switch (pointer_type) {
-    case PT_TOUCH:
-      return HandlePointerEventTypeTouch(message, w_param, l_param);
     case PT_PEN:
       return HandlePointerEventTypePen(message, w_param, l_param);
+    case PT_TOUCH:
+      if (kUsePointerEventsForTouch)
+        return HandlePointerEventTypeTouch(message, w_param, l_param);
+    // FALLTHROUGH_INTENDED
     default:
       SetMsgHandled(FALSE);
       return -1;
@@ -2345,7 +2351,7 @@ LRESULT HWNDMessageHandler::OnTouchEvent(UINT message,
           touch_ids_.erase(input[i].dwID);
           GenerateTouchEvent(ui::ET_TOUCH_RELEASED, touch_point, touch_id,
                              event_time, &touch_events);
-          id_generator_.MaybeReleaseNumber(input[i].dwID);
+          id_generator_.ReleaseNumber(input[i].dwID);
         }
       }
     }
@@ -2762,7 +2768,7 @@ LRESULT HWNDMessageHandler::HandlePointerEventTypeTouch(UINT message,
   delegate_->HandleTouchEvent(event);
 
   if (event_type == ui::ET_TOUCH_RELEASED)
-    id_generator_.MaybeReleaseNumber(pointer_id);
+    id_generator_.ReleaseNumber(pointer_id);
   if (ref)
     SetMsgHandled(TRUE);
   return 0;

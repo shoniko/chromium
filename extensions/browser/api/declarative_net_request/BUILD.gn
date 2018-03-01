@@ -12,6 +12,8 @@ source_set("declarative_net_request") {
     "indexed_rule.h",
     "parse_info.cc",
     "parse_info.h",
+    "ruleset_matcher.cc",
+    "ruleset_matcher.h",
     "utils.cc",
     "utils.h",
   ]
@@ -27,5 +29,20 @@ source_set("declarative_net_request") {
     "//extensions/common",
     "//extensions/common/api",
     "//url",
+  ]
+}
+
+source_set("test_support") {
+  testonly = true
+
+  sources = [
+    "test_utils.cc",
+    "test_utils.h",
+  ]
+
+  deps = [
+    ":declarative_net_request",
+    "//base",
+    "//extensions/common",
   ]
 }

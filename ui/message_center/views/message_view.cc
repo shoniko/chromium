@@ -14,7 +14,7 @@
 #include "ui/gfx/shadow_util.h"
 #include "ui/gfx/shadow_value.h"
 #include "ui/message_center/message_center.h"
-#include "ui/message_center/message_center_style.h"
+#include "ui/message_center/public/cpp/message_center_constants.h"
 #include "ui/message_center/views/message_center_controller.h"
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/background.h"
@@ -29,11 +29,13 @@
 namespace {
 
 #if defined(OS_CHROMEOS)
-const int kShadowCornerRadius = 2;
+const int kBorderThickness = 1;
+const int kBorderCorderRadius = 2;
+const SkColor kBorderColor = SkColorSetARGB(0x1F, 0x0, 0x0, 0x0);
 #else
 const int kShadowCornerRadius = 0;
-#endif
 const int kShadowElevation = 2;
+#endif
 
 // Creates a text for spoken feedback from the data contained in the
 // notification.
@@ -64,7 +66,6 @@ MessageView::MessageView(MessageCenterController* controller,
                          const Notification& notification)
     : controller_(controller),
       notification_id_(notification.id()),
-      notifier_id_(notification.notifier_id()),
       slide_out_controller_(this, this) {
   SetFocusBehavior(FocusBehavior::ALWAYS);
 
@@ -88,21 +89,18 @@ MessageView::~MessageView() {
 }
 
 void MessageView::UpdateWithNotification(const Notification& notification) {
-  display_source_ = notification.display_source();
   pinned_ = notification.pinned();
   accessible_name_ = CreateAccessibleName(notification);
   slide_out_controller_.set_enabled(!GetPinned());
 }
 
-// static
-gfx::Insets MessageView::GetShadowInsets() {
-  return -gfx::ShadowValue::GetMargin(
-      gfx::ShadowDetails::Get(kShadowElevation, kShadowCornerRadius).values);
-}
-
 void MessageView::SetIsNested() {
   is_nested_ = true;
 
+#if defined(OS_CHROMEOS)
+  SetBorder(views::CreateRoundedRectBorder(kBorderThickness,
+                                           kBorderCorderRadius, kBorderColor));
+#else
   const auto& shadow =
       gfx::ShadowDetails::Get(kShadowElevation, kShadowCornerRadius);
   gfx::Insets ninebox_insets = gfx::ShadowValue::GetBlurRegion(shadow.values) +
@@ -111,6 +109,7 @@ void MessageView::SetIsNested() {
       std::unique_ptr<views::Painter>(views::Painter::CreateImagePainter(
           shadow.ninebox_image, ninebox_insets)),
       -gfx::ShadowValue::GetMargin(shadow.values)));
+#endif
 }
 
 void MessageView::SetExpanded(bool expanded) {

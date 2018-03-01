@@ -4,6 +4,7 @@
 package org.chromium.chrome.browser.notifications.channels;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 
@@ -19,6 +20,7 @@ import org.hamcrest.BaseMatcher;
 import org.hamcrest.Description;
 import org.hamcrest.Matcher;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -28,8 +30,11 @@ import org.chromium.chrome.browser.notifications.NotificationChannelStatus;
 import org.chromium.chrome.browser.notifications.NotificationManagerProxy;
 import org.chromium.chrome.browser.notifications.NotificationManagerProxyImpl;
 import org.chromium.chrome.browser.notifications.NotificationSettingsBridge;
+import org.chromium.content.browser.test.NativeLibraryTestRule;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 /**
  * Instrumentation unit tests for SiteChannelsManager.
@@ -41,12 +46,19 @@ import java.util.Arrays;
  * blocked. Thus some of these tests use different channel ids to avoid this problem.
  */
 @RunWith(BaseJUnit4ClassRunner.class)
+@TargetApi(Build.VERSION_CODES.O)
 public class SiteChannelsManagerTest {
     private SiteChannelsManager mSiteChannelsManager;
+    @Rule
+    public NativeLibraryTestRule mNativeLibraryTestRule = new NativeLibraryTestRule();
 
     @Before
     public void setUp() throws Exception {
-        Context mContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        // Not initializing the browser process is safe because
+        // UrlFormatter.formatUrlForSecurityDisplay() is stand-alone.
+        mNativeLibraryTestRule.loadNativeLibraryNoBrowserProcess();
+
+        Context mContext = InstrumentationRegistry.getTargetContext();
         NotificationManagerProxy notificationManagerProxy = new NotificationManagerProxyImpl(
                 (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE));
         clearExistingSiteChannels(notificationManagerProxy);
@@ -67,7 +79,6 @@ public class SiteChannelsManagerTest {
 
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
-    @TargetApi(Build.VERSION_CODES.O)
     @SmallTest
     public void testCreateSiteChannel_enabled() throws Exception {
         mSiteChannelsManager.createSiteChannel("https://example-enabled.org", 62102180000L, true);
@@ -76,6 +87,21 @@ public class SiteChannelsManagerTest {
         assertThat(channel.getOrigin(), is("https://example-enabled.org"));
         assertThat(channel.getStatus(), matchesChannelStatus(NotificationChannelStatus.ENABLED));
         assertThat(channel.getTimestamp(), is(62102180000L));
+    }
+
+    @Test
+    @MinAndroidSdkLevel(Build.VERSION_CODES.O)
+    @SmallTest
+    public void testCreateSiteChannel_stripsSchemaForChannelName() throws Exception {
+        mSiteChannelsManager.createSiteChannel("http://127.0.0.1", 0L, true);
+        mSiteChannelsManager.createSiteChannel("https://example.com", 0L, true);
+        mSiteChannelsManager.createSiteChannel("ftp://127.0.0.1", 0L, true);
+        List<String> channelNames = new ArrayList<>();
+        for (NotificationSettingsBridge.SiteChannel siteChannel :
+                mSiteChannelsManager.getSiteChannels()) {
+            channelNames.add(siteChannel.toChannel().getName().toString());
+        }
+        assertThat(channelNames, containsInAnyOrder("ftp://127.0.0.1", "example.com", "127.0.0.1"));
     }
 
     @Test
@@ -92,7 +118,6 @@ public class SiteChannelsManagerTest {
 
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
-    @TargetApi(Build.VERSION_CODES.O)
     @SmallTest
     public void testDeleteSiteChannel_channelExists() throws Exception {
         NotificationSettingsBridge.SiteChannel channel =
@@ -103,7 +128,16 @@ public class SiteChannelsManagerTest {
 
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
-    @TargetApi(Build.VERSION_CODES.O)
+    @SmallTest
+    public void testDeleteAllSiteChannels() throws Exception {
+        mSiteChannelsManager.createSiteChannel("https://chromium.org", 0L, true);
+        mSiteChannelsManager.createSiteChannel("https://tests.peter.sh", 0L, true);
+        mSiteChannelsManager.deleteAllSiteChannels();
+        assertThat(Arrays.asList(mSiteChannelsManager.getSiteChannels()), hasSize(0));
+    }
+
+    @Test
+    @MinAndroidSdkLevel(Build.VERSION_CODES.O)
     @SmallTest
     public void testDeleteSiteChannel_channelDoesNotExist() throws Exception {
         mSiteChannelsManager.createSiteChannel("https://chromium.org", 0L, true);
@@ -113,7 +147,6 @@ public class SiteChannelsManagerTest {
 
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
-    @TargetApi(Build.VERSION_CODES.O)
     @SmallTest
     public void testGetChannelStatus_channelCreatedAsEnabled() throws Exception {
         NotificationSettingsBridge.SiteChannel channel =
@@ -124,7 +157,6 @@ public class SiteChannelsManagerTest {
 
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
-    @TargetApi(Build.VERSION_CODES.O)
     @SmallTest
     public void testGetChannelStatus_channelCreatedAsBlocked() throws Exception {
         assertThat(mSiteChannelsManager.getChannelStatus("https://example-blocked.com"),
@@ -137,7 +169,6 @@ public class SiteChannelsManagerTest {
 
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
-    @TargetApi(Build.VERSION_CODES.O)
     @SmallTest
     public void testGetChannelStatus_channelNotCreated() throws Exception {
         assertThat(mSiteChannelsManager.getChannelStatus("invalid-channel-id"),
@@ -146,7 +177,6 @@ public class SiteChannelsManagerTest {
 
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
-    @TargetApi(Build.VERSION_CODES.O)
     @SmallTest
     public void testGetChannelStatus_channelCreatedThenDeleted() throws Exception {
         NotificationSettingsBridge.SiteChannel channel =

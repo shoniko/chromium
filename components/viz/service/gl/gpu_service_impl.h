@@ -24,7 +24,7 @@
 #include "gpu/ipc/service/gpu_config.h"
 #include "gpu/ipc/service/x_util.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
-#include "services/ui/gpu/interfaces/gpu_host.mojom.h"
+#include "services/viz/privileged/interfaces/gl/gpu_host.mojom.h"
 #include "services/viz/privileged/interfaces/gl/gpu_service.mojom.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -50,13 +50,14 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl : public gpu::GpuChannelManagerDelegate,
   GpuServiceImpl(const gpu::GPUInfo& gpu_info,
                  std::unique_ptr<gpu::GpuWatchdogThread> watchdog,
                  scoped_refptr<base::SingleThreadTaskRunner> io_runner,
-                 const gpu::GpuFeatureInfo& gpu_feature_info);
+                 const gpu::GpuFeatureInfo& gpu_feature_info,
+                 const gpu::GpuPreferences& gpu_preferences);
 
   ~GpuServiceImpl() override;
 
-  void UpdateGPUInfoFromPreferences(const gpu::GpuPreferences& preferences);
+  void UpdateGPUInfo();
 
-  void InitializeWithHost(ui::mojom::GpuHostPtr gpu_host,
+  void InitializeWithHost(mojom::GpuHostPtr gpu_host,
                           gpu::GpuProcessActivityFlags activity_flags,
                           gpu::SyncPointManager* sync_point_manager = nullptr,
                           base::WaitableEvent* shutdown_event = nullptr);
@@ -93,13 +94,14 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl : public gpu::GpuChannelManagerDelegate,
     return gpu_feature_info_;
   }
 
-  void set_in_host_process(bool in_host_process) {
-    in_host_process_ = in_host_process;
-  }
+  bool in_host_process() const { return gpu_info_.in_process_gpu; }
 
   void set_start_time(base::Time start_time) { start_time_ = start_time; }
 
   const gpu::GPUInfo& gpu_info() const { return gpu_info_; }
+  const gpu::GpuPreferences& gpu_preferences() const {
+    return gpu_preferences_;
+  }
 
  private:
   void RecordLogMessage(int severity,
@@ -149,6 +151,7 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl : public gpu::GpuChannelManagerDelegate,
   void GetVideoMemoryUsageStats(
       GetVideoMemoryUsageStatsCallback callback) override;
   void RequestCompleteGpuInfo(RequestCompleteGpuInfoCallback callback) override;
+  void RequestHDRStatus(RequestHDRStatusCallback callback) override;
   void LoadedShader(const std::string& key, const std::string& data) override;
   void DestroyingVideoSurface(int32_t surface_id,
                               DestroyingVideoSurfaceCallback callback) override;
@@ -159,6 +162,8 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl : public gpu::GpuChannelManagerDelegate,
   void Hang() override;
   void ThrowJavaException() override;
   void Stop(StopCallback callback) override;
+
+  void RequestHDRStatusOnMainThread(RequestHDRStatusCallback callback);
 
   scoped_refptr<base::SingleThreadTaskRunner> main_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> io_runner_;
@@ -175,7 +180,7 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl : public gpu::GpuChannelManagerDelegate,
   // Information about general chrome feature support for the GPU.
   gpu::GpuFeatureInfo gpu_feature_info_;
 
-  scoped_refptr<ui::mojom::ThreadSafeGpuHostPtr> gpu_host_;
+  scoped_refptr<mojom::ThreadSafeGpuHostPtr> gpu_host_;
   std::unique_ptr<gpu::GpuChannelManager> gpu_channel_manager_;
   std::unique_ptr<media::MediaGpuChannelManager> media_gpu_channel_manager_;
 
@@ -191,8 +196,6 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl : public gpu::GpuChannelManagerDelegate,
   std::unique_ptr<base::WaitableEvent> owned_shutdown_event_;
   base::WaitableEvent* shutdown_event_ = nullptr;
 
-  // Whether this is running in the same process as the gpu host.
-  bool in_host_process_ = false;
   base::Time start_time_;
 
   // Used to track the task to bind a GpuServiceRequest on the io thread.

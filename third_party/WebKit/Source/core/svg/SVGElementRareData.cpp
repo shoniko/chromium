@@ -34,10 +34,10 @@ ComputedStyle* SVGElementRareData::OverrideComputedStyle(
     needs_override_computed_style_update_ = false;
   }
   DCHECK(override_computed_style_);
-  return override_computed_style_.Get();
+  return override_computed_style_.get();
 }
 
-DEFINE_TRACE(SVGElementRareData) {
+void SVGElementRareData::Trace(blink::Visitor* visitor) {
   visitor->Trace(outgoing_references_);
   visitor->Trace(incoming_references_);
   visitor->Trace(element_proxy_set_);

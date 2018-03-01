@@ -70,7 +70,7 @@
 #include "public/platform/WebStorageQuotaType.h"
 #include "public/platform/WebSuddenTerminationDisablerType.h"
 #include "public/platform/WebURLError.h"
-#include "public/platform/WebURLLoader.h"
+#include "public/platform/WebURLLoaderFactory.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/platform/WebWorkerFetchContext.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerProvider.h"
@@ -78,10 +78,6 @@
 
 namespace service_manager {
 class InterfaceProvider;
-}
-
-namespace base {
-class SingleThreadTaskRunner;
 }
 
 namespace blink {
@@ -125,6 +121,7 @@ struct WebContextMenuData;
 struct WebPluginParams;
 struct WebPopupMenuInfo;
 struct WebRect;
+struct WebRemoteScrollProperties;
 struct WebURLError;
 
 class BLINK_EXPORT WebFrameClient {
@@ -200,10 +197,7 @@ class BLINK_EXPORT WebFrameClient {
 
   // Returns an InterfaceProvider the frame can use to request interfaces from
   // the browser. This method may not return nullptr.
-  virtual service_manager::InterfaceProvider* GetInterfaceProvider() {
-    NOTREACHED();
-    return nullptr;
-  }
+  virtual service_manager::InterfaceProvider* GetInterfaceProvider();
 
   // General notifications -----------------------------------------------
 
@@ -298,9 +292,6 @@ class BLINK_EXPORT WebFrameClient {
 
   // Called the first time this frame is the target of a user gesture.
   virtual void SetHasReceivedUserGesture() {}
-
-  // Notification of the devtools id for this frame.
-  virtual void SetDevToolsFrameId(const blink::WebString& devtools_frame_id) {}
 
   // Console messages ----------------------------------------------------
 
@@ -426,9 +417,10 @@ class BLINK_EXPORT WebFrameClient {
   // The frame's document has just been initialized.
   virtual void DidCreateNewDocument() {}
 
-  // The window object for the frame has been cleared of any extra
-  // properties that may have been set by script from the previously
-  // loaded document.
+  // The window object for the frame has been cleared of any extra properties
+  // that may have been set by script from the previously loaded document. This
+  // will get invoked multiple times when navigating from an initial empty
+  // document to the actual document.
   virtual void DidClearWindowObject() {}
 
   // The document element has been created.
@@ -496,6 +488,10 @@ class BLINK_EXPORT WebFrameClient {
     return WebEffectiveConnectionType::kTypeUnknown;
   }
 
+  // Overrides the effective connection type for testing.
+  virtual void SetEffectiveConnectionTypeForTesting(
+      WebEffectiveConnectionType) {}
+
   // Returns whether or not Client LoFi is enabled for the frame (and
   // so any image requests may be replaced with a placeholder).
   virtual bool IsClientLoFiActiveForFrame() { return false; }
@@ -509,6 +505,11 @@ class BLINK_EXPORT WebFrameClient {
   // This frame tried to navigate its top level frame to the given url without
   // ever having received a user gesture.
   virtual void DidBlockFramebust(const WebURL&) {}
+
+  // Returns string to be used as a frame id in the devtools protocol.
+  // It is derived from the content's devtools_frame_token, is
+  // defined by the browser and passed into Blink upon frame creation.
+  virtual WebString GetInstrumentationToken() { return ""; }
 
   // PlzNavigate
   // Called to abort a navigation that is being handled by the browser process.
@@ -643,6 +644,17 @@ class BLINK_EXPORT WebFrameClient {
   // connection with certificate errors.
   virtual void DidRunContentWithCertificateErrors(const WebURL& url) {}
 
+  // This frame loaded a resource with an otherwise-valid legacy Symantec
+  // certificate that is slated for distrust. Returns true and populates
+  // |console_message| to override the console message warning that is printed
+  // about the certificate. If it returns false, a generic warning will be
+  // printed.
+  virtual bool OverrideLegacySymantecCertConsoleMessage(const WebURL&,
+                                                        base::Time,
+                                                        WebString*) {
+    return false;
+  }
+
   // A performance timing event (e.g. first paint) occurred
   virtual void DidChangePerformanceTiming() {}
 
@@ -677,6 +689,12 @@ class BLINK_EXPORT WebFrameClient {
 
   // Informs the browser that the draggable regions have been updated.
   virtual void DraggableRegionsChanged() {}
+
+  // Scrolls a local frame in its remote process. Called on the WebFrameClient
+  // of a local frame only.
+  virtual void ScrollRectToVisibleInParentFrame(
+      const WebRect&,
+      const WebRemoteScrollProperties&) {}
 
   // Find-in-page notifications ------------------------------------------
 
@@ -738,11 +756,11 @@ class BLINK_EXPORT WebFrameClient {
 
   // WebGL ------------------------------------------------------
 
-  // Asks the embedder whether WebGL is allowed for the WebFrame. This call is
+  // Asks the embedder whether WebGL is blocked for the WebFrame. This call is
   // placed here instead of WebContentSettingsClient because this class is
   // implemented in content/, and putting it here avoids adding more public
   // content/ APIs.
-  virtual bool AllowWebGL(bool default_value) { return default_value; }
+  virtual bool ShouldBlockWebGL() { return false; }
 
   // Screen Orientation --------------------------------------------------
 
@@ -830,9 +848,7 @@ class BLINK_EXPORT WebFrameClient {
 
   // Loading --------------------------------------------------------------
 
-  virtual std::unique_ptr<blink::WebURLLoader> CreateURLLoader(
-      const WebURLRequest&,
-      base::SingleThreadTaskRunner*) {
+  virtual std::unique_ptr<blink::WebURLLoaderFactory> CreateURLLoaderFactory() {
     NOTREACHED();
     return nullptr;
   }

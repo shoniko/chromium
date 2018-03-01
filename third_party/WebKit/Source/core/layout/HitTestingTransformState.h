@@ -44,15 +44,15 @@ namespace blink {
 // to be taken when this is done.
 class HitTestingTransformState : public RefCounted<HitTestingTransformState> {
  public:
-  static RefPtr<HitTestingTransformState> Create(const FloatPoint& p,
-                                                 const FloatQuad& quad,
-                                                 const FloatQuad& area) {
-    return AdoptRef(new HitTestingTransformState(p, quad, area));
+  static scoped_refptr<HitTestingTransformState> Create(const FloatPoint& p,
+                                                        const FloatQuad& quad,
+                                                        const FloatQuad& area) {
+    return WTF::AdoptRef(new HitTestingTransformState(p, quad, area));
   }
 
-  static RefPtr<HitTestingTransformState> Create(
+  static scoped_refptr<HitTestingTransformState> Create(
       const HitTestingTransformState& other) {
-    return AdoptRef(new HitTestingTransformState(other));
+    return WTF::AdoptRef(new HitTestingTransformState(other));
   }
 
   enum TransformAccumulation { kFlattenTransform, kAccumulateTransform };

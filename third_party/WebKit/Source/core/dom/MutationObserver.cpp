@@ -34,7 +34,7 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8BindingForCore.h"
-#include "bindings/core/v8/mutation_callback.h"
+#include "bindings/core/v8/v8_mutation_callback.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/MutationObserverInit.h"
 #include "core/dom/MutationObserverRegistration.h"
@@ -53,7 +53,7 @@ class MutationObserver::V8DelegateImpl final
 
  public:
   static V8DelegateImpl* Create(v8::Isolate* isolate,
-                                MutationCallback* callback) {
+                                V8MutationCallback* callback) {
     ExecutionContext* execution_context =
         ToExecutionContext(callback->v8Value(isolate)->CreationContext());
 
@@ -71,20 +71,22 @@ class MutationObserver::V8DelegateImpl final
     callback_->call(&observer, records, &observer);
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(callback_);
     MutationObserver::Delegate::Trace(visitor);
     ContextClient::Trace(visitor);
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE_WRAPPERS() { visitor->TraceWrappers(callback_); }
+  virtual void TraceWrappers(const ScriptWrappableVisitor* visitor) const {
+    visitor->TraceWrappers(callback_);
+  }
 
  private:
-  V8DelegateImpl(MutationCallback* callback,
+  V8DelegateImpl(V8MutationCallback* callback,
                  ExecutionContext* execution_context)
       : ContextClient(execution_context), callback_(callback) {}
 
-  TraceWrapperMember<MutationCallback> callback_;
+  TraceWrapperMember<V8MutationCallback> callback_;
 };
 
 static unsigned g_observer_priority = 0;
@@ -102,7 +104,7 @@ MutationObserver* MutationObserver::Create(Delegate* delegate) {
 }
 
 MutationObserver* MutationObserver::Create(ScriptState* script_state,
-                                           MutationCallback* callback) {
+                                           V8MutationCallback* callback) {
   DCHECK(IsMainThread());
   return new MutationObserver(
       ExecutionContext::From(script_state),
@@ -365,14 +367,16 @@ void MutationObserver::DeliverMutations() {
     slot->DispatchSlotChangeEvent();
 }
 
-DEFINE_TRACE(MutationObserver) {
+void MutationObserver::Trace(blink::Visitor* visitor) {
   visitor->Trace(delegate_);
   visitor->Trace(records_);
   visitor->Trace(registrations_);
+  ScriptWrappable::Trace(visitor);
   ContextClient::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(MutationObserver) {
+void MutationObserver::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(delegate_);
   for (auto record : records_)
     visitor->TraceWrappers(record);

@@ -170,14 +170,15 @@ class MtuDiscoveryAlarmDelegate : public QuicAlarm::Delegate {
 #define ENDPOINT \
   (perspective_ == Perspective::IS_SERVER ? "Server: " : "Client: ")
 
-QuicConnection::QuicConnection(QuicConnectionId connection_id,
-                               QuicSocketAddress address,
-                               QuicConnectionHelperInterface* helper,
-                               QuicAlarmFactory* alarm_factory,
-                               QuicPacketWriter* writer,
-                               bool owns_writer,
-                               Perspective perspective,
-                               const QuicVersionVector& supported_versions)
+QuicConnection::QuicConnection(
+    QuicConnectionId connection_id,
+    QuicSocketAddress address,
+    QuicConnectionHelperInterface* helper,
+    QuicAlarmFactory* alarm_factory,
+    QuicPacketWriter* writer,
+    bool owns_writer,
+    Perspective perspective,
+    const QuicTransportVersionVector& supported_versions)
     : framer_(supported_versions,
               helper->GetClock()->ApproximateNow(),
               perspective),
@@ -247,7 +248,6 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
       packet_generator_(connection_id_,
                         &framer_,
                         random_generator_,
-                        helper->GetStreamFrameBufferAllocator(),
                         this),
       idle_network_timeout_(QuicTime::Delta::Infinite()),
       handshake_timeout_(QuicTime::Delta::Infinite()),
@@ -366,7 +366,7 @@ void QuicConnection::SetFromConfig(const QuicConfig& config) {
     QUIC_FLAG_COUNT(quic_reloadable_flag_quic_enable_3rtos);
     close_connection_after_three_rtos_ = true;
   }
-  if (version() > QUIC_VERSION_37 &&
+  if (transport_version() > QUIC_VERSION_37 &&
       config.HasClientSentConnectionOption(kNSTP, perspective_)) {
     no_stop_waiting_frames_ = true;
   }
@@ -402,13 +402,14 @@ void QuicConnection::SetNumOpenStreams(size_t num_streams) {
 }
 
 bool QuicConnection::SelectMutualVersion(
-    const QuicVersionVector& available_versions) {
+    const QuicTransportVersionVector& available_versions) {
   // Try to find the highest mutual version by iterating over supported
   // versions, starting with the highest, and breaking out of the loop once we
   // find a matching version in the provided available_versions vector.
-  const QuicVersionVector& supported_versions = framer_.supported_versions();
+  const QuicTransportVersionVector& supported_versions =
+      framer_.supported_versions();
   for (size_t i = 0; i < supported_versions.size(); ++i) {
-    const QuicVersion& version = supported_versions[i];
+    const QuicTransportVersion& version = supported_versions[i];
     if (QuicContainsValue(available_versions, version)) {
       framer_.set_version(version);
       return true;
@@ -446,7 +447,8 @@ void QuicConnection::OnPublicResetPacket(const QuicPublicResetPacket& packet) {
                                ConnectionCloseSource::FROM_PEER);
 }
 
-bool QuicConnection::OnProtocolVersionMismatch(QuicVersion received_version) {
+bool QuicConnection::OnProtocolVersionMismatch(
+    QuicTransportVersion received_version) {
   QUIC_DLOG(INFO) << ENDPOINT << "Received packet with mismatched version "
                   << received_version;
   // TODO(satyamshekhar): Implement no server state in this mode.
@@ -457,7 +459,7 @@ bool QuicConnection::OnProtocolVersionMismatch(QuicVersion received_version) {
                                  ConnectionCloseSource::FROM_SELF);
     return false;
   }
-  DCHECK_NE(version(), received_version);
+  DCHECK_NE(transport_version(), received_version);
 
   if (debug_visitor_ != nullptr) {
     debug_visitor_->OnProtocolVersionMismatch(received_version);
@@ -527,7 +529,7 @@ void QuicConnection::OnVersionNegotiationPacket(
     return;
   }
 
-  if (QuicContainsValue(packet.versions, version())) {
+  if (QuicContainsValue(packet.versions, transport_version())) {
     const string error_details =
         "Server already supports client's version and should have accepted the "
         "connection.";
@@ -543,16 +545,17 @@ void QuicConnection::OnVersionNegotiationPacket(
   if (!SelectMutualVersion(packet.versions)) {
     CloseConnection(
         QUIC_INVALID_VERSION,
-        QuicStrCat("No common version found. Supported versions: {",
-                   QuicVersionVectorToString(framer_.supported_versions()),
-                   "}, peer supported versions: {",
-                   QuicVersionVectorToString(packet.versions), "}"),
+        QuicStrCat(
+            "No common version found. Supported versions: {",
+            QuicTransportVersionVectorToString(framer_.supported_versions()),
+            "}, peer supported versions: {",
+            QuicTransportVersionVectorToString(packet.versions), "}"),
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     return;
   }
 
-  QUIC_DLOG(INFO) << ENDPOINT
-                  << "Negotiated version: " << QuicVersionToString(version());
+  QUIC_DLOG(INFO) << ENDPOINT << "Negotiated version: "
+                  << QuicVersionToString(transport_version());
   version_negotiation_state_ = NEGOTIATION_IN_PROGRESS;
   RetransmitUnackedPackets(ALL_UNACKED_RETRANSMISSION);
 }
@@ -644,10 +647,7 @@ bool QuicConnection::OnPacketHeader(const QuicPacketHeader& header) {
   // new address.
   if (header.packet_number > received_packet_manager_.GetLargestObserved() &&
       peer_migration_type != NO_CHANGE) {
-    if (FLAGS_quic_reloadable_flag_quic_disable_peer_migration_on_client &&
-        perspective_ == Perspective::IS_CLIENT) {
-      QUIC_FLAG_COUNT_N(
-          quic_reloadable_flag_quic_disable_peer_migration_on_client, 1, 2);
+    if (perspective_ == Perspective::IS_CLIENT) {
       QUIC_DLOG(INFO) << ENDPOINT << "Peer's ip:port changed from "
                       << peer_address_.ToString() << " to "
                       << last_packet_source_address_.ToString();
@@ -962,7 +962,7 @@ void QuicConnection::MaybeQueueAck(bool was_missing) {
   ++num_packets_received_since_last_ack_sent_;
   // Always send an ack every 20 packets in order to allow the peer to discard
   // information from the SentPacketManager and provide an RTT measurement.
-  if (version() <= QUIC_VERSION_38 &&
+  if (transport_version() <= QUIC_VERSION_38 &&
       num_packets_received_since_last_ack_sent_ >=
           kMaxPacketsReceivedBeforeAckSend) {
     ack_queued_ = true;
@@ -1061,7 +1061,8 @@ void QuicConnection::SendVersionNegotiationPacket() {
     return;
   }
   QUIC_DLOG(INFO) << ENDPOINT << "Sending version negotiation packet: {"
-                  << QuicVersionVectorToString(framer_.supported_versions())
+                  << QuicTransportVersionVectorToString(
+                         framer_.supported_versions())
                   << "}";
   std::unique_ptr<QuicEncryptedPacket> version_packet(
       packet_generator_.SerializeVersionNegotiationPacket(
@@ -1085,12 +1086,10 @@ void QuicConnection::SendVersionNegotiationPacket() {
   pending_version_negotiation_packet_ = false;
 }
 
-QuicConsumedData QuicConnection::SendStreamData(
-    QuicStreamId id,
-    QuicIOVector iov,
-    QuicStreamOffset offset,
-    StreamSendingState state,
-    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
+QuicConsumedData QuicConnection::SendStreamData(QuicStreamId id,
+                                                QuicIOVector iov,
+                                                QuicStreamOffset offset,
+                                                StreamSendingState state) {
   if (state == NO_FIN && iov.total_length == 0) {
     QUIC_BUG << "Attempt to send empty stream frame";
     return QuicConsumedData(0, false);
@@ -1103,19 +1102,7 @@ QuicConsumedData QuicConnection::SendStreamData(
   // SHLO from the server, leading to two different decrypters at the server.)
   ScopedRetransmissionScheduler alarm_delayer(this);
   ScopedPacketBundler ack_bundler(this, SEND_ACK_IF_PENDING);
-  // The optimized path may be used for data only packets which fit into a
-  // standard buffer and don't need padding.
-  const bool flag_run_fast_path =
-      FLAGS_quic_reloadable_flag_quic_consuming_data_faster;
-  if (!flag_run_fast_path && id != kCryptoStreamId &&
-      !packet_generator_.HasQueuedFrames() &&
-      iov.total_length > kMaxPacketSize && state != FIN_AND_PADDING) {
-    // Use the fast path to send full data packets.
-    return packet_generator_.ConsumeDataFastPath(
-        id, iov, offset, state != NO_FIN, 0, ack_listener);
-  }
-  return packet_generator_.ConsumeData(
-      id, iov, offset, state, std::move(ack_listener), flag_run_fast_path);
+  return packet_generator_.ConsumeData(id, iov, offset, state);
 }
 
 void QuicConnection::SendRstStream(QuicStreamId id,
@@ -1253,13 +1240,7 @@ void QuicConnection::ProcessUdpPacket(const QuicSocketAddress& self_address,
   if (active_peer_migration_type_ != NO_CHANGE &&
       sent_packet_manager_.GetLargestObserved() >
           highest_packet_sent_before_peer_migration_) {
-    if (FLAGS_quic_reloadable_flag_quic_disable_peer_migration_on_client) {
-      QUIC_FLAG_COUNT_N(
-          quic_reloadable_flag_quic_disable_peer_migration_on_client, 2, 2);
-      if (perspective_ == Perspective::IS_SERVER) {
-        OnPeerMigrationValidated();
-      }
-    } else {
+    if (perspective_ == Perspective::IS_SERVER) {
       OnPeerMigrationValidated();
     }
   }
@@ -1267,6 +1248,10 @@ void QuicConnection::ProcessUdpPacket(const QuicSocketAddress& self_address,
   MaybeSendInResponseToPacket();
   SetPingAlarm();
   current_packet_data_ = nullptr;
+}
+
+void QuicConnection::OnBlockedWriterCanWrite() {
+  OnCanWrite();
 }
 
 void QuicConnection::OnCanWrite() {
@@ -1321,10 +1306,8 @@ bool QuicConnection::ProcessValidatedPacket(const QuicPacketHeader& header) {
     if (self_address_.port() != last_packet_destination_address_.port() ||
         self_address_.host().Normalized() !=
             last_packet_destination_address_.host().Normalized()) {
-      if (FLAGS_quic_reloadable_flag_quic_allow_one_address_change &&
-          AllowSelfAddressChange()) {
-        OnSelfAddressChange();
-      } else {
+      if (!FLAGS_quic_reloadable_flag_quic_allow_address_change_for_udp_proxy ||
+          !visitor_->AllowSelfAddressChange()) {
         CloseConnection(
             QUIC_ERROR_MIGRATING_ADDRESS,
             "Self address migration is not supported at the server.",
@@ -1335,12 +1318,53 @@ bool QuicConnection::ProcessValidatedPacket(const QuicPacketHeader& header) {
     self_address_ = last_packet_destination_address_;
   }
 
-  if (!Near(header.packet_number, last_header_.packet_number)) {
-    QUIC_DLOG(INFO) << ENDPOINT << "Packet " << header.packet_number
-                    << " out of bounds.  Discarding";
-    CloseConnection(QUIC_INVALID_PACKET_HEADER, "Packet number out of bounds.",
-                    ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
-    return false;
+  if (FLAGS_quic_restart_flag_quic_enable_accept_random_ipn) {
+    QUIC_FLAG_COUNT_N(quic_restart_flag_quic_enable_accept_random_ipn, 2, 2);
+    // Configured to accept any packet number in range 1...0x7fffffff
+    // as initial packet number.
+    if (last_header_.packet_number != 0) {
+      // The last packet's number is not 0. Ensure that this packet
+      // is reasonably close to where it should be.
+      if (!Near(header.packet_number, last_header_.packet_number)) {
+        QUIC_DLOG(INFO) << ENDPOINT << "Packet " << header.packet_number
+                        << " out of bounds.  Discarding";
+        CloseConnection(QUIC_INVALID_PACKET_HEADER,
+                        "Packet number out of bounds.",
+                        ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
+        return false;
+      }
+    } else {
+      // The "last packet's number" is 0, meaning that this packet is the first
+      // one received. Ensure it is in range 1..kMaxRandomInitialPacketNumber,
+      // inclusive.
+      if ((header.packet_number == 0) ||
+          (header.packet_number > kMaxRandomInitialPacketNumber)) {
+        // packet number is bad.
+        QUIC_DLOG(INFO) << ENDPOINT << "Initial packet " << header.packet_number
+                        << " out of bounds.  Discarding";
+        CloseConnection(QUIC_INVALID_PACKET_HEADER,
+                        "Initial packet number out of bounds.",
+                        ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
+        return false;
+      }
+    }
+  } else {  //  if (FLAGS_quic_reloadable_flag_quic_accept_random_ipn) {
+    // Count those that would have been accepted if FLAGS..random_ipn
+    // were true -- to detect/diagnose potential issues prior to
+    // enabling the flag.
+    if ((header.packet_number > 1) &&
+        (header.packet_number <= kMaxRandomInitialPacketNumber)) {
+      QUIC_CODE_COUNT_N(had_possibly_random_ipn, 2, 2);
+    }
+
+    if (!Near(header.packet_number, last_header_.packet_number)) {
+      QUIC_DLOG(INFO) << ENDPOINT << "Packet " << header.packet_number
+                      << " out of bounds.  Discarding";
+      CloseConnection(QUIC_INVALID_PACKET_HEADER,
+                      "Packet number out of bounds.",
+                      ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
+      return false;
+    }
   }
 
   if (version_negotiation_state_ != NEGOTIATED_VERSION) {
@@ -1357,11 +1381,11 @@ bool QuicConnection::ProcessValidatedPacket(const QuicPacketHeader& header) {
         return false;
       } else {
         DCHECK_EQ(1u, header.public_header.versions.size());
-        DCHECK_EQ(header.public_header.versions[0], version());
+        DCHECK_EQ(header.public_header.versions[0], transport_version());
         version_negotiation_state_ = NEGOTIATED_VERSION;
-        visitor_->OnSuccessfulVersionNegotiation(version());
+        visitor_->OnSuccessfulVersionNegotiation(transport_version());
         if (debug_visitor_ != nullptr) {
-          debug_visitor_->OnSuccessfulVersionNegotiation(version());
+          debug_visitor_->OnSuccessfulVersionNegotiation(transport_version());
         }
       }
     } else {
@@ -1370,9 +1394,9 @@ bool QuicConnection::ProcessValidatedPacket(const QuicPacketHeader& header) {
       // it should stop sending version since the version negotiation is done.
       packet_generator_.StopSendingVersion();
       version_negotiation_state_ = NEGOTIATED_VERSION;
-      visitor_->OnSuccessfulVersionNegotiation(version());
+      visitor_->OnSuccessfulVersionNegotiation(transport_version());
       if (debug_visitor_ != nullptr) {
-        debug_visitor_->OnSuccessfulVersionNegotiation(version());
+        debug_visitor_->OnSuccessfulVersionNegotiation(transport_version());
       }
     }
   }
@@ -1514,7 +1538,7 @@ bool QuicConnection::WritePacket(SerializedPacket* packet) {
   // Termination packets are eventually owned by TimeWaitListManager.
   // Others are deleted at the end of this call.
   if (is_termination_packet) {
-    if (termination_packets_.get() == nullptr) {
+    if (termination_packets_ == nullptr) {
       termination_packets_.reset(
           new std::vector<std::unique_ptr<QuicEncryptedPacket>>);
     }
@@ -1653,10 +1677,6 @@ bool QuicConnection::ShouldDiscardPacket(const SerializedPacket& packet) {
   return false;
 }
 
-bool QuicConnection::AllowSelfAddressChange() const {
-  return false;
-}
-
 void QuicConnection::OnWriteError(int error_code) {
   if (write_error_occurred_) {
     // A write error already occurred. The connection is being closed.
@@ -1694,7 +1714,7 @@ void QuicConnection::OnSerializedPacket(SerializedPacket* serialized_packet) {
     return;
   }
 
-  if (version() > QUIC_VERSION_38) {
+  if (transport_version() > QUIC_VERSION_38) {
     if (serialized_packet->retransmittable_frames.empty() &&
         serialized_packet->original_packet_number == 0) {
       // Increment consecutive_num_packets_with_no_retransmittable_frames_ if
@@ -2334,7 +2354,7 @@ void QuicConnection::SendMtuDiscoveryPacket(QuicByteCount target_mtu) {
   DCHECK_EQ(target_mtu, GetLimitedMaxPacketSize(target_mtu));
 
   // Send the probe.
-  packet_generator_.GenerateMtuDiscoveryPacket(target_mtu, nullptr);
+  packet_generator_.GenerateMtuDiscoveryPacket(target_mtu);
 }
 
 void QuicConnection::DiscoverMtu() {
