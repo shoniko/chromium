@@ -2134,7 +2134,10 @@ public class ChromeTabbedActivity
             mUndoBarPopupController = null;
         }
 
-        deinitAdblock();
+        if (isAdblockInitialized) {
+            deinitAdblock();
+            isAdblockInitialized = false;
+        }
 
         super.onDestroyInternal();
 
