@@ -1,15 +1,10 @@
 import("//build/config/android/rules.gni")
+import("//third_party/libadblockplus_common/abi.gni")
 
 # Copy libadblockplus headers
 copy("copy_libadblockplus_include") {
   sources = [ "//third_party/libadblockplus/include" ]
   outputs = [ "${target_out_dir}/libadblockplus-binaries/include" ]
-}
-
-if (target_cpu == "arm") {
-  _abi_directory = "armeabi-v7a"
-} else {
-  _abi_directory = "x86"
 }
 
 # Copy libadblockplus archives (.a) for ARM/x86
@@ -19,12 +14,12 @@ copy("copy_libadblockplus_abi") {
   ]
 
   _arm_inputs_dir = "${target_out_dir}/../libadblockplus/build"
-  _arm_outputs_dir = "${target_out_dir}/libadblockplus-binaries/android_${_abi_directory}"
+  _arm_outputs_dir = "${target_out_dir}/libadblockplus-binaries/android_${libadblockplus_abi_dir}"
   
   sources = [
     # = outputs of //third_party/libadblockplus:make
-    "${_arm_inputs_dir}/local/${_abi_directory}/libadblockplus.a",
-    "${_arm_inputs_dir}/android_${target_cpu}.release/libv8_libplatform.a",
+    "${_arm_inputs_dir}/local/${libadblockplus_abi_dir}/libadblockplus.a",
+    "${_arm_inputs_dir}/android_${v8_abi_dir}.release/libv8_libplatform.a",
   ]
   outputs = [
     "${_arm_outputs_dir}/{{source_file_part}}"
@@ -37,7 +32,7 @@ copy("copy_libv8") {
     "//v8:v8"
   ]
 
-  _arm_outputs_dir = "${target_out_dir}/libadblockplus-binaries/android_${_abi_directory}"
+  _arm_outputs_dir = "${target_out_dir}/libadblockplus-binaries/android_${libadblockplus_abi_dir}"
 
   sources = [ "${target_out_dir}/../../../libv8.cr.so" ]
   outputs = [ "${_arm_outputs_dir}/libv8.cr.so" ]
@@ -49,7 +44,7 @@ copy("copy_libv8_libbase") {
     "//v8:v8_libbase"
   ]
 
-  _arm_outputs_dir = "${target_out_dir}/libadblockplus-binaries/android_${_abi_directory}"
+  _arm_outputs_dir = "${target_out_dir}/libadblockplus-binaries/android_${libadblockplus_abi_dir}"
 
   sources = [ "${target_out_dir}/../../../libv8_libbase.cr.so" ]
   outputs = [ "${_arm_outputs_dir}/libv8_libbase.cr.so" ]

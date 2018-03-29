@@ -1,16 +1,18 @@
+import("//third_party/libadblockplus_common/abi.gni")
+
 # Build libadblockplus using make
 action("make") {
   script = "//third_party/libadblockplus_common/subproc.py"
   _cwd = rebase_path(".")
-  _build_dir="${target_out_dir}/build"
-  _abs_build_dir=rebase_path("${_build_dir}")
+  _build_dir = "${target_out_dir}/build"
+  _abs_build_dir = rebase_path("${_build_dir}")
   
   inputs = [
   ]
 
   outputs = [
-    "${_build_dir}/local/armeabi-v7a/libadblockplus.a",
-    "${_build_dir}/android_arm.release/libv8_libplatform.a",
+    "${_build_dir}/local/${libadblockplus_abi_dir}/libadblockplus.a",
+    "${_build_dir}/android_${v8_abi_dir}.release/libv8_libplatform.a",
   ]
 
   args = [
