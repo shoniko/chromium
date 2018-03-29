@@ -346,9 +346,6 @@ int ChromeNetworkDelegate::OnBeforeStartTransaction(
 
     }
 
-    std::string host = filterEngine->GetHostFromURL(url);
-    LOG(WARNING) << "Adblock: extracted host \"" << host << "\" from url " << url;
-
     // check referrer (required for proper ad blocking)
     std::vector<std::string> documentUrls;
     std::string referrer;
