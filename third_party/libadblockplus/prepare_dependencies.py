@@ -33,17 +33,19 @@ def prepare_deps():
                                               'src', 'third_party',
                                               'libadblockplus', 'third_party')
 
-    # googletest
-    #
-    # Chromium's googletest has a bit different directories structure
-    # ('src' as subdirectory)
+    # Actually one should use the version of googletest specified in the DEPS file
+    # of the chromium's V8, however since it's not checked out into chromium source
+    # tree and that version luckily is the same as in libadblockplus' V8,
+    # for the sake of simplicity we create a temporary copy of already checked out
+    # googletest and restore it after preparing the version of chromium's V8.
+    # After changing of a chromium's version it may not work, we will likely have
+    # to check out googletest of another version.
 
-    # gyp
-    #
-    # Chromium's gyp can't be used because of compile error:
-    # *** No rule to make target `shell/src/Main.cpp',
-    # needed by `local/armeabi-v7a/objs/abpshell/shell/src/Main.o'.  Stop.
-    # See. https://hg.adblockplus.org/gyp/rev/fix-issue-339
+    # Chromium code does not fetch V8 deps because in chromium project the
+    # dependencies are taken from a root directory of a parent root project (see
+    # v8/BUILD.gn), so in order to build V8 we have to copy them because we are
+    # still using gyp and gyp does not support such tricks, and even if it supported
+    # libadblockplus Makefile does not support it right now either.
 
     # back-up /v8/testing/gtest as it will be deleted while preparing v8
     gtest_bak_src = os.path.join(libadblockplus_third_party,
@@ -58,14 +60,6 @@ def prepare_deps():
 
     # restore /v8/testing/gtest from backup
     shutil.move(gtest_bak_dst, gtest_bak_src)
-
-    # v8/testing/gtest
-    #
-    # Chromium's gtest can't be used becuase of compile error:
-    # fatal error: third_party/googletest/src/googletest/include/gtest/gtest_prod.h: No such file or directory
-    # #include "third_party/googletest/src/googletest/include/gtest/gtest_prod.h"
-    # so we have to back-up gtest above and restore it
-    # after prepring of 'v8' directory
 
     for path in [
         ('base', 'trace_event', 'common'),
