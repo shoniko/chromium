@@ -3,7 +3,7 @@ import("//third_party/libadblockplus_common/abi.gni")
 
 # Copy libadblockplus headers
 copy("copy_libadblockplus_include") {
-  sources = [ "//third_party/libadblockplus/include" ]
+  sources = [ "//third_party/libadblockplus/src/include" ]
   outputs = [ "${target_out_dir}/libadblockplus-binaries/include" ]
 }
 
@@ -50,11 +50,11 @@ copy("copy_libv8_libbase") {
   outputs = [ "${_arm_outputs_dir}/libv8_libbase.cr.so" ]
 }
 
-_cwd = rebase_path(".")
+_cwd = rebase_path("./src")
 _build_dir = "${target_out_dir}/build"
 _abs_build_dir = rebase_path("${_build_dir}")
-_abs_libadblockplus_dir = rebase_path("//third_party/libadblockplus")
-_abs_sdk_dir = rebase_path("//third_party/libadblockplus_android/third_party/android_sdk")
+_abs_libadblockplus_dir = rebase_path("//third_party/libadblockplus/src")
+_abs_sdk_dir = rebase_path("//third_party/libadblockplus_android/src/third_party/android_sdk")
 
 _libadblockplus_binaries_dir = "${target_out_dir}/libadblockplus-binaries"
 _abs_libadblockplus_binaries_dir = rebase_path("${_libadblockplus_binaries_dir}")

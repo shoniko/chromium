@@ -14,7 +14,8 @@ def main(argv):
     cwd = os.getcwd()
     libadblockplus_third_party = os.path.join(cwd,
                                               'src', 'third_party',
-                                              'libadblockplus', 'third_party')
+                                              'libadblockplus', 'src',
+                                              'third_party')
     ndk_dst = os.path.join(libadblockplus_third_party,
                            'android-ndk-r12b-linux-x86_64.zip')
 

@@ -3,7 +3,7 @@ import("//third_party/libadblockplus_common/abi.gni")
 # Build libadblockplus using make
 action("make") {
   script = "//third_party/libadblockplus_common/subproc.py"
-  _cwd = rebase_path(".")
+  _cwd = rebase_path("./src")
   _build_dir = "${target_out_dir}/build"
   _abs_build_dir = rebase_path("${_build_dir}")
   
@@ -43,5 +43,5 @@ action("make") {
 }
 
 config("headers") {
-  include_dirs = [ "include" ]
+  include_dirs = [ "src/include" ]
 }

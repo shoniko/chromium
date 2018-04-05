@@ -31,7 +31,8 @@ def prepare_deps():
     cwd = os.getcwd()
     libadblockplus_third_party = os.path.join(cwd,
                                               'src', 'third_party',
-                                              'libadblockplus', 'third_party')
+                                              'libadblockplus', 'src',
+                                              'third_party')
 
     # Actually one should use the version of googletest specified in the DEPS file
     # of the chromium's V8, however since it's not checked out into chromium source

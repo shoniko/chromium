@@ -64,10 +64,7 @@
 #if defined(OS_ANDROID)
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/android/adblock/adblock_bridge.h"
-
-// because of dependency "third_party/libadblockplus_android/include" is added into -I
 #include "AdblockPlus.h"
-
 #endif
 
 #if defined(OS_CHROMEOS)

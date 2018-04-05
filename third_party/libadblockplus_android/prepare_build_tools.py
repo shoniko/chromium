@@ -9,7 +9,8 @@ import shutil
 def get_dst_path():
     cwd = os.getcwd()
     return os.path.join(cwd, 'src', 'third_party',
-                        'libadblockplus_android', 'third_party', 'android_sdk')
+                        'libadblockplus_android', 'src',
+                        'third_party', 'android_sdk')
 
 
 def duplicate_sdk():

@@ -19,13 +19,14 @@
 #include "base/android/jni_weak_ref.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 
+#include "AdblockPlus.h"
 #include "jni/AdblockBridge_jni.h"
 
 #include "gin/public/isolate_holder.h"
 #include "gin/v8_initializer.h"
 #include "base/threading/thread.h"
 #include "content/public/browser/browser_thread.h"
-#include "base/task_scheduler/post_task.h" 
+#include "base/task_scheduler/post_task.h"
 
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/notification_service.h"
@@ -35,9 +36,6 @@
 #include "content/public/browser/render_frame_host.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/common/chrome_isolated_world_ids.h"
-
-// because of dependency "third_party/libadblockplus_android/include" is added into -I
-#include "AdblockPlus.h"
 
 // prefs
 #include "components/prefs/pref_service.h"

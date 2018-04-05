@@ -516,13 +516,13 @@ deps = {
     'url':
       (Var("chromium_git")) + '/chromium/deps/xdg-utils.git@d80274d5869b17b8c9067a1022e4416ee7ed5e0d'
   },
-  'src/third_party/libadblockplus': {
+  'src/third_party/libadblockplus/src': {
     'condition':
       'checkout_android',
     'url':
       Var('adblockplus_git') + '/libadblockplus' + '@' + 'f6c45f4cbcf9b4ab6534abe88690be98738c7eb6',
   },
-  'src/third_party/libadblockplus_android': {
+  'src/third_party/libadblockplus_android/src': {
     'condition':
       'checkout_android',
     'url':
@@ -1650,7 +1650,7 @@ hooks = [
     'action': [
         'python',
         'src/third_party/libadblockplus_common/delete_dir.py',
-        'src/third_party/libadblockplus/third_party/v8'
+        'src/third_party/libadblockplus/src/third_party/v8'
     ],
     'condition':
       'checkout_android'
@@ -1662,7 +1662,7 @@ hooks = [
     'condition': 'checkout_android',
     'action': [
         'python',
-        'src/third_party/libadblockplus/ensure_dependencies.py'
+        'src/third_party/libadblockplus/src/ensure_dependencies.py'
     ],
     'condition':
       'checkout_android'
@@ -1708,7 +1708,7 @@ hooks = [
     'condition': 'checkout_android',
     'action': [
         'python',
-        'src/third_party/libadblockplus_android/ensure_dependencies.py'
+        'src/third_party/libadblockplus_android/src/ensure_dependencies.py'
     ],
     'condition':
       'checkout_android'
