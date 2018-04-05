@@ -24,7 +24,6 @@
 
 #include "gin/public/isolate_holder.h"
 #include "gin/v8_initializer.h"
-#include "base/threading/thread.h"
 #include "content/public/browser/browser_thread.h"
 #include "base/task_scheduler/post_task.h"
 
@@ -57,7 +56,8 @@ using base::android::ScopedJavaGlobalRef;
 // ----------------------------------------------------------------------------
 
 bool AdblockBridge::prefs_moved_to_thread = false;
-base::SingleThreadTaskRunner* task_runner = nullptr;
+base::LazyInstance<scoped_refptr<base::SingleThreadTaskRunner>>::DestructorAtExit
+  task_runner = LAZY_INSTANCE_INITIALIZER;
 
 std::string replaceString(
   std::string subject,
@@ -118,11 +118,14 @@ console.log('finished injecting css rules');";
 }
 
 void handleOnLoad(content::WebContents* webContents) {
+  LOG(WARNING) << "Adblock: handleOnLoad()";
   // it can be released in UI thread while this is not yet invoked
   if (!AdblockBridge::enable_adblock ||
-      !AdblockBridge::filterEnginePtr ||
-      !AdblockBridge::adblock_whitelisted_domains)
+      !AdblockBridge::getFilterEnginePtr() ||
+      !AdblockBridge::adblock_whitelisted_domains) {
+    LOG(WARNING) << "Adblock: !something in handleOnLoad()";
     return;
+  }
 
   if (!AdblockBridge::enable_adblock->GetValue()) {
     LOG(WARNING) << "Adblock: adblocking is disabled, skip apply element hiding";
@@ -131,7 +134,7 @@ void handleOnLoad(content::WebContents* webContents) {
 
   // retain local filter engine to prevent usage of released instance if it's released on android/java side
   AdblockPlus::FilterEnginePtr* extFilterEngine =
-    reinterpret_cast<AdblockPlus::FilterEnginePtr*>(AdblockBridge::filterEnginePtr);
+    reinterpret_cast<AdblockPlus::FilterEnginePtr*>(AdblockBridge::getFilterEnginePtr());
   AdblockPlus::FilterEnginePtr filterEngine(*extFilterEngine);
 
   LOG(WARNING) << "Adblock: element hiding: casted to AdblockPlus::FilterEnginePtr, "
@@ -183,8 +186,8 @@ class IsolateHolderV8Provider : public AdblockPlus::IV8IsolateProvider
 
     ~IsolateHolderV8Provider() override
     {
-      LOG(WARNING) << "Deleted IsolateHolderV8Provider (and IsolateHolder)";
       delete isolateHolder;
+      LOG(WARNING) << "Deleted IsolateHolderV8Provider (and IsolateHolder)";
     }
   
   private:
@@ -238,34 +241,37 @@ class AdblockLoadCompleteListener : public content::NotificationObserver {
     void Observe(int type,
                  const content::NotificationSource& source,
                  const content::NotificationDetails& details) override {
-      LOG(WARNING) << "Adblock: received onLoad() notification of type " << type;
+      content::WebContents* webContents = content::Source<content::WebContents>(source).ptr();
+      LOG(WARNING) << "Adblock: received onLoad() notification of type "
+        << type << " with url " << webContents->GetURL().spec();
       
-      if (!AdblockBridge::filterEnginePtr) {
+      if (!AdblockBridge::getFilterEnginePtr()) {
         LOG(WARNING) << "Adblock: inject JS skipped (no filter engine)";
         return;
       }
 
       // run in (background) thread in order not to block main (UI) thread for few seconds
       // prefs can be `nullptr` only if they are released 
-      if (!task_runner ||
+      if (!task_runner.Get() ||
           !AdblockBridge::enable_adblock ||
-          !AdblockBridge::adblock_whitelisted_domains)
+          !AdblockBridge::adblock_whitelisted_domains) {
+          LOG(WARNING) << "Adblock: !something, exiting elemhide";
         return;
+      }
 
       // prefs should be moved to the thread they will be accessed from
       // (should be invoked from UI thread!)
       if (!AdblockBridge::prefs_moved_to_thread) {
         LOG(WARNING) << "Adblock: moving elemehide prefs to background thread";
 
-        AdblockBridge::enable_adblock->MoveToThread(task_runner);
-        AdblockBridge::adblock_whitelisted_domains->MoveToThread(task_runner);
+        AdblockBridge::enable_adblock->MoveToThread(task_runner.Get());
+        AdblockBridge::adblock_whitelisted_domains->MoveToThread(task_runner.Get());
 
         AdblockBridge::prefs_moved_to_thread = true;
       }
 
       // run in (background) thread in order not to block main (UI) thread for few seconds
-      content::WebContents* webContents = content::Source<content::WebContents>(source).ptr();
-      task_runner->PostTask(FROM_HERE, base::BindOnce(&handleOnLoad, webContents));
+      task_runner.Get()->PostTask(FROM_HERE, base::BindOnce(&handleOnLoad, webContents));
     }
 
     DISALLOW_COPY_AND_ASSIGN(AdblockLoadCompleteListener);
@@ -273,11 +279,23 @@ class AdblockLoadCompleteListener : public content::NotificationObserver {
 
 // ----------------------------------------------------------------------------
 
+base::LazyInstance<base::Lock>::DestructorAtExit AdblockBridge::filterEnginePtrLock;
 jlong AdblockBridge::filterEnginePtr = 0;
+
+jlong AdblockBridge::getFilterEnginePtr()
+{
+  const base::AutoLock auto_lock(filterEnginePtrLock.Get());
+  return filterEnginePtr;
+}
+
+void AdblockBridge::setFilterEnginePtr(jlong ptr)
+{
+  const base::AutoLock auto_lock(filterEnginePtrLock.Get());
+  filterEnginePtr = ptr;
+}
+
 BooleanPrefMember* AdblockBridge::enable_adblock = nullptr;
 StringListPrefMember* AdblockBridge::adblock_whitelisted_domains = nullptr;
-
-base::Thread* thread = nullptr;
 AdblockLoadCompleteListener* completeListener = nullptr;
 
 void AdblockBridge::InitializePrefsOnUIThread(PrefService* pref_service) {
@@ -314,20 +332,16 @@ static void UnsubscribeOnLoadListener() {
   completeListener = nullptr;
 }
 
-void ReleaseThread() {
-  LOG(WARNING) << "Adblock: releasing thread";
 
-  thread->Stop();
-  delete thread;
-  thread = nullptr;
-  task_runner = nullptr;
+void ReleaseTaskRunner() {
+  LOG(WARNING) << "Adblock: releasing task runner";
+  task_runner.Get() = nullptr;
 }
+
 
 void ReleaseAdblock() {
   LOG(WARNING) << "Adblock: releasing everything";
-
-  // thread
-  ReleaseThread();
+  ReleaseTaskRunner();
 }
 
 static void SetFilterEngineNativePtr(
@@ -336,9 +350,16 @@ static void SetFilterEngineNativePtr(
     jlong ptr)
 {  
   LOG(WARNING) << "Adblock: set FilterEngine instance " << ptr;
-  AdblockBridge::filterEnginePtr = ptr;
+  jlong prevPtr = AdblockBridge::getFilterEnginePtr();
+  AdblockBridge::setFilterEnginePtr(ptr);
 
-  if (!ptr)
+  // if we had not filter engine and now it's available 
+  if (!prevPtr && ptr) {
+    // start receive notifications to apply element hiding
+    SubscribeOnLoadListener();
+  }
+  // if we had filter engine and now it's no longer available
+  else if (prevPtr && !ptr)
   {
     LOG(WARNING) << "Adblock: schedule release on IO thread";
 
@@ -362,10 +383,6 @@ static jlong GetIsolateProviderNativePtr(
 	JNIEnv* env,
 	const base::android::JavaParamRef<jobject>& jcaller)
 {
-  // thread for V8 tasks
-  thread = new base::Thread("AdblockThread");
-  thread->Start();
-
   // v8 init
   LOG(WARNING) << "Adblock: creating isolate holder ...";
   
@@ -381,23 +398,14 @@ static jlong GetIsolateProviderNativePtr(
                                  gin::IsolateHolder::kStableV8Extras,
                                  gin::ArrayBufferAllocator::SharedInstance());
 
-  // create isolate using isolate holder (using kUseLocker!)
-  thread->WaitUntilThreadStarted();
-  scoped_refptr<base::SingleThreadTaskRunner> thread_task_runner = thread->task_runner();
-  task_runner = thread_task_runner.get();
-    //content::BrowserThread::GetTaskRunnerForThread(content::BrowserThread::UI);
-  /*
-    base::CreateSingleThreadTaskRunnerWithTraits(
+  task_runner.Get() = base::CreateSingleThreadTaskRunnerWithTraits(
       {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::SingleThreadTaskRunnerThreadMode::DEDICATED);
-      */
 
+  // create isolate using isolate holder (using kUseLocker!)
   AdblockPlus::IV8IsolateProvider* isolateProviderPtr =
     new IsolateHolderV8Provider(
-      new gin::IsolateHolder(thread_task_runner, gin::IsolateHolder::AccessMode::kUseLocker));
-
-  // start receive notifications to apply element hiding
-  SubscribeOnLoadListener();
+      new gin::IsolateHolder(task_runner.Get(), gin::IsolateHolder::AccessMode::kUseLocker));
 
   // return isolate pointer
   LOG(WARNING) << "Adblock: returning (from adblock_bridge.cc) isolate provider " << isolateProviderPtr;

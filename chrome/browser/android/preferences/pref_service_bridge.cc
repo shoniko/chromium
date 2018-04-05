@@ -747,7 +747,7 @@ static void SetAdblockWhitelistedDomains(JNIEnv* env, const
 
   // AdblockBridge::filterEnginePtr != 0 as FilterEngine is retained on Activity start
   AdblockPlus::FilterEnginePtr* extFilterEngine =
-    reinterpret_cast<AdblockPlus::FilterEnginePtr*>(AdblockBridge::filterEnginePtr);
+    reinterpret_cast<AdblockPlus::FilterEnginePtr*>(AdblockBridge::getFilterEnginePtr());
   AdblockPlus::FilterEnginePtr filterEngine(*extFilterEngine);
 
   // remove domains from previous list

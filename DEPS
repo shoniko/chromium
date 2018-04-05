@@ -520,13 +520,13 @@ deps = {
     'condition':
       'checkout_android',
     'url':
-      Var('adblockplus_git') + '/libadblockplus' + '@' + 'f6c45f4cbcf9b4ab6534abe88690be98738c7eb6',
+      Var('adblockplus_git') + '/libadblockplus' + '@' + 'c0a6434596a83383e37678ef3b6ecef00ed6a261',
   },
   'src/third_party/libadblockplus_android/src': {
     'condition':
       'checkout_android',
     'url':
-      Var('adblockplus_git') + '/libadblockplus-android' + '@' + 'd11cc807b0e34bbf0e04784edbb9d39dea29932b'
+      Var('adblockplus_git') + '/libadblockplus-android' + '@' + 'eacd75a39184b8b8570086926514514e5f859eab'
   },
   'src/third_party/yasm/source/patched-yasm':
     (Var("chromium_git")) + '/chromium/deps/yasm/patched-yasm.git@b98114e18d8b9b84586b10d24353ab8616d4c5fc',

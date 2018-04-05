@@ -315,16 +315,16 @@ int ChromeNetworkDelegate::OnBeforeStartTransaction(
 
   LOG(WARNING) << "Adblock: isAdBlockEnabled = "
                << (is_adblock_enabled ? "true" : "false")
-               << ", FilterEngine ptr = " << AdblockBridge::filterEnginePtr;
+               << ", FilterEngine ptr = " << AdblockBridge::getFilterEnginePtr();
 
   const std::string filename = request->url().ExtractFileName();
   const std::string url = request->url().spec();
   LOG(WARNING) << "Adblock: loading url " << url;
 
-  if (is_adblock_enabled && AdblockBridge::filterEnginePtr) {
+  if (is_adblock_enabled && AdblockBridge::getFilterEnginePtr()) {
     // retain local filter engine to prevent usage of released instance if it's released on android/java side
     AdblockPlus::FilterEnginePtr* extFilterEngine =
-      reinterpret_cast<AdblockPlus::FilterEnginePtr*>(AdblockBridge::filterEnginePtr);
+      reinterpret_cast<AdblockPlus::FilterEnginePtr*>(AdblockBridge::getFilterEnginePtr());
     AdblockPlus::FilterEnginePtr filterEngine(*extFilterEngine);
 
     const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);

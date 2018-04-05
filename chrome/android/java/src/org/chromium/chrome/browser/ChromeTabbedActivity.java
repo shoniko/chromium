@@ -17,6 +17,7 @@ import android.content.pm.ShortcutManager;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.SystemClock;
 import android.support.annotation.IntDef;
 import android.support.annotation.Nullable;
@@ -153,6 +154,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import org.adblockplus.libadblockplus.android.AdblockEngine;
+import org.adblockplus.libadblockplus.android.SingleInstanceEngineProvider;
 import org.adblockplus.libadblockplus.android.settings.AdblockHelper;
 import org.chromium.chrome.browser.adblock.AdblockBridge;
 
@@ -283,9 +285,6 @@ public class ChromeTabbedActivity
     // Time at which an intent was received and handled.
     private long mIntentHandlingTimeMs;
 
-    // Whether or not AdBlock is initialized
-    private boolean isAdblockInitialized;
-
     private class TabbedAssistStatusHandler extends AssistStatusHandler {
         public TabbedAssistStatusHandler(Activity activity) {
             super(activity);
@@ -400,13 +399,54 @@ public class ChromeTabbedActivity
         mAppIndexingUtil = new AppIndexingUtil();
     }
 
+    private final Handler mAdblockHandler = new Handler();
+
+    private final Runnable mAdblockEngineCreatedRunnable = new Runnable() {
+        @Override
+        public void run() {
+            // pass FilterEngine instance pointer to C++ side
+            long filterEnginePtr = AdblockHelper.get().getProvider()
+                .getEngine().getFilterEngine().getNativePtr();
+            Log.w(TAG, "Adblock: Notify C++ FilterEngine is created (passing pointer) "
+                + filterEnginePtr);
+            AdblockBridge.getInstance().setFilterEngineNativePtr(filterEnginePtr);
+        }
+    };
+
+    private final SingleInstanceEngineProvider.EngineCreatedListener mAdblockEngineCreatedListener =
+            new SingleInstanceEngineProvider.EngineCreatedListener() {
+        @Override
+        public void onAdblockEngineCreated(AdblockEngine engine) {
+            // can be called on background thread
+            Log.d(TAG, "Adblock: onAdblockEngineCreated() in thread "
+                + Thread.currentThread());
+
+            // have to be called on UI thread because of AdblockBridge
+            mAdblockHandler.post(mAdblockEngineCreatedRunnable);
+        }
+    };
+
+    private final SingleInstanceEngineProvider.EngineDisposedListener mAdblockEngineDisposedListener =
+            new SingleInstanceEngineProvider.EngineDisposedListener() {
+        @Override
+        public void onAdblockEngineDisposed() {
+            mAdblockHandler.removeCallbacks(mAdblockEngineCreatedRunnable);
+
+            // have to be called on UI thread because of AdblockBridge
+            Log.w(TAG, "Adblock: Notify C++ side filterEngine can't be used anymore in thread "
+                + Thread.currentThread());
+            AdblockBridge.getInstance().setFilterEngineNativePtr(0L);
+        }
+    };
+
     private void initAdblock() {
         Log.w(TAG, "Adblock ChromeTabbedActivity.java: initAdblock()");
 
-        Log.w(TAG, "Adblock: getting isolate pointer async in Thread " + java.lang.Thread.currentThread());
+        Log.w(TAG, "Adblock: getting isolate pointer async in Thread "
+            + Thread.currentThread());
         long isolateProviderPtr = AdblockBridge.getInstance().getIsolateProviderNativePtr();
-        Log.w(TAG, "Adblock: got isolate pointer = " + isolateProviderPtr
-                 + " in thread " + Thread.currentThread());
+        Log.w(TAG, "Adblock: got isolate pointer = " + isolateProviderPtr + " in thread "
+            + Thread.currentThread());
 
         String basePath = getDir(
             AdblockEngine.BASE_PATH_DIRECTORY,
@@ -416,17 +456,12 @@ public class ChromeTabbedActivity
         AdblockHelper
             .get()
             .init(this, basePath, true, AdblockHelper.PREFERENCE_NAME)
+            .addEngineCreatedListener(mAdblockEngineCreatedListener)
+            .addEngineDisposedListener(mAdblockEngineDisposedListener)
             .useV8IsolateProvider(isolateProviderPtr);
 
-        // synchronously (blocks the UI but allows to get pointer here)
-        // TODO: (improvement) do it async and wait for engine to be created
-        // and passed when URL is about to load
-        if (AdblockHelper.get().retain(false)) {
-            // pass FilterEngine instance pointer to C++ side
-            long ptr = AdblockHelper.get().getEngine().getFilterEngine().getNativePtr();
-            android.util.Log.w(TAG, "Adblock: Notify C++ FilterEngine is created (passing pointer) " + ptr + " in thread " + Thread.currentThread());
-            AdblockBridge.getInstance().setFilterEngineNativePtr(ptr);
-        }
+        // asynchronously, mAdblockEngineCreatedListener is called when actually created
+        AdblockHelper.get().getProvider().retain(true);
     }
 
     @Override
@@ -762,9 +797,8 @@ public class ChromeTabbedActivity
         resetSavedInstanceState();
 
         // for some reason onStartWithNative can be invoked multiple times
-        if (!isAdblockInitialized) {
+        if (!AdblockHelper.get().isInit()) {
             initAdblock();
-            isAdblockInitialized = true;
         }
     }
 
@@ -2134,9 +2168,8 @@ public class ChromeTabbedActivity
             mUndoBarPopupController = null;
         }
 
-        if (isAdblockInitialized) {
+        if (AdblockHelper.get().isInit()) {
             deinitAdblock();
-            isAdblockInitialized = false;
         }
 
         super.onDestroyInternal();
@@ -2147,11 +2180,10 @@ public class ChromeTabbedActivity
     private void deinitAdblock() {
         Log.w(TAG, "Adblock: deinitAdblock()");
 
-        // if it's the last instance then we need to notify C++ side (stop using it)
-        if (AdblockHelper.get().release()) {
-            Log.w(TAG, "Adblock: Notify C++ side filterEngine can't be used anymore in thread " + Thread.currentThread());
-            AdblockBridge.getInstance().setFilterEngineNativePtr(0L);
-        }
+        // synchronous (may block current thread until engine is created,
+        // if the user was too fast to destroy activity before engine is created).
+        // mAdblockEngineDisposedListener is called when actually created
+        AdblockHelper.get().getProvider().release(); 
     }
 
     @Override
