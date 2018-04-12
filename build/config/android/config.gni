@@ -171,6 +171,10 @@ if (is_android) {
     # When true, updates all android_aar_prebuilt() .info files during gn gen.
     # Refer to android_aar_prebuilt() for more details.
     update_android_aar_prebuilts = false
+
+    # When false, chromium android linker is forced to be Not used for Release build
+    # https://issues.adblockplus.org/ticket/6396
+    use_chromium_android_linker = true
   }
 
   # We need a second declare_args block to make sure we are using the overridden
